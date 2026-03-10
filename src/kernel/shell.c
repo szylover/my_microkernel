@@ -42,12 +42,60 @@ unsigned shell_command_count(void) {
 }
 
 void shell_print_commands(void) {
+    /*
+     * Pretty output: fixed-width multi-column list of command names.
+     * We assume a typical 80-column monospace terminal (QEMU -serial stdio).
+     */
+    const unsigned term_width = 80;
+
     unsigned count = shell_command_count();
     printk("Commands (%u):\n", count);
+
+    size_t max_len = 0;
     for (size_t i = 0; i < (sizeof(g_cmds) / sizeof(g_cmds[0])); i++) {
-        const cmd_t* cmd = g_cmds[i];
-        const char* help = cmd->help ? cmd->help : "";
-        printk("- %s: %s\n", cmd->name, help);
+        const char* s = g_cmds[i]->name;
+        size_t n = 0;
+        while (s && s[n]) {
+            n++;
+        }
+        if (n > max_len) {
+            max_len = n;
+        }
+    }
+
+    /* +2 for spacing between columns. Minimum width 4 to keep things readable. */
+    unsigned col_w = (unsigned)(max_len + 2);
+    if (col_w < 4) {
+        col_w = 4;
+    }
+
+    unsigned cols = term_width / col_w;
+    if (cols == 0) {
+        cols = 1;
+    }
+
+    for (size_t i = 0; i < (sizeof(g_cmds) / sizeof(g_cmds[0])); i++) {
+        const char* name = g_cmds[i]->name;
+
+        printk("%s", name ? name : "");
+
+        /* Pad to column width (except possibly end of line). */
+        size_t n = 0;
+        while (name && name[n]) {
+            n++;
+        }
+        unsigned pad = (col_w > (unsigned)n) ? (col_w - (unsigned)n) : 1;
+        for (unsigned p = 0; p < pad; p++) {
+            printk(" ");
+        }
+
+        if (((unsigned)(i + 1)) % cols == 0) {
+            printk("\n");
+        }
+    }
+
+    if (((unsigned)count) % cols != 0) {
+        printk("\n");
     }
 }
 

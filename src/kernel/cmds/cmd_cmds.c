@@ -1,6 +1,5 @@
 #include "cmd.h"
 
-#include "printk.h"
 #include "shell.h"
 
 static int cmd_cmds_main(int argc, char** argv) {

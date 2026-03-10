@@ -13,8 +13,9 @@ KERNEL_ELF := $(BOOT_DIR)/kernel.elf
 ISO_IMAGE := $(BUILD_DIR)/kernel.iso
 
 # Auto-discover kernel sources to avoid manually maintaining object lists.
-KERNEL_C_SRCS := $(wildcard src/kernel/*.c)
-KERNEL_ASM_SRCS := $(wildcard src/kernel/*.asm)
+# Note: we include one-level subdirectories (e.g. src/kernel/cmds/).
+KERNEL_C_SRCS := $(wildcard src/kernel/*.c) $(wildcard src/kernel/*/*.c)
+KERNEL_ASM_SRCS := $(wildcard src/kernel/*.asm) $(wildcard src/kernel/*/*.asm)
 
 KERNEL_C_OBJS := $(patsubst src/kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_SRCS))
 KERNEL_ASM_OBJS := $(patsubst src/kernel/%.asm,$(BUILD_DIR)/%.o,$(KERNEL_ASM_SRCS))
@@ -49,9 +50,11 @@ $(BUILD_DIR)/boot.o: src/boot/boot.asm | $(BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
 $(BUILD_DIR)/%.o: src/kernel/%.c | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: src/kernel/%.asm | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld | $(GRUB_DIR)
