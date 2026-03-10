@@ -27,6 +27,9 @@ CFLAGS := -std=c11 -ffreestanding -fno-pie -fno-stack-protector -fno-asynchronou
 # Use -m32 for host gcc/clang. If you use a cross compiler (i686-elf-gcc), set CC=i686-elf-gcc
 CFLAGS += -m32
 CFLAGS += -Iinclude
+CFLAGS += -Iinclude/arch
+CFLAGS += -Iinclude/drivers
+CFLAGS += -Iinclude/kernel
 CFLAGS += -MMD -MP
 LDFLAGS := -m elf_i386 -T linker.ld
 
