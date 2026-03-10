@@ -9,6 +9,8 @@
 #define SHELL_PROMPT "szy-kernel > "
 #define SHELL_LINE_MAX 128
 
+static volatile int g_shell_exit_requested = 0;
+
 static int streq(const char* a, const char* b) {
     if (!a || !b) {
         return 0;
@@ -28,10 +30,16 @@ static int is_space(char c) {
 }
 
 extern const cmd_t cmd_cls;
+extern const cmd_t cmd_exit;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
+    &cmd_exit,
 };
+
+void shell_request_exit(void) {
+    g_shell_exit_requested = 1;
+}
 
 static void shell_print_prompt(void) {
     printk(SHELL_PROMPT);
@@ -132,11 +140,15 @@ void shell_run(void) {
     printk("\n");
     printk("Interactive shell ready.\n");
 
+    g_shell_exit_requested = 0;
+
     char line[SHELL_LINE_MAX];
 
-    for (;;) {
+    for (; !g_shell_exit_requested;) {
         shell_print_prompt();
         (void)shell_readline(line, sizeof(line));
         shell_dispatch(line);
     }
+
+    printk("Shell exited.\n");
 }

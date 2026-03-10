@@ -15,6 +15,9 @@ extern "C" {
 
 void shell_run(void);
 
+/* Request the interactive shell to exit (used by the `exit` command). */
+void shell_request_exit(void);
+
 #ifdef __cplusplus
 }
 #endif
