@@ -35,36 +35,11 @@ static int is_space(char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
-static int cmd_help(int argc, char** argv);
-static int cmd_info(int argc, char** argv);
 static int cmd_cls(int argc, char** argv);
 
 static const cmd_t g_cmds[] = {
-    {"help", "List available commands", cmd_help},
-    {"info", "Print kernel build info", cmd_info},
     {"cls",  "Clear screen (serial ANSI)", cmd_cls},
 };
-
-static int cmd_help(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-
-    printk("Commands:\n");
-    for (size_t i = 0; i < (sizeof(g_cmds) / sizeof(g_cmds[0])); i++) {
-        printk("  %s - %s\n", g_cmds[i].name, g_cmds[i].help);
-    }
-    return 0;
-}
-
-static int cmd_info(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-
-    printk("szy-kernel (my_microkernel)\n");
-    printk("build: %s %s\n", __DATE__, __TIME__);
-    printk("input: ps/2 keyboard (IRQ1)\n");
-    return 0;
-}
 
 static int cmd_cls(int argc, char** argv) {
     (void)argc;
@@ -171,7 +146,7 @@ static void shell_dispatch(char* line) {
 
 void shell_run(void) {
     printk("\n");
-    printk("Interactive shell ready. Type 'help'.\n");
+    printk("Interactive shell ready.\n");
 
     char line[SHELL_LINE_MAX];
 

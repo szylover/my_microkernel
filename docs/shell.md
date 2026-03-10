@@ -15,7 +15,8 @@ szy-kernel >
 - 系统等待你输入一行命令（支持退格/回显）。
 - 你输入命令并回车后，执行对应指令。
 - 指令必须可扩展：
-  - 第一批：`help`、`info`、`cls`
+  - 第一批：`cls`（先落地最小闭环）
+  - 下一批：`help`、`info`
   - 第二批：`mmap`（输出类似 `Available RAM: 0x100000 - 0x7EE0000`）
   - 第二批：`cpu`（输出 CPU 信息）
 
@@ -24,7 +25,7 @@ szy-kernel >
 
 - 输出：通过串口 `COM1(0x3F8)`，`printk()` -> `serial_putc()`。
 - 中断：已安装 CPU 异常 0..31 的 IDT stubs。
-- 新增（本次改动）：接入 PIC/IRQ 框架、IRQ1 键盘 scancode->ASCII（带环形缓冲），并实现最小 shell（`help/info/cls`）。
+- 新增（本次改动）：接入 PIC/IRQ 框架、IRQ1 键盘 scancode->ASCII（带环形缓冲），并实现最小 shell（目前仅 `cls`）。
 
 
 ## 2. 分层设计（易扩展 + 易验证）
