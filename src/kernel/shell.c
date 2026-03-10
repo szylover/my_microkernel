@@ -29,11 +29,27 @@ static int is_space(char c) {
 
 extern const cmd_t cmd_cls;
 extern const cmd_t cmd_shutdown;
+extern const cmd_t cmd_cmds;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
     &cmd_shutdown,
+    &cmd_cmds,
 };
+
+unsigned shell_command_count(void) {
+    return (unsigned)(sizeof(g_cmds) / sizeof(g_cmds[0]));
+}
+
+void shell_print_commands(void) {
+    unsigned count = shell_command_count();
+    printk("Commands (%u):\n", count);
+    for (size_t i = 0; i < (sizeof(g_cmds) / sizeof(g_cmds[0])); i++) {
+        const cmd_t* cmd = g_cmds[i];
+        const char* help = cmd->help ? cmd->help : "";
+        printk("- %s: %s\n", cmd->name, help);
+    }
+}
 
 static void shell_print_prompt(void) {
     printk(SHELL_PROMPT);
