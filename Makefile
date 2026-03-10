@@ -1,4 +1,5 @@
 NASM ?= nasm
+CC ?= gcc
 LD ?= ld
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
@@ -11,9 +12,12 @@ GRUB_DIR := $(BOOT_DIR)/grub
 KERNEL_ELF := $(BOOT_DIR)/kernel.elf
 ISO_IMAGE := $(BUILD_DIR)/kernel.iso
 
-OBJS := $(BUILD_DIR)/boot.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o
 
 NASMFLAGS := -f elf32
+CFLAGS := -std=c11 -ffreestanding -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -Wall -Wextra -O2
+# Use -m32 for host gcc/clang. If you use a cross compiler (i686-elf-gcc), set CC=i686-elf-gcc
+CFLAGS += -m32
 LDFLAGS := -m elf_i386 -T linker.ld
 
 .PHONY: all iso run clean tools
@@ -22,6 +26,7 @@ all: iso
 
 tools:
 	@command -v $(NASM) >/dev/null || (echo "Missing tool: $(NASM)" && exit 1)
+	@command -v $(CC) >/dev/null || (echo "Missing tool: $(CC)" && exit 1)
 	@command -v $(LD) >/dev/null || (echo "Missing tool: $(LD)" && exit 1)
 	@command -v $(GRUB_MKRESCUE) >/dev/null || (echo "Missing tool: $(GRUB_MKRESCUE)" && exit 1)
 	@command -v $(QEMU) >/dev/null || (echo "Missing tool: $(QEMU)" && exit 1)
@@ -31,6 +36,9 @@ $(BUILD_DIR):
 
 $(BUILD_DIR)/boot.o: src/boot/boot.asm | $(BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
+
+$(BUILD_DIR)/kmain.o: src/kernel/kmain.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld | $(GRUB_DIR)
 	$(LD) $(LDFLAGS) $(OBJS) -o $@

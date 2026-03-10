@@ -2,13 +2,15 @@
 
 本项目当前是一个 **i386 Multiboot2 内核**（NASM 汇编 + ld 链接），通过 **GRUB** 打包成 ISO，并用 **QEMU** 启动。
 
+当前已经包含最小 C 入口 `kmain`，并通过串口（COM1/0x3F8）输出调试信息。
+
 ## 1. 环境依赖
 
 在 Debian/Ubuntu 上：
 
 ```bash
 sudo apt update
-sudo apt install -y nasm binutils grub-pc-bin xorriso qemu-system-x86
+sudo apt install -y nasm binutils grub-pc-bin xorriso qemu-system-x86 gcc-multilib
 ```
 
 说明：
@@ -36,6 +38,7 @@ make run
 
 预期现象：
 - QEMU 窗口左上角能看到 `OK`（写入 VGA 文本显存 0xb8000）
+- 终端（`-serial stdio`）能看到类似 `kmain: hello from C` 和 Multiboot2 tag 列表
 - 退出：关闭窗口或在终端 `Ctrl+C`
 
 ## 4. 常见问题排查
