@@ -4,6 +4,7 @@
 
 #include "gdt.h"
 #include "serial.h"
+#include "printk.h"
 
 /*
  * IDT gate descriptor（8 字节）的布局（32-bit 模式）：
@@ -158,6 +159,14 @@ void isr_handler_c(const regs_t* r) {
     if (r->int_no == 3) {
         return;
     }
+
+    /*
+     * 进入这里说明发生了“不可恢复”的 CPU 异常。
+     * - 目前我们的 printk 只支持最小格式（%d/%u/%x/%s/%c/%%），不支持 %08x。
+     * - 更详细的寄存器转储可以继续用 serial_write_hex32 做。
+     */
+    printk("Kernel panic: ");
+    printk("%s\n", exception_name(r->int_no));
 
     for (;;) {
         __asm__ volatile("hlt");

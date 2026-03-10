@@ -63,15 +63,6 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     idt_init();
     printk("idt: after init\n");
 
-    /*
-     * 自检：触发一个 breakpoint 异常（int3，向量 3）。
-     * - 如果 IDT/ISR stubs 正常，你会在串口看到 [isr] #BP ...
-     * - 我们的 handler 对 vector=3 会 return，所以程序会继续运行。
-     */
-    printk("idt: selftest int3...\n");
-    __asm__ volatile("int3");
-    printk("idt: int3 returned\n");
-
     printk("mb2_magic=");
     printk("%x\n", mb2_magic);
 
