@@ -1,0 +1,34 @@
+# Build outputs
+/build/
+/out/
+/dist/
+
+# Object / dependency files
+*.o
+*.obj
+*.d
+*.a
+*.lib
+
+# Kernel / boot artifacts
+*.elf
+*.bin
+*.img
+*.iso
+*.map
+*.lst
+
+# Debug / logs
+*.log
+qemu*.log
+
+# Tooling
+compile_commands.json
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
