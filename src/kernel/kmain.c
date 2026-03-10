@@ -47,19 +47,39 @@ static void mb2_dump_tags(const void* mb2_info) {
     }
 }
 
+#define KERNEL_NAME "SZY-KERNEL"
+#define KERNEL_VERSION "0.1.0-dev"
+
+static void kmain_print_login(void) {
+    /*
+     * “登录界面”输出到串口终端（QEMU -serial stdio）。
+     * 用 ANSI 序列清屏后再画一个 ASCII Banner。
+     */
+    printk("\x1b[2J\x1b[H");
+
+    printk("+------------------------------------------------------------------------------+\n");
+    printk("|   _____  ________  __   __      __ ________________                         |\n");
+    printk("|  / ___/ /_  __/ / / /  / /__   / //_/ __/ __/ __/ /                         |\n");
+    printk("| / /__    / / / /_/ /  / / _ \\ / ,< / _// _// _// /                          |\n");
+    printk("| \\___/   /_/  \\____/  /_/\\___//_/|_/___/___/___/_/                           |\n");
+    printk("|                                                                              |\n");
+    printk("|  %-12s v%-16s  build: %s %s                                |\n", KERNEL_NAME, KERNEL_VERSION, __DATE__, __TIME__);
+    printk("|  input: keyboard (IRQ1) + serial (COM1 polling)                              |\n");
+    printk("|  tip  : type 'cls' then Enter to clear                                       |\n");
+    printk("+------------------------------------------------------------------------------+\n");
+    printk("\n");
+}
+
 void kmain(uint32_t mb2_magic, const void* mb2_info) {
     serial_init();
-    printk("kmain: hello from C\n");
 
-    printk("gdt: before init\n");
     gdt_init();
-    printk("gdt: after init\n");
+    printk("[init] gdt ok\n");
 
-    printk("idt: before init\n");
     idt_init();
-    printk("idt: after init\n");
+    printk("[init] idt ok\n");
 
-    printk("mb2_magic=%08x\n", mb2_magic);
+    printk("[mb2] magic=%08x\n", mb2_magic);
 
     if (mb2_magic != 0x36d76289u) {
         printk("[mb2] bad magic\n");
@@ -67,16 +87,12 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         mb2_dump_tags(mb2_info);
     }
 
-    /* --- IRQ + keyboard + shell ---
-     *
-     * 现在我们已经把 IRQ1 键盘中断翻译成 ASCII 字符流（见 keyboard.c）。
-     * 所以这里直接进入 shell：
-     *   szy-kernel > help
-     *   szy-kernel > info
-     *   szy-kernel > cls
-     */
+    /* --- IRQ + keyboard + shell --- */
     pic_init();
     keyboard_init();
+
+    /* 进入交互前展示“登录界面”。 */
+    kmain_print_login();
 
     printk("[kbd] IRQ1 enabled. Starting shell...\n");
     __asm__ volatile ("sti");

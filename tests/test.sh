@@ -104,12 +104,11 @@ require_regex() {
 
 # --- Smoke checks ---
 # Basic boot markers
-require_fixed "kmain: hello from C" "kmain banner"
-require_fixed "gdt: after init" "gdt init"
-require_fixed "idt: after init" "idt init"
+require_fixed "[init] gdt ok" "gdt init"
+require_fixed "[init] idt ok" "idt init"
 
 # Multiboot2 magic should be correct when launched from GRUB multiboot2
-require_fixed "mb2_magic=36d76289" "multiboot2 magic"
+require_fixed "[mb2] magic=36d76289" "multiboot2 magic"
 
 # MB2 tag dump markers (address varies)
 require_regex "\\[mb2\\] info @ 0x[0-9a-fA-F]{8}, total_size=[0-9]+" "mb2 info header"
