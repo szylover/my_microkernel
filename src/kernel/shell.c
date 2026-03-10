@@ -31,10 +31,12 @@ static int is_space(char c) {
 
 extern const cmd_t cmd_cls;
 extern const cmd_t cmd_exit;
+extern const cmd_t cmd_shutdown;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
     &cmd_exit,
+    &cmd_shutdown,
 };
 
 void shell_request_exit(void) {
