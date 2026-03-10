@@ -1,0 +1,11 @@
+CompileFlags:
+  # compile_commands.json (generated via bear) is the source of truth.
+  # These are fallbacks for files clangd can't find in the database.
+  Add: [
+    -std=c11,
+    -m32,
+    -ffreestanding,
+    -fno-pie,
+    -fno-stack-protector,
+    -Iinclude
+  ]

@@ -32,7 +32,7 @@ LDFLAGS := -m elf_i386 -T linker.ld
 
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all iso run test clean tools
+.PHONY: all iso run test clean tools compdb
 
 all: iso
 
@@ -82,6 +82,14 @@ run: $(ISO_IMAGE) | tools
 
 test: | tools
 	bash tests/test.sh
+
+# Generate compile_commands.json for clangd.
+# Requires `bear` (https://github.com/rizsotto/Bear).
+compdb:
+	@command -v bear >/dev/null 2>&1 || (echo "Missing tool: bear" && echo "Install: sudo apt update && sudo apt install -y bear" && exit 2)
+	@echo "[compdb] generating compile_commands.json via bear"
+	@bear -- $(MAKE) -B $(KERNEL_ELF)
+	@echo "[compdb] done: compile_commands.json"
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -33,7 +33,31 @@
 - 在每次agent更新以后，在docs/changelog.md里面更新做了什么
 
 
+## 5.1 开发环境（VS Code + clangd，强烈推荐）
+
+目标：让 C 代码的“跳转/查引用/重命名”跟真实编译参数一致（本项目是 i386 + freestanding，靠猜 includePath 很容易不准）。
+
+1) 安装 VS Code 扩展
+- clangd：`llvm-vs-code-extensions.vscode-clangd`
+- （可选）C/C++：`ms-vscode.cpptools`（保留做 debug/辅助；IntelliSense 建议交给 clangd）
+
+2) 安装编译数据库生成工具（Ubuntu/WSL）
+- `sudo apt update && sudo apt install -y bear`
+
+3) 生成 `compile_commands.json`
+- 在仓库根目录运行：`make compdb`
+    - 注意：`compdb` 会用 `make -B` 强制重编译一次，否则在 up-to-date 时 `bear` 可能生成空的 `[]`。
+
+4) 重载语言服务
+- VS Code：`Developer: Reload Window`
+- 如果还不准：`clangd: Restart language server`
+
+补充：`compile_commands.json` 是本地生成文件（已在 `.gitignore` 中忽略），需要时重新 `make compdb` 即可。
+
+
 # 6. 代码结构
+- 如果代码结构发生变化，请更新下面这个结构图
+
 my_microkernel/
 ├── agent.md          # 你的 Agent 指令
 ├── .gitignore        # Git 忽略文件
