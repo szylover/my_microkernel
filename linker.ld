@@ -6,6 +6,14 @@ SECTIONS
     /* Link at 1 MiB (physical & virtual for now). */
     . = 1M;
 
+    /*
+     * Export kernel physical bounds for early memory managers.
+     *
+     * We are still running without paging (identity mapping), so these
+     * addresses are both physical and virtual.
+     */
+    __kernel_phys_start = .;
+
     /* Put the Multiboot2 header first and inside a loadable section. */
     .text ALIGN(4096) :
     {
@@ -28,6 +36,8 @@ SECTIONS
         *(COMMON)
         *(.bss .bss.*)
     }
+
+    __kernel_phys_end = .;
 
     /DISCARD/ :
     {

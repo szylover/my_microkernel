@@ -3,6 +3,11 @@ CC ?= gcc
 LD ?= ld
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
+QEMU_MEM_MB ?= 256
+
+# Optional: auto-regenerate compile_commands.json during builds.
+# Enable with: AUTO_COMPDB=1 make iso
+AUTO_COMPDB ?= 0
 
 BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/isodir
@@ -36,6 +41,12 @@ LDFLAGS := -m elf_i386 -T linker.ld
 DEPS := $(OBJS:.o=.d)
 
 .PHONY: all iso run test clean tools compdb
+
+ifeq ($(AUTO_COMPDB),1)
+ISO_PREREQS := compile_commands.json
+else
+ISO_PREREQS :=
+endif
 
 all: iso
 
@@ -78,10 +89,10 @@ $(GRUB_DIR)/grub.cfg: | $(GRUB_DIR)
 $(ISO_IMAGE): $(KERNEL_ELF) $(GRUB_DIR)/grub.cfg | tools
 	$(GRUB_MKRESCUE) -o $@ $(ISO_DIR)
 
-iso: $(ISO_IMAGE)
+iso: $(ISO_PREREQS) $(ISO_IMAGE)
 
 run: $(ISO_IMAGE) | tools
-	$(QEMU) -cdrom $(ISO_IMAGE) -serial stdio -no-reboot
+	$(QEMU) -m $(QEMU_MEM_MB) -cdrom $(ISO_IMAGE) -serial stdio -no-reboot
 
 test: | tools
 	bash tests/test.sh
@@ -93,6 +104,13 @@ compdb:
 	@echo "[compdb] generating compile_commands.json via bear"
 	@bear -- $(MAKE) -B $(KERNEL_ELF)
 	@echo "[compdb] done: compile_commands.json"
+
+# When AUTO_COMPDB=1, regenerate compdb as part of `make iso`.
+# Use AUTO_COMPDB=0 in the nested make to avoid infinite recursion.
+compile_commands.json: $(KERNEL_C_SRCS) $(KERNEL_ASM_SRCS) src/boot/boot.asm Makefile linker.ld
+	@command -v bear >/dev/null 2>&1 || (echo "Missing tool: bear" && echo "Install: sudo apt update && sudo apt install -y bear" && exit 2)
+	@echo "[compdb] AUTO_COMPDB=1 -> updating compile_commands.json"
+	@bear -- $(MAKE) -B $(KERNEL_ELF) AUTO_COMPDB=0
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -7,5 +7,8 @@ CompileFlags:
     -ffreestanding,
     -fno-pie,
     -fno-stack-protector,
-    -Iinclude
+    -Iinclude,
+    -Iinclude/arch,
+    -Iinclude/drivers,
+    -Iinclude/kernel
   ]

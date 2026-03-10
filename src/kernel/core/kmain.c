@@ -8,6 +8,8 @@
 #include "idt.h"
 #include "printk.h"
 
+#include "pmm.h"
+
 #include "pic.h"
 #include "keyboard.h"
 #include "shell.h"
@@ -94,6 +96,9 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     } else {
         g_mb2_info = mb2_info;
         mb2_dump_tags(mb2_info);
+
+        /* Stage-2: physical memory manager (bitmap allocator). */
+        pmm_init();
     }
 
     /* --- IRQ + keyboard + shell --- */
