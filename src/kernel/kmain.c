@@ -1,57 +1,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
-static inline void outb(uint16_t port, uint8_t value) {
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
-}
+#include "gdt.h"
 
-static inline uint8_t inb(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
-    return value;
-}
+#include "serial.h"
 
-enum {
-    COM1 = 0x3F8,
-};
-
-static int serial_transmit_empty(void) {
-    return inb(COM1 + 5) & 0x20;
-}
-
-static void serial_putc(char c) {
-    while (!serial_transmit_empty()) {
-        // spin
-    }
-    outb(COM1, (uint8_t)c);
-}
-
-static void serial_write(const char* s) {
-    for (; *s; s++) {
-        if (*s == '\n') {
-            serial_putc('\r');
-        }
-        serial_putc(*s);
-    }
-}
-
-static void serial_write_hex32(uint32_t v) {
-    static const char* hex = "0123456789ABCDEF";
-    serial_write("0x");
-    for (int i = 7; i >= 0; i--) {
-        serial_putc(hex[(v >> (i * 4)) & 0xF]);
-    }
-}
-
-static void serial_init(void) {
-    outb(COM1 + 1, 0x00); // Disable all interrupts
-    outb(COM1 + 3, 0x80); // Enable DLAB
-    outb(COM1 + 0, 0x03); // Divisor low byte (38400 baud)
-    outb(COM1 + 1, 0x00); // Divisor high byte
-    outb(COM1 + 3, 0x03); // 8 bits, no parity, one stop bit
-    outb(COM1 + 2, 0xC7); // Enable FIFO, clear, 14-byte threshold
-    outb(COM1 + 4, 0x0B); // IRQs enabled, RTS/DSR set
-}
+#include "idt.h"
 
 // Multiboot2 information structure
 struct mb2_tag {
@@ -99,6 +53,23 @@ static void mb2_dump_tags(const void* mb2_info) {
 void kmain(uint32_t mb2_magic, const void* mb2_info) {
     serial_init();
     serial_write("kmain: hello from C\n");
+
+    serial_write("gdt: before init\n");
+    gdt_init();
+    serial_write("gdt: after init\n");
+
+    serial_write("idt: before init\n");
+    idt_init();
+    serial_write("idt: after init\n");
+
+    /*
+     * 自检：触发一个 breakpoint 异常（int3，向量 3）。
+     * - 如果 IDT/ISR stubs 正常，你会在串口看到 [isr] #BP ...
+     * - 我们的 handler 对 vector=3 会 return，所以程序会继续运行。
+     */
+    serial_write("idt: selftest int3...\n");
+    __asm__ volatile("int3");
+    serial_write("idt: int3 returned\n");
 
     serial_write("mb2_magic=");
     serial_write_hex32(mb2_magic);

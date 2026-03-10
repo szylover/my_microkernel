@@ -12,12 +12,13 @@ GRUB_DIR := $(BOOT_DIR)/grub
 KERNEL_ELF := $(BOOT_DIR)/kernel.elf
 ISO_IMAGE := $(BUILD_DIR)/kernel.iso
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o $(BUILD_DIR)/serial.o $(BUILD_DIR)/gdt.o $(BUILD_DIR)/gdt_flush.o $(BUILD_DIR)/idt.o $(BUILD_DIR)/isr_stubs.o
 
 NASMFLAGS := -f elf32
 CFLAGS := -std=c11 -ffreestanding -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -Wall -Wextra -O2
 # Use -m32 for host gcc/clang. If you use a cross compiler (i686-elf-gcc), set CC=i686-elf-gcc
 CFLAGS += -m32
+CFLAGS += -Iinclude
 LDFLAGS := -m elf_i386 -T linker.ld
 
 .PHONY: all iso run clean tools
@@ -39,6 +40,21 @@ $(BUILD_DIR)/boot.o: src/boot/boot.asm | $(BUILD_DIR)
 
 $(BUILD_DIR)/kmain.o: src/kernel/kmain.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/serial.o: src/kernel/serial.c include/serial.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gdt.o: src/kernel/gdt.c include/gdt.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gdt_flush.o: src/kernel/gdt_flush.asm | $(BUILD_DIR)
+	$(NASM) $(NASMFLAGS) $< -o $@
+
+$(BUILD_DIR)/idt.o: src/kernel/idt.c include/idt.h include/gdt.h include/serial.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/isr_stubs.o: src/kernel/isr_stubs.asm | $(BUILD_DIR)
+	$(NASM) $(NASMFLAGS) $< -o $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld | $(GRUB_DIR)
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
