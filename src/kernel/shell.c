@@ -30,11 +30,13 @@ static int is_space(char c) {
 extern const cmd_t cmd_cls;
 extern const cmd_t cmd_shutdown;
 extern const cmd_t cmd_cmds;
+extern const cmd_t cmd_mmap;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
     &cmd_shutdown,
     &cmd_cmds,
+    &cmd_mmap,
 };
 
 unsigned shell_command_count(void) {

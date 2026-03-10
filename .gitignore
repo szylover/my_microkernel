@@ -28,6 +28,7 @@ compile_commands.json
 # Editor / OS junk
 .vscode/
 .idea/
+.cache/
 *.swp
 *.swo
 *~

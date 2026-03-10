@@ -50,6 +50,14 @@ static void mb2_dump_tags(const void* mb2_info) {
 #define KERNEL_NAME "SZY-KERNEL"
 #define KERNEL_VERSION "0.1.0-dev"
 
+/*
+ * Multiboot2 info pointer (provided by GRUB).
+ *
+ * We keep it as a global so that later commands (e.g. `mmap`) can parse
+ * Multiboot2 tags from within the shell.
+ */
+const void* g_mb2_info = NULL;
+
 static void kmain_print_login(void) {
     /*
      * “登录界面”输出到串口终端（QEMU -serial stdio）。
@@ -84,6 +92,7 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     if (mb2_magic != 0x36d76289u) {
         printk("[mb2] bad magic\n");
     } else {
+        g_mb2_info = mb2_info;
         mb2_dump_tags(mb2_info);
     }
 

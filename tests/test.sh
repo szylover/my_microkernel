@@ -23,6 +23,10 @@ LOG="${LOG_DIR}/serial-${TS}.log"
 # How long to let QEMU run (seconds). Kernel typically hlt-loops forever.
 QEMU_TIMEOUT_SEC=${QEMU_TIMEOUT_SEC:-5}
 
+# Optional: verify `mmap` shell command prints a summary line.
+# Enable with: TEST_MMAP=1 make test
+TEST_MMAP=${TEST_MMAP:-0}
+
 cd "${ROOT_DIR}"
 
 echo "[test] build: clean"
@@ -113,6 +117,33 @@ require_fixed "[mb2] magic=36d76289" "multiboot2 magic"
 # MB2 tag dump markers (address varies)
 require_regex "\\[mb2\\] info @ 0x[0-9a-fA-F]{8}, total_size=[0-9]+" "mb2 info header"
 require_fixed "[mb2] end tag" "mb2 end tag"
+
+if [[ "${TEST_MMAP}" == "1" ]]; then
+  echo "[test] cmd: mmap (feed input via serial stdio)"
+  LOG_MMAP_RAW="${LOG_DIR}/serial-mmap-${TS}.raw.log"
+  LOG_MMAP="${LOG_DIR}/serial-mmap-${TS}.log"
+
+  # Feed `mmap` into the shell via QEMU stdio.
+  # Note: QEMU's stdio can be line-buffered; keep the timeout a bit longer.
+  (printf 'mmap\n' | timeout "${QEMU_TIMEOUT_SEC}s" "${QEMU_BIN}" \
+    -cdrom "${ISO_IMAGE}" \
+    -serial stdio \
+    -display none \
+    -no-reboot \
+    -no-shutdown \
+    >"${LOG_MMAP_RAW}" 2>&1) || true
+
+  tr -d '\r' <"${LOG_MMAP_RAW}" >"${LOG_MMAP}" || true
+
+  if ! grep -Eq -- "Available RAM: 0x[0-9a-fA-F]+ - 0x[0-9a-fA-F]+ \([0-9]+MB\)" "${LOG_MMAP}"; then
+    echo "[FAIL] mmap output: missing 'Available RAM' line"
+    echo "[test] mmap log (last 80 lines):"
+    tail -n 80 "${LOG_MMAP}" || true
+    exit 1
+  else
+    echo "[ OK ] mmap output"
+  fi
+fi
 
 if [[ "${fail}" -ne 0 ]]; then
   echo "[test] RESULT: FAIL"
