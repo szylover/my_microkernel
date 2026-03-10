@@ -2,8 +2,6 @@
 #ifndef PRINTK_H
 #define PRINTK_H
 
-#include <stdarg.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,7 +25,6 @@ extern "C" {
  * - %s  C 字符串（const char*，允许传 NULL）
  * - %c  单字符（int，按 char 输出）
  */
-void vprintk(const char* fmt, va_list args) PRINTK_ATTR_PRINTF(1, 0);
 void printk(const char* fmt, ...) PRINTK_ATTR_PRINTF(1, 2);
 
 #undef PRINTK_ATTR_PRINTF

@@ -81,7 +81,7 @@ static void print_int(int value) {
     print_dec_u32((uint32_t)value);
 }
 
-void vprintk(const char* fmt, va_list args) {
+static void vprintk(const char* fmt, va_list args) {
     while (fmt && *fmt) {
         if (*fmt != '%') {
             serial_putc(*fmt++);

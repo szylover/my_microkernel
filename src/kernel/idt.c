@@ -3,7 +3,6 @@
 #include <stddef.h>
 
 #include "gdt.h"
-#include "serial.h"
 #include "printk.h"
 
 /*
@@ -142,15 +141,13 @@ static const char* exception_name(uint32_t v) {
  * - 后面可以更容易拓展：page fault 解码 CR2、#GP 解码 selector 等
  */
 void isr_handler_c(const regs_t* r) {
-    serial_write("\n[isr] ");
-    serial_write(exception_name(r->int_no));
-    serial_write(" vector=");
-    serial_write_hex32(r->int_no);
-    serial_write(" err=");
-    serial_write_hex32(r->err_code);
-    serial_write(" eip=");
-    serial_write_hex32(r->eip);
-    serial_write("\n");
+    printk(
+        "\n[isr] %s vector=%u err=0x%08x eip=0x%08x\n",
+        exception_name(r->int_no),
+        r->int_no,
+        r->err_code,
+        r->eip
+    );
 
     /*
      * 对 breakpoint（int3）我们允许返回，这样可以用它做“自检”。
@@ -160,11 +157,7 @@ void isr_handler_c(const regs_t* r) {
         return;
     }
 
-    /*
-     * 进入这里说明发生了“不可恢复”的 CPU 异常。
-     * - 目前我们的 printk 只支持最小格式（%d/%u/%x/%s/%c/%%），不支持 %08x。
-     * - 更详细的寄存器转储可以继续用 serial_write_hex32 做。
-     */
+    /* 进入这里说明发生了“不可恢复”的 CPU 异常。 */
     printk("Kernel panic: ");
     printk("%s\n", exception_name(r->int_no));
 
