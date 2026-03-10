@@ -16,3 +16,4 @@
 - 阶段 2（Shell 起步）：新增最小交互式 shell（`szy-kernel >`，行编辑 + 命令表），当前仅实现 `cls`（其余命令按 docs 规划逐步加回）。
 - 新增 `docs/shell.md`：记录 cmd 风格 shell 的 UX/分层/命令规划（help/info/cls/mmap/cpu）与阶段落地路线。
 - 阶段 2（Command 模块化）：新增 `include/cmd.h` 命令接口；将 `cls` 拆为独立命令模块（`src/kernel/cmd_cls.c`），shell 通过注册表调用。
+- 阶段 2（Console 输入层）：新增 `include/console.h`/`src/kernel/console.c`，统一键盘（IRQ1 缓冲）与串口（轮询）输入；shell 只依赖 console。

@@ -46,6 +46,9 @@ szy-kernel >
 - `int console_try_getc(char* out)` / `char console_getc()`
 - 初期实现可直接让 shell 依赖 `keyboard_getc()` 或 `serial_getc()`，后续再抽象。
 
+当前实现（已落地）：
+- 已实现 `console_try_getc/console_getc`（见 `include/console.h`、`src/kernel/console.c`），shell 只依赖 console。
+
 
 ### 2.2 行编辑层（Line Editor）
 
