@@ -31,6 +31,11 @@ static int serial_transmit_empty(void) {
     return (inb((uint16_t)(COM1 + 5)) & 0x20) != 0;
 }
 
+static int serial_received(void) {
+    /* LSR bit0 = Data Ready */
+    return (inb((uint16_t)(COM1 + 5)) & 0x01) != 0;
+}
+
 void serial_putc(char c) {
     while (!serial_transmit_empty()) {
         // busy wait
@@ -70,4 +75,25 @@ void serial_init(void) {
     outb(COM1 + 3, 0x03); // 8 bits, no parity, one stop bit
     outb(COM1 + 2, 0xC7); // Enable FIFO, clear, 14-byte threshold
     outb(COM1 + 4, 0x0B); // IRQs enabled (in UART), RTS/DSR set
+}
+
+int serial_try_getc(char* out) {
+    if (!out) {
+        return 0;
+    }
+
+    if (!serial_received()) {
+        return 0;
+    }
+
+    *out = (char)inb(COM1);
+    return 1;
+}
+
+char serial_getc(void) {
+    char c;
+    while (!serial_try_getc(&c)) {
+        __asm__ volatile("pause");
+    }
+    return c;
 }

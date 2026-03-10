@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "keyboard.h"
+#include "serial.h"
 #include "printk.h"
 
 #define SHELL_PROMPT "szy-kernel > "
@@ -54,6 +55,37 @@ static void shell_print_prompt(void) {
     printk(SHELL_PROMPT);
 }
 
+static char shell_getc(void) {
+    /*
+     * 同时支持两种输入源：
+     * - PS/2 键盘（IRQ1 -> ring buffer）
+     * - 串口（COM1 轮询接收，适用于 QEMU -serial stdio）
+     *
+     * 为什么需要这样：
+     * - shell 输出在串口时，用户往往会在“串口终端”里输入；
+     *   若只读键盘，会表现为“输入后卡住”。
+     */
+    for (;;) {
+        char c;
+        if (keyboard_try_getc(&c)) {
+            return c;
+        }
+        if (serial_try_getc(&c)) {
+            /* 终端常见回车是 '\r'，统一成 '\n' 方便处理 */
+            if (c == '\r') {
+                c = '\n';
+            }
+            return c;
+        }
+
+        /*
+         * 串口接收是轮询，没有 IRQ 唤醒；用 pause 降低忙等开销。
+         *（如果未来打开 IRQ0 时钟，也可以在这里改成 hlt + 定期 wake。）
+         */
+        __asm__ volatile("pause");
+    }
+}
+
 static size_t shell_readline(char* buf, size_t cap) {
     if (!buf || cap == 0) {
         return 0;
@@ -61,7 +93,7 @@ static size_t shell_readline(char* buf, size_t cap) {
 
     size_t len = 0;
     for (;;) {
-        char c = keyboard_getc();
+        char c = shell_getc();
 
         if (c == '\n') {
             printk("\n");
