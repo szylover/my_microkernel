@@ -19,3 +19,4 @@
 - 阶段 2（Console 输入层）：新增 `include/console.h`/`src/kernel/console.c`，统一键盘（IRQ1 缓冲）与串口（轮询）输入；shell 只依赖 console。
 - 阶段 2（Shell 命令）：新增 `shutdown` 命令模块（`src/kernel/cmds/cmd_shutdown.c`），尝试触发 QEMU/Bochs 关机，失败则 halt。
 - 阶段 2（Shell 命令）：新增 `cmds` 命令模块（`src/kernel/cmds/cmd_cmds.c`），列出当前所有可用命令。
+- 开发体验：新增 `.clangd`（clangd fallback 编译参数）、`make compdb`/`tools/compdb.sh`（通过 bear 生成 `compile_commands.json`），并在 `docs/agent.md` 补充 VS Code + clangd 配置说明。
