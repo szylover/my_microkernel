@@ -31,7 +31,7 @@ LDFLAGS := -m elf_i386 -T linker.ld
 
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all iso run clean tools
+.PHONY: all iso run test clean tools
 
 all: iso
 
@@ -76,6 +76,9 @@ iso: $(ISO_IMAGE)
 
 run: $(ISO_IMAGE) | tools
 	$(QEMU) -cdrom $(ISO_IMAGE) -serial stdio -no-reboot
+
+test: | tools
+	bash tests/test.sh
 
 clean:
 	rm -rf $(BUILD_DIR)
