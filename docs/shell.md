@@ -76,6 +76,12 @@ szy-kernel >
 - `cmd_table[]` 静态数组
 - `help` 遍历 `cmd_table[]` 打印
 
+当前实现（已落地）：
+
+- 命令接口在 `include/cmd.h` 中定义（`cmd_t/cmd_fn_t`）。
+- 每个命令做成独立编译单元，并导出一个 `const cmd_t`（例如 `cmd_cls`）。
+- shell 只维护“注册表”（`const cmd_t*` 数组）并根据 `name` 分发调用。
+
 
 ## 3. 内置命令设计
 
@@ -129,11 +135,11 @@ Available RAM: 0x100000 - 0x7EE0000
 验证点：按键能触发 IRQ1，handler 能从 0x60 读走 scancode，并（在中断里）翻译为 ASCII 写入缓冲区。
 
 
-### 阶段 B：实现 shell 最小闭环（help/info/cls）（已完成）
+### 阶段 B：实现 shell 最小闭环（cls）（已完成）
 
 - 输入层：keyboard ASCII（IRQ1 -> ring buffer -> `keyboard_getc()`）
 - 行编辑：回显/退格/回车
-- 命令表：help/info/cls
+- 命令表：当前仅 `cls`（其余命令按本文档规划逐步加回）
 
 
 ### 阶段 C：扩展 mmap/cpu
@@ -146,4 +152,4 @@ Available RAM: 0x100000 - 0x7EE0000
 
 - 启动：`make iso && make run`
 - IRQ1 测试：在 QEMU 窗口里按键，串口应输出 `SzyOs > `
-- 后续 shell：输入 `help` / `info` / `cls` 验证
+- shell：输入 `cls` 验证清屏（串口 ANSI 序列）

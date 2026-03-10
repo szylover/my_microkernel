@@ -3,20 +3,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "cmd.h"
 #include "keyboard.h"
 #include "serial.h"
 #include "printk.h"
 
 #define SHELL_PROMPT "szy-kernel > "
 #define SHELL_LINE_MAX 128
-
-typedef int (*cmd_fn_t)(int argc, char** argv);
-
-typedef struct {
-    const char* name;
-    const char* help;
-    cmd_fn_t fn;
-} cmd_t;
 
 static int streq(const char* a, const char* b) {
     if (!a || !b) {
@@ -36,20 +29,11 @@ static int is_space(char c) {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
 
-static int cmd_cls(int argc, char** argv);
+extern const cmd_t cmd_cls;
 
-static const cmd_t g_cmds[] = {
-    {"cls",  "Clear screen (serial ANSI)", cmd_cls},
+static const cmd_t* g_cmds[] = {
+    &cmd_cls,
 };
-
-static int cmd_cls(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-
-    /* ANSI clear screen + cursor home (works for QEMU -serial stdio terminals). */
-    printk("\x1b[2J\x1b[H");
-    return 0;
-}
 
 static void shell_print_prompt(void) {
     printk(SHELL_PROMPT);
@@ -167,8 +151,9 @@ static void shell_dispatch(char* line) {
     }
 
     for (size_t i = 0; i < (sizeof(g_cmds) / sizeof(g_cmds[0])); i++) {
-        if (streq(argv[0], g_cmds[i].name)) {
-            (void)g_cmds[i].fn(argc, argv);
+        const cmd_t* cmd = g_cmds[i];
+        if (streq(argv[0], cmd->name)) {
+            (void)cmd->fn(argc, argv);
             return;
         }
     }
