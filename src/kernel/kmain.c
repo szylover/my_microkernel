@@ -8,6 +8,9 @@
 #include "idt.h"
 #include "printk.h"
 
+#include "pic.h"
+#include "keyboard.h"
+
 // Multiboot2 information structure
 struct mb2_tag {
     uint32_t type;
@@ -62,6 +65,21 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     } else {
         mb2_dump_tags(mb2_info);
     }
+
+    /* --- IRQ + keyboard minimal test ---
+     *
+     * 目标：先把“IRQ1 键盘中断通路”打通。
+     * 当前临时行为：按下任意键，就在串口输出一次 "SzyOs > "。
+     *
+     * 后续你会把这里替换为真正的 shell：
+     * - scancode -> ASCII
+     * - 行编辑 + 命令分发（help/info/cls/mmap/cpu...）
+     */
+    pic_init();
+    keyboard_init();
+
+    printk("[kbd] IRQ1 enabled. Press keys to see prompt.\n");
+    __asm__ volatile ("sti");
 
     for (;;) {
         __asm__ volatile ("hlt");

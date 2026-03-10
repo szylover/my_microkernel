@@ -86,6 +86,27 @@ extern void isr30(void);
 extern void isr31(void);
 
 /*
+ * 汇编 IRQ stubs（在 irq_stubs.asm 里定义）。
+ * 这些向量对应 PIC remap 后的 0x20..0x2F。
+ */
+extern void irq0(void);
+extern void irq1(void);
+extern void irq2(void);
+extern void irq3(void);
+extern void irq4(void);
+extern void irq5(void);
+extern void irq6(void);
+extern void irq7(void);
+extern void irq8(void);
+extern void irq9(void);
+extern void irq10(void);
+extern void irq11(void);
+extern void irq12(void);
+extern void irq13(void);
+extern void irq14(void);
+extern void irq15(void);
+
+/*
  * 从汇编 stub 传入的寄存器快照。
  *
  * 这个布局需要和 isr_common_stub 里 push 的顺序严格匹配。
@@ -207,6 +228,32 @@ void idt_init(void) {
     idt_set_gate(29, isr29, GDT_KERNEL_CODE_SEL, INT_GATE);
     idt_set_gate(30, isr30, GDT_KERNEL_CODE_SEL, INT_GATE);
     idt_set_gate(31, isr31, GDT_KERNEL_CODE_SEL, INT_GATE);
+
+    /*
+     * 硬件 IRQ（来自 8259 PIC）
+     *
+     * 约定：PIC remap 到 0x20..0x2F。
+     * 这里先把 gate 装进去，真正要收到 IRQ 还需要：
+     * - pic_init() 做 remap
+     * - 解除对应 IRQ mask（例如键盘 IRQ1）
+     * - sti 打开 IF
+     */
+    idt_set_gate(0x20, irq0,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x21, irq1,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x22, irq2,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x23, irq3,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x24, irq4,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x25, irq5,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x26, irq6,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x27, irq7,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x28, irq8,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x29, irq9,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2A, irq10, GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2B, irq11, GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2C, irq12, GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2D, irq13, GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2E, irq14, GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x2F, irq15, GDT_KERNEL_CODE_SEL, INT_GATE);
 
     idtr.limit = (uint16_t)(sizeof(idt) - 1);
     idtr.base = (uint32_t)(uintptr_t)&idt[0];
