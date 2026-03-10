@@ -18,11 +18,7 @@ static void mb2_dump_tags(const void* mb2_info) {
     const uint8_t* base = (const uint8_t*)mb2_info;
     uint32_t total_size = *(const uint32_t*)(base + 0);
 
-    printk("[mb2] info @ ");
-    serial_write_hex32((uint32_t)(uintptr_t)mb2_info);
-    printk(", total_size=");
-    serial_write_hex32(total_size);
-    printk("\n");
+    printk("[mb2] info @ %p, total_size=%u\n", mb2_info, total_size);
 
     const uint8_t* p = base + 8;
     const uint8_t* end = base + total_size;
@@ -34,11 +30,7 @@ static void mb2_dump_tags(const void* mb2_info) {
             break;
         }
 
-        printk("[mb2] tag type=");
-        serial_write_hex32(tag->type);
-        printk(", size=");
-        serial_write_hex32(tag->size);
-        printk("\n");
+        printk("[mb2] tag type=%u, size=%u\n", tag->type, tag->size);
 
         if (tag->size < 8) {
             printk("[mb2] invalid tag size\n");
@@ -63,8 +55,7 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     idt_init();
     printk("idt: after init\n");
 
-    printk("mb2_magic=");
-    printk("%x\n", mb2_magic);
+    printk("mb2_magic=%08x\n", mb2_magic);
 
     if (mb2_magic != 0x36d76289u) {
         printk("[mb2] bad magic\n");

@@ -22,6 +22,8 @@ extern "C" {
  * - %d  有符号十进制（int）
  * - %u  无符号十进制（unsigned int）
  * - %x  无符号十六进制（unsigned int，小写，不带 0x）
+ * - %0<width>x  十六进制零填充宽度（仅支持 32-bit，常用如 %08x）
+ * - %p  指针（打印为 0xXXXXXXXX）
  * - %s  C 字符串（const char*，允许传 NULL）
  * - %c  单字符（int，按 char 输出）
  */

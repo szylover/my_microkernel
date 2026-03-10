@@ -4,6 +4,10 @@
 #include "printk.h"
 #include "serial.h"
 
+static int is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
 static void print_hex_u32(uint32_t num) {
     char hex[8];
 
@@ -21,6 +25,24 @@ static void print_hex_u32(uint32_t num) {
 
     for (int j = i - 1; j >= 0; j--) {
         serial_putc(hex[j]);
+    }
+}
+
+static void print_hex_u32_width(uint32_t num, int width) {
+    static const char* hex = "0123456789abcdef";
+
+    if (width <= 0) {
+        print_hex_u32(num);
+        return;
+    }
+
+    if (width > 8) {
+        width = 8;
+    }
+
+    for (int i = width - 1; i >= 0; i--) {
+        uint8_t digit = (uint8_t)((num >> (i * 4)) & 0xFu);
+        serial_putc(hex[digit]);
     }
 }
 
@@ -73,7 +95,24 @@ void vprintk(const char* fmt, va_list args) {
             break;
         }
 
-        switch (*fmt) {
+        /* Minimal flag/width parsing: currently supports %0<width>x (e.g., %08x). */
+        int zero_pad = 0;
+        int width = 0;
+        if (*fmt == '0') {
+            zero_pad = 1;
+            fmt++;
+            while (is_digit(*fmt)) {
+                width = (width * 10) + (*fmt - '0');
+                fmt++;
+            }
+            if (width < 0) {
+                width = 0;
+            }
+        }
+
+        char spec = *fmt;
+
+        switch (spec) {
             case '%':
                 serial_putc('%');
                 break;
@@ -84,8 +123,19 @@ void vprintk(const char* fmt, va_list args) {
                 print_dec_u32(va_arg(args, unsigned int));
                 break;
             case 'x':
-                print_hex_u32(va_arg(args, unsigned int));
+                if (zero_pad && width > 0) {
+                    print_hex_u32_width((uint32_t)va_arg(args, unsigned int), width);
+                } else {
+                    print_hex_u32((uint32_t)va_arg(args, unsigned int));
+                }
                 break;
+            case 'p': {
+                /* 32-bit kernel: print pointers as 0xXXXXXXXX */
+                uintptr_t p = (uintptr_t)va_arg(args, void*);
+                serial_write("0x");
+                print_hex_u32_width((uint32_t)p, 8);
+                break;
+            }
             case 's': {
                 const char* str = va_arg(args, const char*);
                 serial_write(str ? str : "(null)");
@@ -96,7 +146,7 @@ void vprintk(const char* fmt, va_list args) {
                 break;
             default:
                 serial_putc('%');
-                serial_putc(*fmt);
+                serial_putc(spec);
                 break;
         }
 
