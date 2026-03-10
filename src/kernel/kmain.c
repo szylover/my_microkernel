@@ -6,6 +6,7 @@
 #include "serial.h"
 
 #include "idt.h"
+#include "printk.h"
 
 // Multiboot2 information structure
 struct mb2_tag {
@@ -52,31 +53,30 @@ static void mb2_dump_tags(const void* mb2_info) {
 
 void kmain(uint32_t mb2_magic, const void* mb2_info) {
     serial_init();
-    serial_write("kmain: hello from C\n");
+    printk("kmain: hello from C\n");
 
-    serial_write("gdt: before init\n");
+    printk("gdt: before init\n");
     gdt_init();
-    serial_write("gdt: after init\n");
+    printk("gdt: after init\n");
 
-    serial_write("idt: before init\n");
+    printk("idt: before init\n");
     idt_init();
-    serial_write("idt: after init\n");
+    printk("idt: after init\n");
 
     /*
      * 自检：触发一个 breakpoint 异常（int3，向量 3）。
      * - 如果 IDT/ISR stubs 正常，你会在串口看到 [isr] #BP ...
      * - 我们的 handler 对 vector=3 会 return，所以程序会继续运行。
      */
-    serial_write("idt: selftest int3...\n");
+    printk("idt: selftest int3...\n");
     __asm__ volatile("int3");
-    serial_write("idt: int3 returned\n");
+    printk("idt: int3 returned\n");
 
-    serial_write("mb2_magic=");
-    serial_write_hex32(mb2_magic);
-    serial_write("\n");
+    printk("mb2_magic=");
+    printk("%x\n", mb2_magic);
 
     if (mb2_magic != 0x36d76289u) {
-        serial_write("[mb2] bad magic\n");
+        printk("[mb2] bad magic\n");
     } else {
         mb2_dump_tags(mb2_info);
     }

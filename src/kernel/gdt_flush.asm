@@ -37,3 +37,6 @@ gdt_flush:
     mov esp, esp
 
     ret
+
+; Mark stack as non-executable (silences ld warning about missing .note.GNU-stack)
+section .note.GNU-stack noalloc noexec nowrite progbits

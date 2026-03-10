@@ -12,7 +12,7 @@ GRUB_DIR := $(BOOT_DIR)/grub
 KERNEL_ELF := $(BOOT_DIR)/kernel.elf
 ISO_IMAGE := $(BUILD_DIR)/kernel.iso
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o $(BUILD_DIR)/serial.o $(BUILD_DIR)/gdt.o $(BUILD_DIR)/gdt_flush.o $(BUILD_DIR)/idt.o $(BUILD_DIR)/isr_stubs.o
+OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o $(BUILD_DIR)/serial.o $(BUILD_DIR)/printk.o $(BUILD_DIR)/gdt.o $(BUILD_DIR)/gdt_flush.o $(BUILD_DIR)/idt.o $(BUILD_DIR)/isr_stubs.o
 
 NASMFLAGS := -f elf32
 CFLAGS := -std=c11 -ffreestanding -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -Wall -Wextra -O2
@@ -42,6 +42,9 @@ $(BUILD_DIR)/kmain.o: src/kernel/kmain.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/serial.o: src/kernel/serial.c include/serial.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/printk.o: src/kernel/printk.c include/printk.h include/serial.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/gdt.o: src/kernel/gdt.c include/gdt.h | $(BUILD_DIR)

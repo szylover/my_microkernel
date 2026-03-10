@@ -123,3 +123,6 @@ isr_common_stub:
     add esp, 8
 
     iret
+
+; Mark stack as non-executable (silences ld warning about missing .note.GNU-stack)
+section .note.GNU-stack noalloc noexec nowrite progbits
