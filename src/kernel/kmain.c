@@ -10,6 +10,7 @@
 
 #include "pic.h"
 #include "keyboard.h"
+#include "shell.h"
 
 // Multiboot2 information structure
 struct mb2_tag {
@@ -66,22 +67,19 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         mb2_dump_tags(mb2_info);
     }
 
-    /* --- IRQ + keyboard minimal test ---
+    /* --- IRQ + keyboard + shell ---
      *
-     * 目标：先把“IRQ1 键盘中断通路”打通。
-     * 当前临时行为：按下任意键，就在串口输出一次 "SzyOs > "。
-     *
-     * 后续你会把这里替换为真正的 shell：
-     * - scancode -> ASCII
-     * - 行编辑 + 命令分发（help/info/cls/mmap/cpu...）
+     * 现在我们已经把 IRQ1 键盘中断翻译成 ASCII 字符流（见 keyboard.c）。
+     * 所以这里直接进入 shell：
+     *   szy-kernel > help
+     *   szy-kernel > info
+     *   szy-kernel > cls
      */
     pic_init();
     keyboard_init();
 
-    printk("[kbd] IRQ1 enabled. Press keys to see prompt.\n");
+    printk("[kbd] IRQ1 enabled. Starting shell...\n");
     __asm__ volatile ("sti");
 
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    shell_run();
 }
