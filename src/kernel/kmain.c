@@ -18,11 +18,11 @@ static void mb2_dump_tags(const void* mb2_info) {
     const uint8_t* base = (const uint8_t*)mb2_info;
     uint32_t total_size = *(const uint32_t*)(base + 0);
 
-    serial_write("[mb2] info @ ");
+    printk("[mb2] info @ ");
     serial_write_hex32((uint32_t)(uintptr_t)mb2_info);
-    serial_write(", total_size=");
+    printk(", total_size=");
     serial_write_hex32(total_size);
-    serial_write("\n");
+    printk("\n");
 
     const uint8_t* p = base + 8;
     const uint8_t* end = base + total_size;
@@ -30,18 +30,18 @@ static void mb2_dump_tags(const void* mb2_info) {
     while (p + sizeof(struct mb2_tag) <= end) {
         const struct mb2_tag* tag = (const struct mb2_tag*)p;
         if (tag->type == 0 && tag->size == 8) {
-            serial_write("[mb2] end tag\n");
+            printk("[mb2] end tag\n");
             break;
         }
 
-        serial_write("[mb2] tag type=");
+        printk("[mb2] tag type=");
         serial_write_hex32(tag->type);
-        serial_write(", size=");
+        printk(", size=");
         serial_write_hex32(tag->size);
-        serial_write("\n");
+        printk("\n");
 
         if (tag->size < 8) {
-            serial_write("[mb2] invalid tag size\n");
+            printk("[mb2] invalid tag size\n");
             break;
         }
 

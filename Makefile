@@ -12,14 +12,24 @@ GRUB_DIR := $(BOOT_DIR)/grub
 KERNEL_ELF := $(BOOT_DIR)/kernel.elf
 ISO_IMAGE := $(BUILD_DIR)/kernel.iso
 
-OBJS := $(BUILD_DIR)/boot.o $(BUILD_DIR)/kmain.o $(BUILD_DIR)/serial.o $(BUILD_DIR)/printk.o $(BUILD_DIR)/gdt.o $(BUILD_DIR)/gdt_flush.o $(BUILD_DIR)/idt.o $(BUILD_DIR)/isr_stubs.o
+# Auto-discover kernel sources to avoid manually maintaining object lists.
+KERNEL_C_SRCS := $(wildcard src/kernel/*.c)
+KERNEL_ASM_SRCS := $(wildcard src/kernel/*.asm)
+
+KERNEL_C_OBJS := $(patsubst src/kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_C_SRCS))
+KERNEL_ASM_OBJS := $(patsubst src/kernel/%.asm,$(BUILD_DIR)/%.o,$(KERNEL_ASM_SRCS))
+
+OBJS := $(BUILD_DIR)/boot.o $(KERNEL_C_OBJS) $(KERNEL_ASM_OBJS)
 
 NASMFLAGS := -f elf32
 CFLAGS := -std=c11 -ffreestanding -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables -Wall -Wextra -O2
 # Use -m32 for host gcc/clang. If you use a cross compiler (i686-elf-gcc), set CC=i686-elf-gcc
 CFLAGS += -m32
 CFLAGS += -Iinclude
+CFLAGS += -MMD -MP
 LDFLAGS := -m elf_i386 -T linker.ld
+
+DEPS := $(OBJS:.o=.d)
 
 .PHONY: all iso run clean tools
 
@@ -38,25 +48,10 @@ $(BUILD_DIR):
 $(BUILD_DIR)/boot.o: src/boot/boot.asm | $(BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
-$(BUILD_DIR)/kmain.o: src/kernel/kmain.c | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: src/kernel/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/serial.o: src/kernel/serial.c include/serial.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/printk.o: src/kernel/printk.c include/printk.h include/serial.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/gdt.o: src/kernel/gdt.c include/gdt.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/gdt_flush.o: src/kernel/gdt_flush.asm | $(BUILD_DIR)
-	$(NASM) $(NASMFLAGS) $< -o $@
-
-$(BUILD_DIR)/idt.o: src/kernel/idt.c include/idt.h include/gdt.h include/serial.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/isr_stubs.o: src/kernel/isr_stubs.asm | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: src/kernel/%.asm | $(BUILD_DIR)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld | $(GRUB_DIR)
@@ -84,3 +79,5 @@ run: $(ISO_IMAGE) | tools
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+-include $(DEPS)
