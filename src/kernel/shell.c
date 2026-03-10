@@ -9,8 +9,6 @@
 #define SHELL_PROMPT "szy-kernel > "
 #define SHELL_LINE_MAX 128
 
-static volatile int g_shell_exit_requested = 0;
-
 static int streq(const char* a, const char* b) {
     if (!a || !b) {
         return 0;
@@ -30,18 +28,12 @@ static int is_space(char c) {
 }
 
 extern const cmd_t cmd_cls;
-extern const cmd_t cmd_exit;
 extern const cmd_t cmd_shutdown;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
-    &cmd_exit,
     &cmd_shutdown,
 };
-
-void shell_request_exit(void) {
-    g_shell_exit_requested = 1;
-}
 
 static void shell_print_prompt(void) {
     printk(SHELL_PROMPT);
@@ -142,15 +134,20 @@ void shell_run(void) {
     printk("\n");
     printk("Interactive shell ready.\n");
 
-    g_shell_exit_requested = 0;
+    /*
+     * NOTE (future design):
+     * 之后我们会引入“上层 monitor/login”这样的层级。
+     * - 在 shell 里执行 `exit`：退出到上层 monitor
+     * - 如果 monitor 已经是最上层：再退出则回到 login
+     *
+     * 现在仓库还没做层级设计，所以 shell 暂不提供 `exit`。
+     */
 
     char line[SHELL_LINE_MAX];
 
-    for (; !g_shell_exit_requested;) {
+    for (;;) {
         shell_print_prompt();
         (void)shell_readline(line, sizeof(line));
         shell_dispatch(line);
     }
-
-    printk("Shell exited.\n");
 }

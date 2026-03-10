@@ -16,7 +16,6 @@ szy-kernel >
 - 你输入命令并回车后，执行对应指令。
 - 指令必须可扩展：
   - 第一批：`cls`（先落地最小闭环）
-  - 第一批：`exit`（退出 shell）
   - 第一批：`shutdown`（关机/停止）
   - 下一批：`help`、`info`
   - 第二批：`mmap`（输出类似 `Available RAM: 0x100000 - 0x7EE0000`）
@@ -140,11 +139,11 @@ Available RAM: 0x100000 - 0x7EE0000
 验证点：按键能触发 IRQ1，handler 能从 0x60 读走 scancode，并（在中断里）翻译为 ASCII 写入缓冲区。
 
 
-### 阶段 B：实现 shell 最小闭环（cls/exit/shutdown）（已完成）
+### 阶段 B：实现 shell 最小闭环（cls/shutdown）（已完成）
 
 - 输入层：keyboard ASCII（IRQ1 -> ring buffer -> `keyboard_getc()`）
 - 行编辑：回显/退格/回车
-- 命令表：当前仅 `cls`/`exit`/`shutdown`（其余命令按本文档规划逐步加回）
+- 命令表：当前仅 `cls`/`shutdown`（其余命令按本文档规划逐步加回）
 
 
 ### 阶段 C：扩展 mmap/cpu
@@ -157,4 +156,7 @@ Available RAM: 0x100000 - 0x7EE0000
 
 - 启动：`make iso && make run`
 - IRQ1 测试：在 QEMU 窗口里按键，串口应输出 `SzyOs > `
-- shell：输入 `cls` 验证清屏；输入 `exit` 退出 shell；输入 `shutdown` 触发关机/停止
+- shell：输入 `cls` 验证清屏；输入 `shutdown` 触发关机/停止
+
+补充（未来层级设计）：
+- 当我们加入上层 monitor/login 后，会重新引入 `exit`：从 shell 退出到 monitor；若 monitor 已是最上层则回到 login。

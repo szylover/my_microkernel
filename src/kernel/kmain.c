@@ -98,10 +98,4 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
     __asm__ volatile ("sti");
 
     shell_run();
-
-    /* If the user typed `exit`, shell_run returns. Halt the CPU. */
-    printk("[halt] shell returned; CPU halted\n");
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
 }

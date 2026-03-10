@@ -17,5 +17,4 @@
 - 新增 `docs/shell.md`：记录 cmd 风格 shell 的 UX/分层/命令规划（help/info/cls/mmap/cpu）与阶段落地路线。
 - 阶段 2（Command 模块化）：新增 `include/cmd.h` 命令接口；将 `cls` 拆为独立命令模块（`src/kernel/cmd_cls.c`），shell 通过注册表调用。
 - 阶段 2（Console 输入层）：新增 `include/console.h`/`src/kernel/console.c`，统一键盘（IRQ1 缓冲）与串口（轮询）输入；shell 只依赖 console。
-- 阶段 2（Shell 命令）：新增 `exit` 命令模块（`src/kernel/cmd_exit.c`），使 shell 可正常退出并返回到 `kmain`。
 - 阶段 2（Shell 命令）：新增 `shutdown` 命令模块（`src/kernel/cmd_shutdown.c`），尝试触发 QEMU/Bochs 关机，失败则 halt。
