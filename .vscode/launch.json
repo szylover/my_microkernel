@@ -16,7 +16,7 @@
       "stopAtEntry": true,
       "externalConsole": false,
 
-      "preLaunchTask": "Build ISO (DEBUG=1)",
+      "preLaunchTask": "Start QEMU (gdbstub)",
 
       "setupCommands": [
         {

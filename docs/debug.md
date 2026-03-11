@@ -130,21 +130,16 @@ make gdb
 
 ### 7.3 使用步骤（断点/单步）
 
-1) 启动 QEMU（等待 GDB attach）
-
-- VS Code 中：`Terminal` → `Run Task...` → 选择 `Run QEMU (gdbstub)`
-
-等价命令行：
-
-```bash
-make DEBUG=1 debug
-```
-
-2) Attach 调试器
+1) 启动调试（推荐一键）
 
 - VS Code 左侧 `Run and Debug` 面板
 - 选择 `Kernel: Attach to QEMU (GDB)`
-- 点击开始
+- 点击开始（会自动执行任务 `Start QEMU (gdbstub)`，并等待看到 `GDBSTUB READY` 后再 attach）
+
+手动方式：
+
+- VS Code 中：`Terminal` → `Run Task...` → 选择 `Start QEMU (gdbstub)`
+- 然后再启动 `Kernel: Attach to QEMU (GDB)`
 
 3) 设置断点并单步
 
