@@ -37,6 +37,16 @@ static int serial_received(void) {
 }
 
 void serial_putc(char c) {
+    /* Most serial terminals expect CRLF for newlines. If we only send '\n'
+     * (LF), the cursor may move down but stay in the same column, which makes
+     * ASCII art boxes look misaligned.
+     */
+    if (c == '\n') {
+        while (!serial_transmit_empty()) {
+            // busy wait
+        }
+        outb(COM1, (uint8_t)'\r');
+    }
     while (!serial_transmit_empty()) {
         // busy wait
     }
@@ -45,9 +55,6 @@ void serial_putc(char c) {
 
 void serial_write(const char* s) {
     for (; *s; s++) {
-        if (*s == '\n') {
-            serial_putc('\r');
-        }
         serial_putc(*s);
     }
 }

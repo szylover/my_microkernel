@@ -8,34 +8,106 @@ static int is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
-static void print_hex_u32(uint32_t num) {
-    char hex[8];
+static int cstr_len(const char* s) {
+    if (!s) {
+        return 0;
+    }
+    int n = 0;
+    while (s[n] != '\0') {
+        n++;
+    }
+    return n;
+}
 
-    if (num == 0) {
-        serial_putc('0');
-        return;
+static void serial_putn(char ch, int n) {
+    for (int i = 0; i < n; i++) {
+        serial_putc(ch);
+    }
+}
+
+static void serial_write_n(const char* s, int n) {
+    for (int i = 0; i < n; i++) {
+        serial_putc(s[i]);
+    }
+}
+
+static void serial_write_padded(const char* s, int len, int width, int left_align, char pad) {
+    if (width < 0) {
+        width = 0;
     }
 
+    int padding = (width > len) ? (width - len) : 0;
+
+    if (!left_align) {
+        serial_putn(pad, padding);
+    }
+
+    serial_write_n(s, len);
+
+    if (left_align) {
+        serial_putn(' ', padding);
+    }
+}
+
+static int fmt_u32_dec(char* out, uint32_t value) {
+    /* returns length, no terminator */
+    if (value == 0) {
+        out[0] = '0';
+        return 1;
+    }
+
+    char tmp[10];
     int i = 0;
-    while (num > 0 && i < (int)sizeof(hex)) {
-        uint8_t digit = (uint8_t)(num & 0xFu);
-        hex[i++] = (char)((digit < 10) ? ('0' + digit) : ('a' + (digit - 10)));
-        num >>= 4;
+    while (value > 0 && i < (int)sizeof(tmp)) {
+        tmp[i++] = (char)('0' + (value % 10u));
+        value /= 10u;
     }
 
+    int len = 0;
     for (int j = i - 1; j >= 0; j--) {
-        serial_putc(hex[j]);
+        out[len++] = tmp[j];
     }
+    return len;
+}
+
+static int fmt_int_dec(char* out, int value) {
+    if (value < 0) {
+        out[0] = '-';
+        /* abs for INT_MIN without overflow: abs_u = 0 - (uint32_t)value */
+        uint32_t abs_u = 0u - (uint32_t)value;
+        return 1 + fmt_u32_dec(out + 1, abs_u);
+    }
+    return fmt_u32_dec(out, (uint32_t)value);
+}
+
+static int fmt_u32_hex(char* out, uint32_t value) {
+    static const char* hex = "0123456789abcdef";
+
+    if (value == 0) {
+        out[0] = '0';
+        return 1;
+    }
+
+    char tmp[8];
+    int i = 0;
+    while (value > 0 && i < (int)sizeof(tmp)) {
+        tmp[i++] = hex[value & 0xFu];
+        value >>= 4;
+    }
+
+    int len = 0;
+    for (int j = i - 1; j >= 0; j--) {
+        out[len++] = tmp[j];
+    }
+    return len;
 }
 
 static void print_hex_u32_width(uint32_t num, int width) {
     static const char* hex = "0123456789abcdef";
 
     if (width <= 0) {
-        print_hex_u32(num);
-        return;
+        width = 1;
     }
-
     if (width > 8) {
         width = 8;
     }
@@ -44,41 +116,6 @@ static void print_hex_u32_width(uint32_t num, int width) {
         uint8_t digit = (uint8_t)((num >> (i * 4)) & 0xFu);
         serial_putc(hex[digit]);
     }
-}
-
-static void print_dec_u32(uint32_t num) {
-    char dec[10];
-
-    if (num == 0) {
-        serial_putc('0');
-        return;
-    }
-
-    int i = 0;
-    while (num > 0 && i < (int)sizeof(dec)) {
-        uint32_t digit = num % 10u;
-        dec[i++] = (char)('0' + digit);
-        num /= 10u;
-    }
-
-    for (int j = i - 1; j >= 0; j--) {
-        serial_putc(dec[j]);
-    }
-}
-
-static void print_int(int value) {
-    if (value < 0) {
-        serial_putc('-');
-        /*
-         * 不能直接做 -value：当 value == INT_MIN 时会溢出。
-         * 转成无符号做补码绝对值：abs = 0 - (uint32_t)value
-         */
-        uint32_t abs_u = 0u - (uint32_t)value;
-        print_dec_u32(abs_u);
-        return;
-    }
-
-    print_dec_u32((uint32_t)value);
 }
 
 static void vprintk(const char* fmt, va_list args) {
@@ -90,45 +127,71 @@ static void vprintk(const char* fmt, va_list args) {
 
         fmt++; /* skip '%' */
         if (*fmt == '\0') {
-            /* fmt 以 '%' 结尾：按字面输出 '%' */
+            /* fmt ends with '%': print it literally */
             serial_putc('%');
             break;
         }
 
-        /* Minimal flag/width parsing: currently supports %0<width>x (e.g., %08x). */
-        int zero_pad = 0;
-        int width = 0;
-        if (*fmt == '0') {
-            zero_pad = 1;
-            fmt++;
-            while (is_digit(*fmt)) {
-                width = (width * 10) + (*fmt - '0');
+        /* flags */
+        int left_align = 0;
+        char pad = ' ';
+
+        for (;;) {
+            if (*fmt == '-') {
+                left_align = 1;
                 fmt++;
+                continue;
             }
-            if (width < 0) {
-                width = 0;
+            if (*fmt == '0') {
+                pad = '0';
+                fmt++;
+                continue;
             }
+            break;
+        }
+
+        /* width */
+        int width = 0;
+        while (is_digit(*fmt)) {
+            width = (width * 10) + (*fmt - '0');
+            fmt++;
+        }
+
+        if (left_align) {
+            pad = ' ';
         }
 
         char spec = *fmt;
-
         switch (spec) {
             case '%':
                 serial_putc('%');
                 break;
-            case 'd':
-                print_int(va_arg(args, int));
-                break;
-            case 'u':
-                print_dec_u32(va_arg(args, unsigned int));
-                break;
-            case 'x':
-                if (zero_pad && width > 0) {
-                    print_hex_u32_width((uint32_t)va_arg(args, unsigned int), width);
+            case 'd': {
+                char buf[16];
+                int len = fmt_int_dec(buf, va_arg(args, int));
+
+                /* if negative and zero padded: keep '-' first, then zeros */
+                if (pad == '0' && !left_align && width > len && len > 0 && buf[0] == '-') {
+                    serial_putc('-');
+                    serial_putn('0', width - len);
+                    serial_write_n(buf + 1, len - 1);
                 } else {
-                    print_hex_u32((uint32_t)va_arg(args, unsigned int));
+                    serial_write_padded(buf, len, width, left_align, pad);
                 }
                 break;
+            }
+            case 'u': {
+                char buf[16];
+                int len = fmt_u32_dec(buf, (uint32_t)va_arg(args, unsigned int));
+                serial_write_padded(buf, len, width, left_align, pad);
+                break;
+            }
+            case 'x': {
+                char buf[16];
+                int len = fmt_u32_hex(buf, (uint32_t)va_arg(args, unsigned int));
+                serial_write_padded(buf, len, width, left_align, pad);
+                break;
+            }
             case 'p': {
                 /* 32-bit kernel: print pointers as 0xXXXXXXXX */
                 uintptr_t p = (uintptr_t)va_arg(args, void*);
@@ -138,12 +201,15 @@ static void vprintk(const char* fmt, va_list args) {
             }
             case 's': {
                 const char* str = va_arg(args, const char*);
-                serial_write(str ? str : "(null)");
+                const char* out = str ? str : "(null)";
+                serial_write_padded(out, cstr_len(out), width, left_align, pad);
                 break;
             }
-            case 'c':
-                serial_putc((char)va_arg(args, int));
+            case 'c': {
+                char ch = (char)va_arg(args, int);
+                serial_write_padded(&ch, 1, width, left_align, pad);
                 break;
+            }
             default:
                 serial_putc('%');
                 serial_putc(spec);

@@ -60,6 +60,31 @@ static void mb2_dump_tags(const void* mb2_info) {
  */
 const void* g_mb2_info = NULL;
 
+static int kstrlen(const char* s) {
+    if (!s) {
+        return 0;
+    }
+    int n = 0;
+    while (s[n] != '\0') {
+        n++;
+    }
+    return n;
+}
+
+static void banner_pad_to_inner_width(int already_printed) {
+    /* Banner is: |<78 chars>|
+     * We print content after the leading '|', then pad with spaces to reach 78.
+     */
+    const int inner_width = 78;
+    int remain = inner_width - already_printed;
+    if (remain < 0) {
+        remain = 0;
+    }
+    for (int i = 0; i < remain; i++) {
+        printk("%c", ' ');
+    }
+}
+
 static void kmain_print_login(void) {
     /*
      * “登录界面”输出到串口终端（QEMU -serial stdio）。
@@ -68,12 +93,34 @@ static void kmain_print_login(void) {
     printk("\x1b[2J\x1b[H");
 
     printk("+------------------------------------------------------------------------------+\n");
-    printk("|   _____  ________  __   __      __ ________________                         |\n");
-    printk("|  / ___/ /_  __/ / / /  / /__   / //_/ __/ __/ __/ /                         |\n");
-    printk("| / /__    / / / /_/ /  / / _ \\ / ,< / _// _// _// /                          |\n");
-    printk("| \\___/   /_/  \\____/  /_/\\___//_/|_/___/___/___/_/                           |\n");
+    printk("|   _____  ________  __   __      __ ________________                          |\n");
+    printk("|  / ___/ /_  __/ / / /  / /__   / //_/ __/ __/ __/ /                          |\n");
+    printk("| / /__    / / / /_/ /  / / _ \\ / ,< / _// _// _// /                           |\n");
+    printk("| \\___/   /_/  \\____/  /_/\\___//_/|_/___/___/___/_/                            |\n");
     printk("|                                                                              |\n");
-    printk("|  %-12s v%-16s  build: %s %s                                |\n", KERNEL_NAME, KERNEL_VERSION, __DATE__, __TIME__);
+
+    /* Build info line: pad dynamically so the right border stays aligned even
+     * if printk implements field widths (or if strings change).
+     */
+    printk("|");
+    printk("  %-12s v%-16s  build: %s %s", KERNEL_NAME, KERNEL_VERSION, __DATE__, __TIME__);
+
+    int name_w = kstrlen(KERNEL_NAME);
+    if (name_w < 12) name_w = 12;
+    int ver_w = kstrlen(KERNEL_VERSION);
+    if (ver_w < 16) ver_w = 16;
+
+    int already = 2 /* two leading spaces */
+                + name_w
+                + 2 /* " v" */
+                + ver_w
+                + 9 /* "  build: " */
+                + kstrlen(__DATE__)
+                + 1 /* space between date/time */
+                + kstrlen(__TIME__);
+
+    banner_pad_to_inner_width(already);
+    printk("|\n");
     printk("|  input: keyboard (IRQ1) + serial (COM1 polling)                              |\n");
     printk("|  tip  : type 'cls' then Enter to clear                                       |\n");
     printk("+------------------------------------------------------------------------------+\n");
