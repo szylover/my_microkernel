@@ -27,6 +27,10 @@ QEMU_TIMEOUT_SEC=${QEMU_TIMEOUT_SEC:-5}
 # Enable with: TEST_MMAP=1 make test
 TEST_MMAP=${TEST_MMAP:-0}
 
+# Optional: verify `pmm` shell command works and allocation/free affects counters.
+# Enable with: TEST_PMM=1 make test
+TEST_PMM=${TEST_PMM:-0}
+
 cd "${ROOT_DIR}"
 
 echo "[test] build: clean"
@@ -143,6 +147,98 @@ if [[ "${TEST_MMAP}" == "1" ]]; then
   else
     echo "[ OK ] mmap output"
   fi
+fi
+
+if [[ "${TEST_PMM}" == "1" ]]; then
+  echo "[test] cmd: pmm (feed scripted input via serial stdio)"
+  LOG_PMM_RAW="${LOG_DIR}/serial-pmm-${TS}.raw.log"
+  LOG_PMM="${LOG_DIR}/serial-pmm-${TS}.log"
+
+  # Shell is interactive; give it a bit more time than the default smoke run.
+  QEMU_TIMEOUT_PMM_SEC=${QEMU_TIMEOUT_PMM_SEC:-8}
+
+  # Script:
+  #  1) print initial state
+  #  2) alloc 3 pages
+  #  3) print state (free should drop by 3)
+  #  4) freeall
+  #  5) print state (free should return)
+  # NOTE: Piping input immediately at QEMU start is racy; early bytes can be
+  # consumed before the shell read loop is ready. Add a short delay and space
+  # commands out a bit so the interactive console can process them.
+  ({
+    sleep 1
+    printf 'pmm state\n'
+    sleep 0.1
+    printf 'pmm alloc 3\n'
+    sleep 0.1
+    printf 'pmm state\n'
+    sleep 0.1
+    printf 'pmm freeall\n'
+    sleep 0.1
+    printf 'pmm state\n'
+  } ) | (timeout "${QEMU_TIMEOUT_PMM_SEC}s" "${QEMU_BIN}" \
+    -cdrom "${ISO_IMAGE}" \
+    -serial stdio \
+    -display none \
+    -no-reboot \
+    -no-shutdown \
+    >"${LOG_PMM_RAW}" 2>&1) || true
+
+  tr -d '\r' <"${LOG_PMM_RAW}" >"${LOG_PMM}" || true
+
+  # Basic command presence checks.
+  if ! grep -Fq -- "PMM: base=" "${LOG_PMM}"; then
+    echo "[FAIL] pmm output: missing 'PMM: base=' line"
+    echo "[test] pmm log (last 120 lines):"
+    tail -n 120 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  # Ensure alloc printed three addresses.
+  alloc_lines=$(grep -c -F -- "pmm alloc:" "${LOG_PMM}" || true)
+  if [[ "${alloc_lines}" -lt 3 ]]; then
+    echo "[FAIL] pmm alloc: expected >=3 lines, got ${alloc_lines}"
+    echo "[test] pmm log (last 120 lines):"
+    tail -n 120 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  if ! grep -Fq -- "pmm freeall: freed 3 pages" "${LOG_PMM}"; then
+    echo "[FAIL] pmm freeall: missing 'freed 3 pages' confirmation"
+    echo "[test] pmm log (last 120 lines):"
+    tail -n 120 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  # Extract the free page counts from the three `pmm state` outputs.
+  mapfile -t frees < <(awk '/^PMM: free [0-9]+ \/ [0-9]+ pages/ {print $3}' "${LOG_PMM}")
+  if [[ "${#frees[@]}" -lt 3 ]]; then
+    echo "[FAIL] pmm state: expected >=3 'PMM: free' lines, got ${#frees[@]}"
+    echo "[test] pmm log (last 160 lines):"
+    tail -n 160 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  free0=${frees[0]}
+  free1=${frees[1]}
+  free2=${frees[2]}
+
+  if [[ $((free0 - free1)) -ne 3 ]]; then
+    echo "[FAIL] pmm alloc: expected free to drop by 3 (before=${free0}, after=${free1})"
+    echo "[test] pmm log (last 160 lines):"
+    tail -n 160 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  if [[ "${free2}" -ne "${free0}" ]]; then
+    echo "[FAIL] pmm freeall: expected free to return (before=${free0}, after_freeall=${free2})"
+    echo "[test] pmm log (last 160 lines):"
+    tail -n 160 "${LOG_PMM}" || true
+    exit 1
+  fi
+
+  echo "[ OK ] pmm command"
 fi
 
 if [[ "${fail}" -ne 0 ]]; then
