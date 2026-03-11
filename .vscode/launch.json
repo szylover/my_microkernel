@@ -26,6 +26,10 @@
         {
           "description": "i386 architecture",
           "text": "set architecture i386"
+        },
+        {
+          "description": "Prefer hexadecimal output",
+          "text": "set output-radix 16"
         }
       ]
     }

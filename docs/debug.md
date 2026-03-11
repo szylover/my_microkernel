@@ -154,3 +154,16 @@ make gdb
   - 先确认系统里真的装了 `gdb`：`command -v gdb`。
   - 本仓库的 `.vscode/launch.json` 默认使用 `/usr/bin/gdb`；如果你的 GDB 路径不同，改成你的实际路径。
   - 如果你使用 `gdb-multiarch`，可以把 `miDebuggerPath` 改成 `gdb-multiarch` 或它的绝对路径。
+
+### 7.5 变量面板想看十六进制（hex）
+
+目前 `ms-vscode.cpptools` + GDB 对 **Variables 面板统一切换十六进制显示** 的支持比较有限（很多情况下只能在寄存器/内存视图里方便地看 hex）。
+
+推荐做法：
+
+- 在 Debug Console 用 GDB 命令打印十六进制：
+  - `-exec p/x your_var`
+  - `-exec p/a your_ptr`
+- 在 Watch 里直接写表达式：
+  - `((unsigned)your_var)`（配合 Debug Console `p/x` 一起使用最直观）
+- 本仓库的 VS Code 配置已在启动时执行 `set output-radix 16`，让表达式求值/打印更偏向十六进制输出。
