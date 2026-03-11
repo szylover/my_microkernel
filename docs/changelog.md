@@ -1,4 +1,9 @@
 
+## 2026-03-11
+- 阶段 3（VMM 起步）：新增 `include/kernel/vmm.h`（页目录/页表类型、PDE/PTE flags、vmm_init/vmm_map_page/vmm_unmap_page API）。
+- 阶段 3（VMM 实现）：新增 `src/kernel/core/vmm.c`（identity mapping 0–16MiB + 开启分页）、`src/kernel/arch/paging_flush.asm`（CR3 加载、CR0.PG 置位、invlpg TLB 刷新）。
+- 更新 `kmain.c`：在 pmm_init() 后调用 vmm_init() 开启分页。
+
 ## 2026-03-10
 - 新增 `linker.ld`：i386/Multiboot2 内核链接脚本（1MiB 链接地址，保留 `.multiboot_header`）。
 - 新增 `.gitignore`：忽略常见构建产物与编辑器文件。
