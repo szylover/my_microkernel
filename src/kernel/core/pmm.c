@@ -21,6 +21,9 @@
 #define PMM_PAGE_SIZE 4096u
 #define PMM_ONE_MIB   0x100000u
 
+/* Maximum number of usable RAM regions PMM will manage (fixed, no kmalloc). */
+#define PMM_MAX_REGIONS 32u
+
 /*
  * [ASSUMPTION]
  *   目前内核仍处于 identity mapping（物理地址 == 线性地址）。
@@ -128,55 +131,63 @@ static enum mb2_find_result mb2_find_tag(const uint8_t* base, uint32_t total_siz
 }
 
 /* ================================
- * Bitmap internals
+ * Bitmap internals (per-region)
  *   bit=1 => used/reserved
  *   bit=0 => free
  * ================================ */
-static uint8_t* g_pmm_bitmap = NULL;
-static uint32_t g_pmm_bitmap_bytes = 0;      /* ceil(pages/8) */
-static uint32_t g_pmm_bitmap_storage_bytes = 0; /* mapped/allocated bytes (page aligned) */
 
-static uint32_t g_pmm_base = 0;              /* physical address of page index 0 */
-static uint32_t g_pmm_pages = 0;             /* total pages tracked by bitmap */
-static uint32_t g_pmm_free = 0;              /* cached free page count */
+struct pmm_region {
+	uint32_t base; /* physical address of page index 0 (for this region) */
+	uint32_t pages;
+	uint8_t* bitmap;
+	uint32_t bitmap_bytes; /* ceil(pages/8) */
+	uint32_t bitmap_storage_bytes; /* page-aligned storage */
+	uint32_t bitmap_pages; /* bitmap storage in pages */
+	uint32_t free;
+};
+
+static struct pmm_region g_regions[PMM_MAX_REGIONS];
+static uint32_t g_region_count = 0;
+static uint32_t g_region_rr = 0; /* round-robin start index for alloc */
+
+static uint32_t g_pmm_total_pages = 0;
+static uint32_t g_pmm_total_free = 0;
 static int g_pmm_ready = 0;
-
-static uint32_t pmm_managed_end(void) {
-	return g_pmm_base + g_pmm_pages * PMM_PAGE_SIZE;
-}
 
 static int pmm_addr_is_page_aligned(uint32_t addr) {
 	return (addr & (PMM_PAGE_SIZE - 1u)) == 0;
 }
 
-static int pmm_addr_in_managed_range(uint32_t addr) {
-	return (addr >= g_pmm_base) && (addr < pmm_managed_end());
+static int region_contains_addr(const struct pmm_region* r, uint32_t addr) {
+	if (!r || r->pages == 0) return 0;
+	uint32_t end = r->base + r->pages * PMM_PAGE_SIZE;
+	return addr >= r->base && addr < end;
 }
 
-static uint32_t pmm_addr_to_index(uint32_t addr) {
-	return (addr - g_pmm_base) / PMM_PAGE_SIZE;
+static uint32_t region_addr_to_index(const struct pmm_region* r, uint32_t addr) {
+	return (addr - r->base) / PMM_PAGE_SIZE;
 }
 
-static uint32_t pmm_index_to_addr(uint32_t idx) {
-	return g_pmm_base + idx * PMM_PAGE_SIZE;
+static uint32_t region_index_to_addr(const struct pmm_region* r, uint32_t idx) {
+	return r->base + idx * PMM_PAGE_SIZE;
 }
 
-static int bitmap_test(uint32_t bit) {
+static int bitmap_test_r(const struct pmm_region* r, uint32_t bit) {
 	uint32_t byte = bit >> 3;
 	uint32_t mask = 1u << (bit & 7u);
-	return (g_pmm_bitmap[byte] & mask) != 0;
+	return (r->bitmap[byte] & mask) != 0;
 }
 
-static void bitmap_set(uint32_t bit) {
+static void bitmap_set_r(struct pmm_region* r, uint32_t bit) {
 	uint32_t byte = bit >> 3;
 	uint32_t mask = 1u << (bit & 7u);
-	g_pmm_bitmap[byte] = (uint8_t)(g_pmm_bitmap[byte] | mask);
+	r->bitmap[byte] = (uint8_t)(r->bitmap[byte] | mask);
 }
 
-static void bitmap_clear(uint32_t bit) {
+static void bitmap_clear_r(struct pmm_region* r, uint32_t bit) {
 	uint32_t byte = bit >> 3;
 	uint32_t mask = 1u << (bit & 7u);
-	g_pmm_bitmap[byte] = (uint8_t)(g_pmm_bitmap[byte] & (uint8_t)~mask);
+	r->bitmap[byte] = (uint8_t)(r->bitmap[byte] & (uint8_t)~mask);
 }
 
 /*
@@ -191,18 +202,26 @@ static void bitmap_mark_used_by_addr(uint32_t phys_addr) {
 	if (!pmm_addr_is_page_aligned(phys_addr)) {
 		phys_addr = align_down_u32(phys_addr, PMM_PAGE_SIZE);
 	}
-	if (!pmm_addr_in_managed_range(phys_addr)) {
-		return;
-	}
-	uint32_t idx = pmm_addr_to_index(phys_addr);
-	if (idx >= g_pmm_pages) {
-		return;
-	}
-	if (!bitmap_test(idx)) {
-		bitmap_set(idx);
-		if (g_pmm_free > 0) {
-			g_pmm_free--;
+
+	for (uint32_t ri = 0; ri < g_region_count; ri++) {
+		struct pmm_region* r = &g_regions[ri];
+		if (!region_contains_addr(r, phys_addr)) {
+			continue;
 		}
+		uint32_t idx = region_addr_to_index(r, phys_addr);
+		if (idx >= r->pages) {
+			return;
+		}
+		if (!bitmap_test_r(r, idx)) {
+			bitmap_set_r(r, idx);
+			if (r->free > 0) {
+				r->free--;
+				if (g_pmm_total_free > 0) {
+					g_pmm_total_free--;
+				}
+			}
+		}
+		return;
 	}
 }
 
@@ -221,79 +240,26 @@ static void bitmap_mark_used_range(uint32_t start, uint32_t end_excl) {
 	}
 }
 
-/* ================================
- * Multiboot2 mmap -> best usable region
- * ================================ */
-/* Find the largest available RAM region (type=1), clamped to >=1MiB and <4GiB. */
-static int pmm_pick_best_region(const struct mb2_tag_mmap* mmap_tag, uint32_t* out_start, uint32_t* out_end) {
-	if (!mmap_tag || !out_start || !out_end) {
-		return 0;
+static void pmm_reset_state(void) {
+	g_pmm_ready = 0;
+	g_region_count = 0;
+	g_region_rr = 0;
+	g_pmm_total_pages = 0;
+	g_pmm_total_free = 0;
+	for (uint32_t i = 0; i < PMM_MAX_REGIONS; i++) {
+		g_regions[i].base = 0;
+		g_regions[i].pages = 0;
+		g_regions[i].bitmap = NULL;
+		g_regions[i].bitmap_bytes = 0;
+		g_regions[i].bitmap_storage_bytes = 0;
+		g_regions[i].bitmap_pages = 0;
+		g_regions[i].free = 0;
 	}
-
-	if (mmap_tag->size < sizeof(struct mb2_tag_mmap)) {
-		return 0;
-	}
-	if (mmap_tag->entry_size < sizeof(struct mb2_mmap_entry)) {
-		return 0;
-	}
-
-	const uint8_t* entries = (const uint8_t*)mmap_tag + sizeof(struct mb2_tag_mmap);
-	const uint8_t* entries_end = (const uint8_t*)mmap_tag + mmap_tag->size;
-
-	uint64_t best_bytes = 0;
-	uint32_t best_s = 0;
-	uint32_t best_e = 0;
-
-	for (const uint8_t* p = entries; p + mmap_tag->entry_size <= entries_end; p += mmap_tag->entry_size) {
-		const struct mb2_mmap_entry* e = (const struct mb2_mmap_entry*)p;
-		if (e->type != 1u) {
-			continue;
-		}
-
-		uint64_t region_start64 = e->addr;
-		uint64_t region_end64 = u64_add_sat(e->addr, e->len);
-		if (region_end64 == UINT64_MAX || region_end64 <= region_start64) {
-			continue;
-		}
-
-		/* Clamp to 32-bit addressable space and skip >4GiB-only regions. */
-		if (region_start64 >= 0x100000000ull) {
-			continue;
-		}
-		uint32_t region_start = (uint32_t)region_start64;
-		uint32_t region_end = (region_end64 >= 0x100000000ull) ? 0xffffffffu : (uint32_t)region_end64;
-
-		/* Clamp usable start to >= 1MiB, per stage-1 mmap summary convention. */
-		if (region_end <= PMM_ONE_MIB) {
-			continue;
-		}
-		if (region_start < PMM_ONE_MIB) {
-			region_start = PMM_ONE_MIB;
-		}
-		if (region_end <= region_start) {
-			continue;
-		}
-
-		uint64_t bytes = (uint64_t)(region_end - region_start);
-		if (bytes > best_bytes) {
-			best_bytes = bytes;
-			best_s = region_start;
-			best_e = region_end;
-		}
-	}
-
-	if (best_bytes == 0) {
-		return 0;
-	}
-
-	*out_start = best_s;
-	*out_end = best_e;
-	return 1;
 }
 
-struct pmm_layout {
-	uint32_t best_start;
-	uint32_t best_end;
+struct pmm_region_layout {
+	uint32_t usable_start;
+	uint32_t usable_end;
 	uint32_t managed_start;
 	uint32_t managed_end;
 	uint32_t pages;
@@ -302,35 +268,17 @@ struct pmm_layout {
 	uint32_t bitmap_pages;
 };
 
-static void pmm_reset_state(void) {
-	g_pmm_ready = 0;
-	g_pmm_bitmap = NULL;
-	g_pmm_bitmap_bytes = 0;
-	g_pmm_bitmap_storage_bytes = 0;
-	g_pmm_base = 0;
-	g_pmm_pages = 0;
-	g_pmm_free = 0;
-}
+static int pmm_compute_region_layout(uint32_t usable_start, uint32_t usable_end, uint32_t kernel_end, struct pmm_region_layout* out) {
+	if (!out) return 0;
+	if (usable_end <= usable_start) return 0;
 
-static int pmm_compute_layout(const struct mb2_tag_mmap* mmap_tag, struct pmm_layout* out) {
-	if (!mmap_tag || !out) {
-		return 0;
+	uint32_t managed_start = usable_start;
+	uint32_t managed_end = usable_end;
+
+	/* If the kernel image sits inside this usable range, skip kernel pages. */
+	if (kernel_end > managed_start && kernel_end < managed_end) {
+		managed_start = u32_max(managed_start, align_up_u32(kernel_end, PMM_PAGE_SIZE));
 	}
-
-	uint32_t best_start = 0;
-	uint32_t best_end = 0;
-	if (!pmm_pick_best_region(mmap_tag, &best_start, &best_end)) {
-		return 0;
-	}
-
-	/*
-	 * Reserve everything below:
-	 * - 1MiB (already clamped by picker)
-	 * - kernel image (.text/.rodata/.data/.bss + stack)
-	 */
-	uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
-	uint32_t managed_start = u32_max(best_start, align_up_u32(kernel_end, PMM_PAGE_SIZE));
-	uint32_t managed_end = best_end;
 
 	managed_start = align_up_u32(managed_start, PMM_PAGE_SIZE);
 	managed_end = align_down_u32(managed_end, PMM_PAGE_SIZE);
@@ -351,8 +299,8 @@ static int pmm_compute_layout(const struct mb2_tag_mmap* mmap_tag, struct pmm_la
 		return 0;
 	}
 
-	out->best_start = best_start;
-	out->best_end = best_end;
+	out->usable_start = usable_start;
+	out->usable_end = usable_end;
 	out->managed_start = managed_start;
 	out->managed_end = managed_end;
 	out->pages = pages;
@@ -362,17 +310,17 @@ static int pmm_compute_layout(const struct mb2_tag_mmap* mmap_tag, struct pmm_la
 	return 1;
 }
 
-static void pmm_bitmap_init_and_free_tail(const struct pmm_layout* layout) {
+static void pmm_region_bitmap_init_and_free_tail(struct pmm_region* r) {
 	/*
-	 * Bitmap storage lives at the beginning of managed region.
+	 * Bitmap storage lives at the beginning of this managed region.
 	 * Start with all-ones (everything used), then clear bits for free pages.
 	 */
-	memfill_u8(g_pmm_bitmap, 0xffu, layout->bitmap_storage_bytes);
+	memfill_u8(r->bitmap, 0xffu, r->bitmap_storage_bytes);
 
-	g_pmm_free = 0;
-	for (uint32_t i = layout->bitmap_pages; i < g_pmm_pages; i++) {
-		bitmap_clear(i);
-		g_pmm_free++;
+	r->free = 0;
+	for (uint32_t i = r->bitmap_pages; i < r->pages; i++) {
+		bitmap_clear_r(r, i);
+		r->free++;
 	}
 }
 
@@ -389,11 +337,17 @@ static void pmm_reserve_multiboot2_info(void) {
 	bitmap_mark_used_range(mb2_phys, mb2_phys + mb2_size);
 }
 
-static void pmm_print_summary(const struct pmm_layout* layout) {
-	printk("[pmm] best region: 0x%08x - 0x%08x\n", layout->best_start, layout->best_end);
-	printk("[pmm] managed    : 0x%08x - 0x%08x (%u pages)\n", layout->managed_start, layout->managed_end, g_pmm_pages);
-	printk("[pmm] bitmap @ 0x%08x (%u bytes, %u pages)\n", (uint32_t)(uintptr_t)g_pmm_bitmap, g_pmm_bitmap_bytes, layout->bitmap_pages);
-	printk("[pmm] free pages : %u\n", g_pmm_free);
+static void pmm_print_summary(void) {
+	printk("[pmm] regions    : %u\n", (unsigned)g_region_count);
+	for (uint32_t i = 0; i < g_region_count; i++) {
+		const struct pmm_region* r = &g_regions[i];
+		uint32_t end = r->base + r->pages * PMM_PAGE_SIZE;
+		printk("[pmm] r%u managed : 0x%08x - 0x%08x (%u pages)\n", (unsigned)i, r->base, end, (unsigned)r->pages);
+		printk("[pmm] r%u bitmap  : 0x%08x (%u bytes, %u pages)\n", (unsigned)i, (uint32_t)(uintptr_t)r->bitmap, (unsigned)r->bitmap_bytes, (unsigned)r->bitmap_pages);
+		printk("[pmm] r%u free    : %u\n", (unsigned)i, (unsigned)r->free);
+	}
+	printk("[pmm] total pages: %u\n", (unsigned)g_pmm_total_pages);
+	printk("[pmm] free pages : %u\n", (unsigned)g_pmm_total_free);
 }
 
 static void pmm_resync_free_count(void) {
@@ -404,34 +358,39 @@ static void pmm_resync_free_count(void) {
 	 *   g_pmm_free 是缓存值；在早期阶段我们宁可偶尔 O(n) 纠正它，
 	 *   也不引入更复杂的数据结构。
 	 */
-	g_pmm_free = 0;
-	for (uint32_t i = 0; i < g_pmm_pages; i++) {
-		if (!bitmap_test(i)) {
-			g_pmm_free++;
+	g_pmm_total_free = 0;
+	for (uint32_t ri = 0; ri < g_region_count; ri++) {
+		struct pmm_region* r = &g_regions[ri];
+		r->free = 0;
+		for (uint32_t i = 0; i < r->pages; i++) {
+			if (!bitmap_test_r(r, i)) {
+				r->free++;
+			}
 		}
+		g_pmm_total_free += r->free;
 	}
 }
 
-static int pmm_find_free_index(uint32_t* out_idx) {
+static int pmm_find_free_index(const struct pmm_region* r, uint32_t* out_idx) {
 	/*
 	 * Find a free page index by scanning the bitmap.
 	 * Returns 1 on success, 0 if none found.
 	 */
-	if (!out_idx) {
+	if (!r || !out_idx) {
 		return 0;
 	}
 
-	for (uint32_t byte = 0; byte < g_pmm_bitmap_bytes; byte++) {
-		uint8_t v = g_pmm_bitmap[byte];
+	for (uint32_t byte = 0; byte < r->bitmap_bytes; byte++) {
+		uint8_t v = r->bitmap[byte];
 		if (v == 0xffu) {
 			continue;
 		}
 		for (uint32_t bit = 0; bit < 8; bit++) {
 			uint32_t idx = (byte << 3) + bit;
-			if (idx >= g_pmm_pages) {
+			if (idx >= r->pages) {
 				break;
 			}
-			if (!bitmap_test(idx)) {
+			if (!bitmap_test_r(r, idx)) {
 				*out_idx = idx;
 				return 1;
 			}
@@ -453,11 +412,11 @@ static void pmm_selftest(void) {
 	 * Non-goals:
 	 *  - Exhaustive testing or performance benchmarking
 	 */
-	if (!g_pmm_ready || !g_pmm_bitmap || g_pmm_pages == 0) {
+	if (!g_pmm_ready || g_region_count == 0 || g_pmm_total_pages == 0) {
 		return;
 	}
 
-	unsigned free_before = (unsigned)g_pmm_free;
+	unsigned free_before = (unsigned)g_pmm_total_free;
 	if (free_before < 4u) {
 		printk("[pmm] selftest: skip (free=%u)\n", free_before);
 		return;
@@ -490,7 +449,7 @@ static void pmm_selftest(void) {
 		return;
 	}
 
-	if ((unsigned)g_pmm_free != free_before - TEST_PAGES) {
+	if ((unsigned)g_pmm_total_free != free_before - TEST_PAGES) {
 		for (unsigned i = 0; i < TEST_PAGES; i++) {
 			pmm_free_page(pages[i]);
 		}
@@ -520,12 +479,45 @@ static void pmm_selftest(void) {
 		pmm_free_page(pages[i]);
 	}
 
-	if ((unsigned)g_pmm_free != free_before) {
+	if ((unsigned)g_pmm_total_free != free_before) {
 		printk("[pmm] selftest: FAIL (free counter mismatch after free)\n");
 		return;
 	}
 
 	printk("[pmm] selftest: OK (%u pages)\n", (unsigned)TEST_PAGES);
+}
+
+static void pmm_recompute_totals(void) {
+	g_pmm_total_pages = 0;
+	g_pmm_total_free = 0;
+	for (uint32_t i = 0; i < g_region_count; i++) {
+		g_pmm_total_pages += g_regions[i].pages;
+		g_pmm_total_free += g_regions[i].free;
+	}
+}
+
+static int pmm_add_region(uint32_t usable_start, uint32_t usable_end, uint32_t kernel_end) {
+	if (g_region_count >= PMM_MAX_REGIONS) {
+		return 0;
+	}
+
+	struct pmm_region_layout layout;
+	if (!pmm_compute_region_layout(usable_start, usable_end, kernel_end, &layout)) {
+		return 0;
+	}
+
+	struct pmm_region* r = &g_regions[g_region_count];
+	r->base = layout.managed_start;
+	r->pages = layout.pages;
+	r->bitmap = (uint8_t*)(uintptr_t)layout.managed_start;
+	r->bitmap_bytes = layout.bitmap_bytes;
+	r->bitmap_storage_bytes = layout.bitmap_storage_bytes;
+	r->bitmap_pages = layout.bitmap_pages;
+	r->free = 0;
+
+	pmm_region_bitmap_init_and_free_tail(r);
+	g_region_count++;
+	return 1;
 }
 
 void pmm_init(void) {
@@ -554,23 +546,68 @@ void pmm_init(void) {
 		return;
 	}
 
-	struct pmm_layout layout;
-	if (!pmm_compute_layout((const struct mb2_tag_mmap*)tag, &layout)) {
-		printk("[pmm] cannot compute PMM layout (no usable region / too small)\n");
+	/* Build PMM regions from all usable mmap entries (type=1). */
+	const struct mb2_tag_mmap* mmap_tag = (const struct mb2_tag_mmap*)tag;
+	if (mmap_tag->size < sizeof(struct mb2_tag_mmap) || mmap_tag->entry_size < sizeof(struct mb2_mmap_entry)) {
+		printk("[pmm] invalid multiboot2 mmap tag; PMM disabled\n");
 		return;
 	}
 
-	g_pmm_base = layout.managed_start;
-	g_pmm_pages = layout.pages;
-	g_pmm_bitmap = (uint8_t*)(uintptr_t)layout.managed_start;
-	g_pmm_bitmap_bytes = layout.bitmap_bytes;
-	g_pmm_bitmap_storage_bytes = layout.bitmap_storage_bytes;
-	g_pmm_ready = 1;
+	const uint8_t* entries = (const uint8_t*)mmap_tag + sizeof(struct mb2_tag_mmap);
+	const uint8_t* entries_end = (const uint8_t*)mmap_tag + mmap_tag->size;
+	uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
 
-	pmm_bitmap_init_and_free_tail(&layout);
+	uint32_t added = 0;
+	for (const uint8_t* p = entries; p + mmap_tag->entry_size <= entries_end; p += mmap_tag->entry_size) {
+		const struct mb2_mmap_entry* e = (const struct mb2_mmap_entry*)p;
+		if (e->type != 1u) {
+			continue;
+		}
+
+		uint64_t region_start64 = e->addr;
+		uint64_t region_end64 = u64_add_sat(e->addr, e->len);
+		if (region_end64 == UINT64_MAX || region_end64 <= region_start64) {
+			continue;
+		}
+
+		if (region_start64 >= 0x100000000ull) {
+			continue;
+		}
+		uint32_t region_start = (uint32_t)region_start64;
+		uint32_t region_end = (region_end64 >= 0x100000000ull) ? 0xffffffffu : (uint32_t)region_end64;
+
+		/* Clamp usable start to >= 1MiB. */
+		if (region_end <= PMM_ONE_MIB) {
+			continue;
+		}
+		if (region_start < PMM_ONE_MIB) {
+			region_start = PMM_ONE_MIB;
+		}
+		if (region_end <= region_start) {
+			continue;
+		}
+
+		if (!pmm_add_region(region_start, region_end, kernel_end)) {
+			if (g_region_count >= PMM_MAX_REGIONS) {
+				printk("[pmm] WARN: region cap reached (%u), ignore remaining mmap\n", (unsigned)PMM_MAX_REGIONS);
+				break;
+			}
+			continue;
+		}
+		added++;
+	}
+
+	if (added == 0 || g_region_count == 0) {
+		printk("[pmm] cannot build PMM regions (no usable region / too small)\n");
+		return;
+	}
+
+	g_pmm_ready = 1;
+	pmm_recompute_totals();
 	pmm_reserve_multiboot2_info();
+	pmm_resync_free_count();
 	pmm_selftest();
-	pmm_print_summary(&layout);
+	pmm_print_summary();
 }
 
 void* pmm_alloc_page(void) {
@@ -580,21 +617,32 @@ void* pmm_alloc_page(void) {
 	 * [NOTE]
 	 *   Early-kernel implementation uses a linear scan over the bitmap.
 	 */
-	if (!g_pmm_ready || !g_pmm_bitmap || g_pmm_pages == 0) {
+	if (!g_pmm_ready || g_region_count == 0 || g_pmm_total_pages == 0) {
 		return NULL;
 	}
-	if (g_pmm_free == 0) {
+	if (g_pmm_total_free == 0) {
 		return NULL;
 	}
 
-	uint32_t idx = 0;
-	if (pmm_find_free_index(&idx)) {
-		bitmap_set(idx);
-		g_pmm_free--;
-		return (void*)(uintptr_t)pmm_index_to_addr(idx);
+	for (uint32_t off = 0; off < g_region_count; off++) {
+		uint32_t ri = (g_region_rr + off) % g_region_count;
+		struct pmm_region* r = &g_regions[ri];
+		if (r->free == 0) {
+			continue;
+		}
+		uint32_t idx = 0;
+		if (pmm_find_free_index(r, &idx)) {
+			bitmap_set_r(r, idx);
+			r->free--;
+			if (g_pmm_total_free > 0) {
+				g_pmm_total_free--;
+			}
+			g_region_rr = ri;
+			return (void*)(uintptr_t)region_index_to_addr(r, idx);
+		}
 	}
 
-	/* Bitmap says free>0 but we didn't find any. Re-sync count. */
+	/* Cached free count says free>0 but we didn't find any. Re-sync. */
 	pmm_resync_free_count();
 	return NULL;
 }
@@ -617,42 +665,80 @@ void pmm_free_page(void* page) {
 		printk("[pmm] free: unaligned addr=0x%08x\n", addr);
 		return;
 	}
-	if (!pmm_addr_in_managed_range(addr)) {
-		printk("[pmm] free: out of range addr=0x%08x\n", addr);
+	for (uint32_t ri = 0; ri < g_region_count; ri++) {
+		struct pmm_region* r = &g_regions[ri];
+		if (!region_contains_addr(r, addr)) {
+			continue;
+		}
+		uint32_t idx = region_addr_to_index(r, addr);
+		if (idx >= r->pages) {
+			return;
+		}
+		if (!bitmap_test_r(r, idx)) {
+			printk("[pmm] free: double free addr=0x%08x\n", addr);
+			return;
+		}
+		bitmap_clear_r(r, idx);
+		r->free++;
+		g_pmm_total_free++;
 		return;
 	}
 
-	uint32_t idx = pmm_addr_to_index(addr);
-	if (idx >= g_pmm_pages) {
-		return;
-	}
-	if (!bitmap_test(idx)) {
-		printk("[pmm] free: double free addr=0x%08x\n", addr);
-		return;
-	}
-	bitmap_clear(idx);
-	g_pmm_free++;
+	printk("[pmm] free: out of range addr=0x%08x\n", addr);
 }
 
 unsigned pmm_total_pages(void) {
-	return g_pmm_ready ? (unsigned)g_pmm_pages : 0u;
+	return g_pmm_ready ? (unsigned)g_pmm_total_pages : 0u;
 }
 
 unsigned pmm_free_pages(void) {
-	return g_pmm_ready ? (unsigned)g_pmm_free : 0u;
+	return g_pmm_ready ? (unsigned)g_pmm_total_free : 0u;
 }
 
 unsigned pmm_managed_base(void) {
-	return g_pmm_ready ? (unsigned)g_pmm_base : 0u;
+	if (!g_pmm_ready || g_region_count == 0) {
+		return 0u;
+	}
+	uint32_t min_base = g_regions[0].base;
+	for (uint32_t i = 1; i < g_region_count; i++) {
+		if (g_regions[i].base != 0 && g_regions[i].base < min_base) {
+			min_base = g_regions[i].base;
+		}
+	}
+	return (unsigned)min_base;
+}
+
+unsigned pmm_page_addr(unsigned page_index) {
+	if (!g_pmm_ready) {
+		return 0u;
+	}
+	uint32_t idx = (uint32_t)page_index;
+	uint32_t acc = 0;
+	for (uint32_t ri = 0; ri < g_region_count; ri++) {
+		const struct pmm_region* r = &g_regions[ri];
+		if (idx < acc + r->pages) {
+			uint32_t local = idx - acc;
+			return (unsigned)region_index_to_addr(r, local);
+		}
+		acc += r->pages;
+	}
+	return 0u;
 }
 
 int pmm_page_is_used(unsigned page_index) {
 	if (!g_pmm_ready) {
 		return -1;
 	}
-	if (page_index >= g_pmm_pages) {
-		return -1;
+	uint32_t idx = (uint32_t)page_index;
+	uint32_t acc = 0;
+	for (uint32_t ri = 0; ri < g_region_count; ri++) {
+		const struct pmm_region* r = &g_regions[ri];
+		if (idx < acc + r->pages) {
+			uint32_t local = idx - acc;
+			return bitmap_test_r(r, local) ? 1 : 0;
+		}
+		acc += r->pages;
 	}
-	return bitmap_test((uint32_t)page_index) ? 1 : 0;
+	return -1;
 }
 

@@ -128,7 +128,7 @@ static int cmd_pmm_stat(void) {
     }
 
     unsigned used = total - free;
-    printk("PMM: base=0x%08x page_size=%u\n", base, (unsigned)PMM_PAGE_SIZE);
+    printk("PMM: min_base=0x%08x page_size=%u\n", base, (unsigned)PMM_PAGE_SIZE);
     printk("PMM: free %u / %u pages (used %u)\n", free, total, used);
     return 0;
 }
@@ -250,7 +250,10 @@ static int cmd_pmm_dump(int argc, char** argv) {
         line++;
         if (line == 32) {
             unsigned idx0 = i - 31u;
-            uint32_t addr0 = (uint32_t)base + (uint32_t)idx0 * (uint32_t)PMM_PAGE_SIZE;
+            uint32_t addr0 = (uint32_t)pmm_page_addr(idx0);
+            if (addr0 == 0) {
+                addr0 = (uint32_t)base;
+            }
             printk("  idx %u addr 0x%08x\n", idx0, addr0);
             line = 0;
         }
@@ -258,7 +261,10 @@ static int cmd_pmm_dump(int argc, char** argv) {
 
     if (line != 0) {
         unsigned idx0 = end - line;
-        uint32_t addr0 = (uint32_t)base + (uint32_t)idx0 * (uint32_t)PMM_PAGE_SIZE;
+        uint32_t addr0 = (uint32_t)pmm_page_addr(idx0);
+        if (addr0 == 0) {
+            addr0 = (uint32_t)base;
+        }
         printk("  idx %u addr 0x%08x\n", idx0, addr0);
     }
 
