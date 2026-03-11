@@ -70,6 +70,13 @@ static uint32_t align_up_u32(uint32_t v, uint32_t a) { return (v + (a - 1u)) & ~
 static uint32_t align_down_u32(uint32_t v, uint32_t a) { return v & ~(a - 1u); }
 
 static uint32_t u32_max(uint32_t a, uint32_t b) { return (a > b) ? a : b; }
+static uint32_t u32_min(uint32_t a, uint32_t b) { return (a < b) ? a : b; }
+
+static int ranges_overlap_u32(uint32_t a_start, uint32_t a_end, uint32_t b_start, uint32_t b_end) {
+	uint32_t s = u32_max(a_start, b_start);
+	uint32_t e = u32_min(a_end, b_end);
+	return e > s;
+}
 
 /* Saturating add for (addr + len) parsing; avoids overflow UB/bugs. */
 static uint64_t u64_add_sat(uint64_t a, uint64_t b) {
@@ -268,46 +275,74 @@ struct pmm_region_layout {
 	uint32_t bitmap_pages;
 };
 
-static int pmm_compute_region_layout(uint32_t usable_start, uint32_t usable_end, uint32_t kernel_end, struct pmm_region_layout* out) {
+static int pmm_compute_region_layout(
+	uint32_t usable_start,
+	uint32_t usable_end,
+	uint32_t kernel_start,
+	uint32_t kernel_end,
+	uint32_t mb2_start,
+	uint32_t mb2_end,
+	struct pmm_region_layout* out
+) {
 	if (!out) return 0;
 	if (usable_end <= usable_start) return 0;
 
 	uint32_t managed_start = usable_start;
 	uint32_t managed_end = usable_end;
 
-	/* If the kernel image sits inside this usable range, skip kernel pages. */
-	if (kernel_end > managed_start && kernel_end < managed_end) {
-		managed_start = u32_max(managed_start, align_up_u32(kernel_end, PMM_PAGE_SIZE));
+	/*
+	 * We store the bitmap at the beginning of the managed range.
+	 * So we must ensure that "managed_start .. managed_start+bitmap_storage" does
+	 * not overlap critical boot-time data (kernel image, multiboot2 info).
+	 */
+	for (unsigned attempt = 0; attempt < 4; attempt++) {
+		/* If the kernel image overlaps this usable range, skip kernel pages. */
+		if (ranges_overlap_u32(managed_start, managed_end, kernel_start, kernel_end)) {
+			if (managed_start < kernel_end && managed_end > kernel_start) {
+				managed_start = u32_max(managed_start, align_up_u32(kernel_end, PMM_PAGE_SIZE));
+			}
+		}
+
+		managed_start = align_up_u32(managed_start, PMM_PAGE_SIZE);
+		managed_end = align_down_u32(managed_end, PMM_PAGE_SIZE);
+		if (managed_end <= managed_start + PMM_PAGE_SIZE) {
+			return 0;
+		}
+
+		uint32_t bytes = managed_end - managed_start;
+		uint32_t pages = bytes / PMM_PAGE_SIZE;
+		if (pages < 8) {
+			return 0;
+		}
+
+		uint32_t bitmap_bytes = (pages + 7u) / 8u;
+		uint32_t bitmap_storage = align_up_u32(bitmap_bytes, PMM_PAGE_SIZE);
+		uint32_t bitmap_pages = bitmap_storage / PMM_PAGE_SIZE;
+		if (bitmap_pages >= pages) {
+			return 0;
+		}
+
+		uint32_t bitmap_start = managed_start;
+		uint32_t bitmap_end = bitmap_start + bitmap_storage;
+
+		/* Avoid corrupting Multiboot2 info while we are still parsing it. */
+		if (mb2_end > mb2_start && ranges_overlap_u32(bitmap_start, bitmap_end, mb2_start, mb2_end)) {
+			managed_start = align_up_u32(mb2_end, PMM_PAGE_SIZE);
+			continue;
+		}
+
+		out->usable_start = usable_start;
+		out->usable_end = usable_end;
+		out->managed_start = managed_start;
+		out->managed_end = managed_end;
+		out->pages = pages;
+		out->bitmap_bytes = bitmap_bytes;
+		out->bitmap_storage_bytes = bitmap_storage;
+		out->bitmap_pages = bitmap_pages;
+		return 1;
 	}
 
-	managed_start = align_up_u32(managed_start, PMM_PAGE_SIZE);
-	managed_end = align_down_u32(managed_end, PMM_PAGE_SIZE);
-	if (managed_end <= managed_start + PMM_PAGE_SIZE) {
-		return 0;
-	}
-
-	uint32_t bytes = managed_end - managed_start;
-	uint32_t pages = bytes / PMM_PAGE_SIZE;
-	if (pages < 8) {
-		return 0;
-	}
-
-	uint32_t bitmap_bytes = (pages + 7u) / 8u;
-	uint32_t bitmap_storage = align_up_u32(bitmap_bytes, PMM_PAGE_SIZE);
-	uint32_t bitmap_pages = bitmap_storage / PMM_PAGE_SIZE;
-	if (bitmap_pages >= pages) {
-		return 0;
-	}
-
-	out->usable_start = usable_start;
-	out->usable_end = usable_end;
-	out->managed_start = managed_start;
-	out->managed_end = managed_end;
-	out->pages = pages;
-	out->bitmap_bytes = bitmap_bytes;
-	out->bitmap_storage_bytes = bitmap_storage;
-	out->bitmap_pages = bitmap_pages;
-	return 1;
+	return 0;
 }
 
 static void pmm_region_bitmap_init_and_free_tail(struct pmm_region* r) {
@@ -335,6 +370,15 @@ static void pmm_reserve_multiboot2_info(void) {
 	uint32_t mb2_phys = (uint32_t)(uintptr_t)g_mb2_info;
 	uint32_t mb2_size = *(const uint32_t*)((const uint8_t*)g_mb2_info + 0);
 	bitmap_mark_used_range(mb2_phys, mb2_phys + mb2_size);
+}
+
+static void pmm_reserve_kernel_image(void) {
+	/* Reserve the kernel image pages so PMM never hands them out. */
+	uint32_t k_start = (uint32_t)(uintptr_t)__kernel_phys_start;
+	uint32_t k_end = (uint32_t)(uintptr_t)__kernel_phys_end;
+	if (k_end > k_start) {
+		bitmap_mark_used_range(k_start, k_end);
+	}
 }
 
 static void pmm_print_summary(void) {
@@ -496,13 +540,20 @@ static void pmm_recompute_totals(void) {
 	}
 }
 
-static int pmm_add_region(uint32_t usable_start, uint32_t usable_end, uint32_t kernel_end) {
+static int pmm_add_region(
+	uint32_t usable_start,
+	uint32_t usable_end,
+	uint32_t kernel_start,
+	uint32_t kernel_end,
+	uint32_t mb2_start,
+	uint32_t mb2_end
+) {
 	if (g_region_count >= PMM_MAX_REGIONS) {
 		return 0;
 	}
 
 	struct pmm_region_layout layout;
-	if (!pmm_compute_region_layout(usable_start, usable_end, kernel_end, &layout)) {
+	if (!pmm_compute_region_layout(usable_start, usable_end, kernel_start, kernel_end, mb2_start, mb2_end, &layout)) {
 		return 0;
 	}
 
@@ -555,7 +606,10 @@ void pmm_init(void) {
 
 	const uint8_t* entries = (const uint8_t*)mmap_tag + sizeof(struct mb2_tag_mmap);
 	const uint8_t* entries_end = (const uint8_t*)mmap_tag + mmap_tag->size;
+	uint32_t kernel_start = (uint32_t)(uintptr_t)__kernel_phys_start;
 	uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
+	uint32_t mb2_start = (uint32_t)(uintptr_t)g_mb2_info;
+	uint32_t mb2_end = mb2_start + *(const uint32_t*)((const uint8_t*)g_mb2_info + 0);
 
 	uint32_t added = 0;
 	for (const uint8_t* p = entries; p + mmap_tag->entry_size <= entries_end; p += mmap_tag->entry_size) {
@@ -587,7 +641,7 @@ void pmm_init(void) {
 			continue;
 		}
 
-		if (!pmm_add_region(region_start, region_end, kernel_end)) {
+		if (!pmm_add_region(region_start, region_end, kernel_start, kernel_end, mb2_start, mb2_end)) {
 			if (g_region_count >= PMM_MAX_REGIONS) {
 				printk("[pmm] WARN: region cap reached (%u), ignore remaining mmap\n", (unsigned)PMM_MAX_REGIONS);
 				break;
@@ -604,6 +658,7 @@ void pmm_init(void) {
 
 	g_pmm_ready = 1;
 	pmm_recompute_totals();
+	pmm_reserve_kernel_image();
 	pmm_reserve_multiboot2_info();
 	pmm_resync_free_count();
 	pmm_selftest();
