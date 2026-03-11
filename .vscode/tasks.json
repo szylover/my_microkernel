@@ -20,7 +20,8 @@
           "owner": "custom",
           "pattern": [
             {
-              "regexp": ".*"
+              "regexp": "^(.*)$",
+              "message": 1
             }
           ],
           "background": {
