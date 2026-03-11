@@ -155,3 +155,7 @@ make DEBUG=1 debug
 
 - 如果 attach 失败（连不上端口）：先确认 QEMU 已经用 `make debug` 启动，并且端口是 `1234`。
 - 如果单步/变量显示怪异：用 `DEBUG=1` 重新构建/启动（禁用优化，保留符号）。
+- 如果 VS Code 报错 “Unable to determine path to debugger / Please specify MIDebuggerPath”：
+  - 先确认系统里真的装了 `gdb`：`command -v gdb`。
+  - 本仓库的 `.vscode/launch.json` 默认使用 `/usr/bin/gdb`；如果你的 GDB 路径不同，改成你的实际路径。
+  - 如果你使用 `gdb-multiarch`，可以把 `miDebuggerPath` 改成 `gdb-multiarch` 或它的绝对路径。
