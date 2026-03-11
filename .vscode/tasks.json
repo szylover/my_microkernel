@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build ISO (DEBUG=1)",
+      "type": "shell",
+      "command": "make",
+      "args": ["DEBUG=1", "iso"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run QEMU (gdbstub)",
+      "type": "shell",
+      "command": "make",
+      "args": ["DEBUG=1", "debug"],
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

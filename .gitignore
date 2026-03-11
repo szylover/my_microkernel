@@ -26,7 +26,10 @@ qemu*.log
 compile_commands.json
 
 # Editor / OS junk
-.vscode/
+.vscode/*
+!.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 .cache/
 *.swp

@@ -103,3 +103,48 @@ make gdb
 
 - 脚本位置：`tools/kernel.gdb`
 - 它会做：设置架构为 i386、加载符号、连接 `:1234`、在 `kmain` 下断。
+
+## 7. VS Code 集成调试（推荐）
+
+本项目使用 **QEMU gdbstub**（远程目标）调试内核。VS Code 通过 GDB 的 MI 接口 attach 到 `localhost:1234`。
+
+### 7.1 需要安装的 VS Code 扩展
+
+- **C/C++**：`ms-vscode.cpptools`
+
+> 说明：这里不需要 LLDB，也不需要额外的 QEMU 插件；核心是 cpptools + gdb。
+
+### 7.2 仓库内置的 VS Code 配置
+
+本仓库提供：
+
+- `.vscode/launch.json`：调试配置 `Kernel: Attach to QEMU (GDB)`
+- `.vscode/tasks.json`：构建与启动 QEMU 的任务
+
+### 7.3 使用步骤（断点/单步）
+
+1) 启动 QEMU（等待 GDB attach）
+
+- VS Code 中：`Terminal` → `Run Task...` → 选择 `Run QEMU (gdbstub)`
+
+等价命令行：
+
+```bash
+make DEBUG=1 debug
+```
+
+2) Attach 调试器
+
+- VS Code 左侧 `Run and Debug` 面板
+- 选择 `Kernel: Attach to QEMU (GDB)`
+- 点击开始
+
+3) 设置断点并单步
+
+- 在 C 文件里点行号打断点
+- 使用 VS Code 的 Step Over / Step Into / Continue
+
+### 7.4 常见坑
+
+- 如果 attach 失败（连不上端口）：先确认 QEMU 已经用 `make debug` 启动，并且端口是 `1234`。
+- 如果单步/变量显示怪异：用 `DEBUG=1` 重新构建/启动（禁用优化，保留符号）。

@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Kernel: Attach to QEMU (GDB)",
+      "type": "cppdbg",
+      "request": "launch",
+
+      "program": "${workspaceFolder}/build/isodir/boot/kernel.elf",
+      "cwd": "${workspaceFolder}",
+
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "miDebuggerServerAddress": "localhost:1234",
+
+      "stopAtEntry": true,
+      "externalConsole": false,
+
+      "preLaunchTask": "Build ISO (DEBUG=1)",
+
+      "setupCommands": [
+        {
+          "description": "Intel syntax",
+          "text": "set disassembly-flavor intel"
+        },
+        {
+          "description": "i386 architecture",
+          "text": "set architecture i386"
+        }
+      ]
+    }
+  ]
+}
