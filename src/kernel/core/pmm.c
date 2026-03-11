@@ -554,3 +554,17 @@ unsigned pmm_free_pages(void) {
 	return g_pmm_ready ? (unsigned)g_pmm_free : 0u;
 }
 
+unsigned pmm_managed_base(void) {
+	return g_pmm_ready ? (unsigned)g_pmm_base : 0u;
+}
+
+int pmm_page_is_used(unsigned page_index) {
+	if (!g_pmm_ready) {
+		return -1;
+	}
+	if (page_index >= g_pmm_pages) {
+		return -1;
+	}
+	return bitmap_test((uint32_t)page_index) ? 1 : 0;
+}
+

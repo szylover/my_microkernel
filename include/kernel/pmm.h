@@ -32,6 +32,20 @@ void pmm_free_page(void* page);
 unsigned pmm_total_pages(void);
 unsigned pmm_free_pages(void);
 
+/* Debug/inspection helpers for shell commands.
+ *
+ * Returns 0 if PMM is not initialized.
+ */
+unsigned pmm_managed_base(void);
+
+/* Query whether a page (by PMM page index) is marked used/reserved.
+ * Return values:
+ *   1  => used/reserved
+ *   0  => free
+ *  -1  => PMM not initialized or index out of range
+ */
+int pmm_page_is_used(unsigned page_index);
+
 #ifdef __cplusplus
 }
 #endif
