@@ -162,6 +162,36 @@ int vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags);
  */
 void vmm_unmap_page(uint32_t virt);
 
+/*
+ * vmm_is_mapped — 查询一个虚拟地址是否已映射
+ *
+ * @param virt   虚拟地址（必须 4KiB 对齐）
+ * @return       1 = 已映射 (Present), 0 = 未映射, -1 = VMM 未初始化
+ */
+int vmm_is_mapped(uint32_t virt);
+
+/*
+ * vmm_get_physical — 查询一个虚拟地址映射到的物理地址
+ *
+ * @param virt   虚拟地址（必须 4KiB 对齐）
+ * @param phys   输出参数：物理地址（仅成功时有效）
+ * @return       0 成功, -1 未映射或 VMM 未初始化
+ */
+int vmm_get_physical(uint32_t virt, uint32_t* phys);
+
+/*
+ * vmm_get_pde — 获取指定 PD index 的原始 PDE 值
+ * vmm_get_pte — 获取指定虚拟地址对应的原始 PTE 值
+ *
+ * 直接返回硬件格式的 32 位值，高 20 位 = 页帧地址，低 12 位 = flags。
+ * 返回 0 表示条目不存在或 VMM 未初始化。
+ */
+uint32_t vmm_get_pde(uint32_t pd_idx);
+uint32_t vmm_get_pte(uint32_t virt);
+
+/* 返回 VMM 是否已初始化并开启分页 */
+int vmm_is_ready(void);
+
 #ifdef __cplusplus
 }
 #endif

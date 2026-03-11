@@ -381,3 +381,84 @@ void vmm_init(void) {
            (unsigned)pages_mapped,
            (unsigned)pts_used);
 }
+
+/* ============================================================================
+ * 查询辅助函数（供 shell vmm 命令使用）
+ * ============================================================================ */
+
+int vmm_is_ready(void) {
+    return g_vmm_ready;
+}
+
+int vmm_is_mapped(uint32_t virt) {
+    if (!g_vmm_ready) {
+        return -1;
+    }
+    if (virt & 0xFFFu) {
+        return -1;
+    }
+
+    uint32_t pdi = pd_index(virt);
+    uint32_t pde = g_kernel_pd.entries[pdi];
+    if (!(pde & PDE_PRESENT)) {
+        return 0;
+    }
+
+    uint32_t pt_phys = pde & ~0xFFFu;
+    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    uint32_t pti = pt_index(virt);
+
+    return (pt->entries[pti] & PTE_PRESENT) ? 1 : 0;
+}
+
+int vmm_get_physical(uint32_t virt, uint32_t* phys) {
+    if (!g_vmm_ready || !phys) {
+        return -1;
+    }
+    if (virt & 0xFFFu) {
+        return -1;
+    }
+
+    uint32_t pdi = pd_index(virt);
+    uint32_t pde = g_kernel_pd.entries[pdi];
+    if (!(pde & PDE_PRESENT)) {
+        return -1;
+    }
+
+    uint32_t pt_phys = pde & ~0xFFFu;
+    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    uint32_t pti = pt_index(virt);
+
+    uint32_t pte = pt->entries[pti];
+    if (!(pte & PTE_PRESENT)) {
+        return -1;
+    }
+
+    *phys = pte & ~0xFFFu;
+    return 0;
+}
+
+uint32_t vmm_get_pde(uint32_t pd_idx) {
+    if (!g_vmm_ready || pd_idx >= VMM_ENTRIES_PER_PD) {
+        return 0;
+    }
+    return g_kernel_pd.entries[pd_idx];
+}
+
+uint32_t vmm_get_pte(uint32_t virt) {
+    if (!g_vmm_ready) {
+        return 0;
+    }
+
+    uint32_t pdi = pd_index(virt);
+    uint32_t pde = g_kernel_pd.entries[pdi];
+    if (!(pde & PDE_PRESENT)) {
+        return 0;
+    }
+
+    uint32_t pt_phys = pde & ~0xFFFu;
+    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    uint32_t pti = pt_index(virt);
+
+    return pt->entries[pti];
+}
