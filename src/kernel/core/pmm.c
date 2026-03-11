@@ -441,6 +441,93 @@ static int pmm_find_free_index(uint32_t* out_idx) {
 	return 0;
 }
 
+static void pmm_selftest(void) {
+	/*
+	 * Minimal PMM self-test.
+	 *
+	 * Goals:
+	 *  - Validate alloc/free basic correctness
+	 *  - Validate the returned memory is writable/readable (identity mapping stage)
+	 *  - Validate free-page counter bookkeeping restores after frees
+	 *
+	 * Non-goals:
+	 *  - Exhaustive testing or performance benchmarking
+	 */
+	if (!g_pmm_ready || !g_pmm_bitmap || g_pmm_pages == 0) {
+		return;
+	}
+
+	unsigned free_before = (unsigned)g_pmm_free;
+	if (free_before < 4u) {
+		printk("[pmm] selftest: skip (free=%u)\n", free_before);
+		return;
+	}
+
+	/* Keep it small so it is fast and low-risk during boot. */
+	enum { TEST_PAGES = 4 };
+	void* pages[TEST_PAGES];
+	for (unsigned i = 0; i < TEST_PAGES; i++) {
+		pages[i] = NULL;
+	}
+
+	unsigned allocated = 0;
+	for (unsigned i = 0; i < TEST_PAGES; i++) {
+		void* p = pmm_alloc_page();
+		if (!p) {
+			break;
+		}
+		pages[i] = p;
+		allocated++;
+	}
+
+	if (allocated != TEST_PAGES) {
+		for (unsigned i = 0; i < TEST_PAGES; i++) {
+			if (pages[i]) {
+				pmm_free_page(pages[i]);
+			}
+		}
+		printk("[pmm] selftest: FAIL (alloc %u/%u)\n", allocated, (unsigned)TEST_PAGES);
+		return;
+	}
+
+	if ((unsigned)g_pmm_free != free_before - TEST_PAGES) {
+		for (unsigned i = 0; i < TEST_PAGES; i++) {
+			pmm_free_page(pages[i]);
+		}
+		printk("[pmm] selftest: FAIL (free counter mismatch after alloc)\n");
+		return;
+	}
+
+	/* Write + verify a simple per-page pattern. */
+	for (unsigned i = 0; i < TEST_PAGES; i++) {
+		uint32_t* w = (uint32_t*)pages[i];
+		uint32_t pattern = 0xC0FFEE00u ^ (i * 0x11111111u);
+		for (unsigned j = 0; j < (PMM_PAGE_SIZE / 4u); j++) {
+			w[j] = pattern;
+		}
+		for (unsigned j = 0; j < (PMM_PAGE_SIZE / 4u); j++) {
+			if (w[j] != pattern) {
+				for (unsigned k = 0; k < TEST_PAGES; k++) {
+					pmm_free_page(pages[k]);
+				}
+				printk("[pmm] selftest: FAIL (pattern verify)\n");
+				return;
+			}
+		}
+	}
+
+	for (unsigned i = 0; i < TEST_PAGES; i++) {
+		pmm_free_page(pages[i]);
+	}
+
+	if ((unsigned)g_pmm_free != free_before) {
+		printk("[pmm] selftest: FAIL (free counter mismatch after free)\n");
+		return;
+	}
+
+	printk("[pmm] selftest: OK (%u pages)\n", (unsigned)TEST_PAGES);
+}
+
 void pmm_init(void) {
 	/*
 	 * Initialize the bitmap allocator from Multiboot2 mmap.
@@ -482,6 +569,7 @@ void pmm_init(void) {
 
 	pmm_bitmap_init_and_free_tail(&layout);
 	pmm_reserve_multiboot2_info();
+	pmm_selftest();
 	pmm_print_summary(&layout);
 }
 
