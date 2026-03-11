@@ -9,6 +9,13 @@
   - 常见发行版的 `gdb` 即可。
   - 如果你的系统默认 GDB 对架构支持不完整，可用 `gdb-multiarch`（不同发行版包名不同）。
 
+Ubuntu/WSL 示例：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y gdb
+```
+
 ## 1. 最常用：两终端调试工作流
 
 ### 终端 A：启动 QEMU 并等待 GDB

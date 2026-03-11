@@ -10,7 +10,7 @@
       "cwd": "${workspaceFolder}",
 
       "MIMode": "gdb",
-      "miDebuggerPath": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
       "miDebuggerServerAddress": "localhost:1234",
 
       "stopAtEntry": true,
