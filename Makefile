@@ -4,6 +4,8 @@ LD ?= ld
 GRUB_MKRESCUE ?= grub-mkrescue
 QEMU ?= qemu-system-i386
 QEMU_MEM_MB ?= 256
+QEMU_GDB_PORT ?= 1234
+GDB ?= gdb
 
 # Optional: auto-regenerate compile_commands.json during builds.
 # Enable with: AUTO_COMPDB=1 make iso
@@ -38,9 +40,16 @@ CFLAGS += -Iinclude/kernel
 CFLAGS += -MMD -MP
 LDFLAGS := -m elf_i386 -T linker.ld
 
+# Debug build: keep symbols, disable optimizations (better stepping/backtraces).
+DEBUG ?= 0
+ifeq ($(DEBUG),1)
+CFLAGS := $(filter-out -O2,$(CFLAGS))
+CFLAGS += -O0 -g3 -ggdb -fno-omit-frame-pointer -fno-optimize-sibling-calls
+endif
+
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all iso run test clean tools compdb
+.PHONY: all iso run test clean tools compdb debug gdb
 
 ifeq ($(AUTO_COMPDB),1)
 ISO_PREREQS := compile_commands.json
@@ -93,6 +102,16 @@ iso: $(ISO_PREREQS) $(ISO_IMAGE)
 
 run: $(ISO_IMAGE) | tools
 	$(QEMU) -m $(QEMU_MEM_MB) -cdrom $(ISO_IMAGE) -serial stdio -no-reboot
+
+# Start QEMU and wait for GDB to attach.
+# In another terminal, run: `make gdb`.
+debug: $(ISO_IMAGE) | tools
+	$(QEMU) -m $(QEMU_MEM_MB) -cdrom $(ISO_IMAGE) -serial stdio -no-reboot -S -gdb tcp::$(QEMU_GDB_PORT)
+
+# Launch GDB and attach to QEMU's gdbstub.
+# Usage: `make debug` (terminal A), then `make gdb` (terminal B).
+gdb: $(KERNEL_ELF) | tools
+	$(GDB) -q -x tools/kernel.gdb
 
 test: | tools
 	bash tests/test.sh
