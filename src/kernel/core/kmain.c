@@ -1,21 +1,24 @@
+/* libc freestanding */
 #include <stdint.h>
 #include <stddef.h>
 
+/* arch: CPU 初始化 */
 #include "gdt.h"
-
-#include "serial.h"
-
 #include "idt.h"
-#include "printk.h"
+#include "pic.h"
 
+/* core: 内存管理 */
 #include "pmm.h"
-#include "pmm_bitmap.h"
-#include "pmm_buddy.h"
+#include "pmm_backends.h"
 #include "vmm.h"
 
-#include "pic.h"
-#include "keyboard.h"
+/* core: 内核基础设施 */
+#include "printk.h"
 #include "shell.h"
+
+/* drivers */
+#include "serial.h"
+#include "keyboard.h"
 
 // Multiboot2 information structure
 struct mb2_tag {
