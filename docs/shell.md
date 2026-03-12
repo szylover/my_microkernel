@@ -49,7 +49,7 @@ szy-kernel >
 - 初期实现可直接让 shell 依赖 `keyboard_getc()` 或 `serial_getc()`，后续再抽象。
 
 当前实现（已落地）：
-- 已实现 `console_try_getc/console_getc`（见 `include/kernel/console.h`、`src/kernel/core/console.c`），shell 只依赖 console。
+- 已实现 `console_try_getc/console_getc`（见 `src/include/kernel/console.h`、`src/kernel/core/console.c`），shell 只依赖 console。
 
 
 ### 2.2 行编辑层（Line Editor）
@@ -83,7 +83,7 @@ szy-kernel >
 
 当前实现（已落地）：
 
-- 命令接口在 `include/kernel/cmd.h` 中定义（`cmd_t/cmd_fn_t`）。
+- 命令接口在 `src/include/kernel/cmd.h` 中定义（`cmd_t/cmd_fn_t`）。
 - 每个命令做成独立编译单元，并导出一个 `const cmd_t`（例如 `cmd_cls`）。
 - shell 只维护“注册表”（`const cmd_t*` 数组）并根据 `name` 分发调用。
 
