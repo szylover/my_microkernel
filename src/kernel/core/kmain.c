@@ -1,19 +1,24 @@
+/* libc freestanding */
 #include <stdint.h>
 #include <stddef.h>
 
+/* arch: CPU 初始化 */
 #include "gdt.h"
-
-#include "serial.h"
-
 #include "idt.h"
-#include "printk.h"
+#include "pic.h"
 
+/* core: 内存管理 */
 #include "pmm.h"
+#include "pmm_backends.h"
 #include "vmm.h"
 
-#include "pic.h"
-#include "keyboard.h"
+/* core: 内核基础设施 */
+#include "printk.h"
 #include "shell.h"
+
+/* drivers */
+#include "serial.h"
+#include "keyboard.h"
 
 // Multiboot2 information structure
 struct mb2_tag {
@@ -145,7 +150,16 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         g_mb2_info = mb2_info;
         mb2_dump_tags(mb2_info);
 
-        /* Stage-2: physical memory manager (bitmap allocator). */
+        /*
+         * Stage-8: 选择 PMM 后端。
+         * 两个后端都编译进内核，切换只需改这一行：
+         *   pmm_register_backend(pmm_bitmap_get_ops());  // bitmap
+         *   pmm_register_backend(pmm_buddy_get_ops());   // buddy
+         * 不注册则 dispatch 层 fallback 到 bitmap 默认后端。
+         */
+        pmm_register_backend(pmm_bitmap_get_ops());
+
+        /* Stage-2: physical memory manager. */
         pmm_init();
 
         /* Stage-3: virtual memory manager (identity mapping + paging). */

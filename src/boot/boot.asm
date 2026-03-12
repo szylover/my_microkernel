@@ -82,7 +82,14 @@ _start:
     ;   PD[0..3]     → identity:  virt 0x00000000 → phys 0x00000000
     ;   PD[768..771] → high-half: virt 0xC0000000 → phys 0x00000000
     ;
-    ; [WHY] 16 MiB? Covers kernel image + PMM bitmap + stack + VGA region.
+    ; [WHY] boot PSE 映射范围
+    ;
+    ; 必须覆盖 PMM 管理的所有物理内存，否则 vmm_init 分配页表时
+    ; 通过 PHYS_TO_VIRT 访问高地址页会 #PF。
+    ;
+    ; 映射 1GiB（256 个 4MiB PSE 页），这是 high-half 内核虚拟地址空间
+    ; 的上限（0xC0000000 - 0xFFFFFFFF）。超出实际 RAM 的 PDE 不会被访问，
+    ; vmm_init() 最终会用 4KiB 页表替换这些 PSE 条目。
 
     ; Clear boot_pd (1024 entries × 4 bytes = 4 KiB)
     push edi                ; save mb2 pointer
@@ -92,18 +99,22 @@ _start:
     rep stosd
     pop edi                 ; restore mb2 pointer
 
-    ; Identity mapping: PD[0..3] → physical 0x00000000..0x00FFFFFF
-    mov dword [boot_pd + 0*4], 0x00000083   ; 0 - 4 MiB
-    mov dword [boot_pd + 1*4], 0x00400083   ; 4 - 8 MiB
-    mov dword [boot_pd + 2*4], 0x00800083   ; 8 - 12 MiB
-    mov dword [boot_pd + 3*4], 0x00C00083   ; 12 - 16 MiB
-
-    ; High-half mapping: PD[768..771] → physical 0x00000000..0x00FFFFFF
-    ; 768 = KERNEL_VIRT_BASE >> 22 = 0xC0000000 >> 22
-    mov dword [boot_pd + 768*4], 0x00000083 ; 0xC0000000 → 0
-    mov dword [boot_pd + 769*4], 0x00400083 ; 0xC0400000 → 4 MiB
-    mov dword [boot_pd + 770*4], 0x00800083 ; 0xC0800000 → 8 MiB
-    mov dword [boot_pd + 771*4], 0x00C00083 ; 0xC0C00000 → 12 MiB
+    ; Build identity + high-half PSE mapping: 256 × 4 MiB = 1 GiB
+    ;   PD[i]     → phys i*4MiB  (identity: virt 0 → phys 0)
+    ;   PD[768+i] → phys i*4MiB  (high-half: virt 0xC0000000 → phys 0)
+    ;
+    ; PSE PDE format: [31:22]=phys_4MiB_base | [7]=PS=1 | [1]=RW | [0]=P
+    ;   flags = 0x83 = PS(bit7) | RW(bit1) | Present(bit0)
+    xor ecx, ecx            ; ecx = loop counter (0..255)
+.fill_pse:
+    mov eax, ecx
+    shl eax, 22             ; eax = ecx * 4 MiB (physical base)
+    or  eax, 0x83           ; flags: PS | RW | Present
+    mov [boot_pd + ecx*4],       eax   ; identity: PD[i]
+    mov [boot_pd + 768*4 + ecx*4], eax ; high-half: PD[768+i]
+    inc ecx
+    cmp ecx, 256
+    jb  .fill_pse
 
     ; ------------------------------------------------------------------
     ; Enable PSE (Page Size Extension) in CR4

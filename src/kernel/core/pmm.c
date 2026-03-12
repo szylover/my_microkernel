@@ -1,7 +1,7 @@
 #include <stddef.h>
 
 #include "pmm.h"
-#include "pmm_bitmap.h"
+#include "pmm_backends.h"
 #include "printk.h"
 
 /*

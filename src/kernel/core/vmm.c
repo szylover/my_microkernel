@@ -279,14 +279,29 @@ void vmm_init(void) {
 
     /*
      * 计算需要映射的物理范围
+     *
+     * [WHY] 必须覆盖 PMM 管理的所有物理页，否则 PHYS_TO_VIRT() 访问
+     *   高地址页时会触发 Page Fault。PMM init 已经在 vmm_init 之前完成，
+     *   所以可以查询 PMM 来确定需要映射的范围。
      */
     uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
     uint32_t map_end = kernel_end;
 
-    /* 至少映射 16MiB */
+    /* 至少映射 16MiB（覆盖 VGA、BIOS 区域等） */
     uint32_t min_map = 16u * 1024u * 1024u;
     if (map_end < min_map) {
         map_end = min_map;
+    }
+
+    /* 覆盖 PMM 管理的全部物理页（buddy 可能管理到 256MiB+） */
+    uint32_t pmm_end = pmm_managed_base() + pmm_total_pages() * VMM_PAGE_SIZE;
+    if (pmm_end > map_end) {
+        map_end = pmm_end;
+    }
+
+    /* 不超过 1GiB（内核虚拟地址空间上限 0xC0000000 + 1GiB = 0xFFFFFFFF） */
+    if (map_end > 0x40000000u) {
+        map_end = 0x40000000u;
     }
 
     /* 向上对齐到 4KiB 页边界 */
