@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "printk.h"
+#include "vmm.h"
 
 /*
  * We store the Multiboot2 information pointer in kmain.c.
@@ -212,6 +213,10 @@ void mmap_print(void) {
     }
 
     const uint8_t* base = (const uint8_t*)g_mb2_info;
+    /*
+     * g_mb2_info 在 kmain 中已被转换为虚拟地址 (PHYS_TO_VIRT)，
+     * 因此可以直接解引用。
+     */
     uint32_t total_size = *(const uint32_t*)(base + 0);
 
     const struct mb2_tag* tag = NULL;

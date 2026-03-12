@@ -34,14 +34,14 @@
 | 5 | PMM（物理内存） | Multiboot2 mmap 解析多 region、bitmap 分配器、`pmm_alloc/free_page` | ✅ |
 | 6 | VMM（虚拟内存） | 两级页表、identity mapping 0-16MiB、CR3/CR0.PG 开启分页、Page Fault handler | ✅ |
 
-### 里程碑 C：高级内存 ← **当前位置**
+### 里程碑 C：高级内存
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 7 | High-Half Kernel | 内核映射到 `0xC0000000+`，拆除低地址 identity mapping | |
+| 7 | High-Half Kernel | 内核映射到 `0xC0000000+`，拆除低地址 identity mapping | ✅ |
 | 8 | 内核堆 (kmalloc) | `kmalloc(size)` / `kfree(ptr)`，空闲块管理（链表或红黑树） | |
 
-### 里程碑 D：进程与用户态
+### 里程碑 D：进程与用户态 ← **当前位置**
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
@@ -108,3 +108,10 @@
 - paging_flush.asm（CR3 加载、分页开启、invlpg）
 - Page Fault handler（读 CR2、解码 error code）
 - shell 命令：`vmm`（state/lookup/pd/pt/map/unmap/fault）
+
+### Stage 7: High-Half Kernel
+- boot.asm 用 4MiB PSE 页建立临时 identity + high-half 双重映射
+- vmm_init() 用 4KiB 页表替换 PSE 映射
+- 所有物理地址访问改为 PHYS_TO_VIRT()（PMM bitmap、Multiboot2 info、selftest）
+- vmm_unmap_identity() 拆除 PD[0..767]，低地址空间留给用户态
+- g_mb2_info 在 vmm_init() 后转为虚拟地址
