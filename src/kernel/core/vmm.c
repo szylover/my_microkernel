@@ -6,40 +6,30 @@
 #include "printk.h"
 
 /*
- * Virtual Memory Manager (VMM) — x86 32-bit 两级页表
+ * Virtual Memory Manager (VMM) — x86 32-bit 两级页表 (High-Half Kernel)
  *
  * ============================================================================
- * [WHY] 为什么要开启分页？
+ * [WHY] High-Half Kernel 架构
  * ============================================================================
  *
- * 目前内核运行在"实地址 == 线性地址"的模式（identity mapping，靠 GDT 平坦段）。
- * 虽然能用，但有几个问题：
- *   1. 无法给用户态进程独立的地址空间（Ring 3 隔离）
- *   2. 无法实现按需分配（page fault handler）
- *   3. 无法把内核映射到高地址（High-Half Kernel）
+ * 内核链接在虚拟地址 0xC0000000+ (高半区)，物理加载在 0x00100000。
+ * 地址空间划分：
+ *   0x00000000 - 0xBFFFFFFF : 用户态（将来给进程用）
+ *   0xC0000000 - 0xFFFFFFFF : 内核态
  *
- * 开启分页后，每次内存访问都经过 MMU 翻译：
- *   虚拟地址 → (Page Directory → Page Table) → 物理地址
+ * boot.asm 已经用 4MiB PSE 页建立了临时映射（identity + high-half）。
+ * vmm_init() 会用正式的 4KiB 页表替换临时映射。
  *
- * ============================================================================
- * [CPU STATE] 开启分页的关键操作
- * ============================================================================
- *
- * 1. 把 Page Directory 的 **物理地址** 写入 CR3
- *    → CPU 知道去哪里找顶层页表
- *
- * 2. 设置 CR0 的 PG 位 (bit 31)
- *    → 从下一条指令开始，所有地址都经过分页翻译
- *
- * [CRITICAL] 开启分页的那一瞬间，EIP（指令指针）里的地址也会被翻译。
- *   如果我们没有把当前代码所在的物理地址做 identity mapping，
- *   CPU 翻译 EIP 会得到一个无效地址 → Page Fault → Triple Fault → 重启。
- *   所以我们 **必须** 先把内核用到的所有物理地址 1:1 映射好。
+ * [CRITICAL] 物理地址不能直接当指针用！
+ *   必须通过 PHYS_TO_VIRT() 转换为虚拟地址后才能解引用。
+ *   PDE/PTE 中存储的始终是物理地址（给 CPU/MMU 用）。
  */
 
-/* Linker 导出的内核物理边界（定义在 linker.ld） */
-extern char __kernel_phys_start[];
-extern char __kernel_phys_end[];
+/* Linker 导出的内核边界（定义在 linker.ld） */
+extern char __kernel_phys_start[];  /* 物理起始地址 (0x00100000) */
+extern char __kernel_phys_end[];    /* 物理结束地址 */
+extern char __kernel_virt_start[];  /* 虚拟起始地址 (0xC01xxxxx) */
+extern char __kernel_virt_end[];    /* 虚拟结束地址 */
 
 /* ============================================================================
  * 汇编辅助函数（定义在 paging_flush.asm）
@@ -129,10 +119,11 @@ static page_table_t* vmm_ensure_page_table(uint32_t pd_idx) {
          * PDE 已经有效，取出它指向的页表物理地址。
          * 高 20 位是页帧地址，低 12 位是 flags，用 & ~0xFFF 去掉 flags。
          *
-         * [ASSUMPTION] identity mapping 阶段，物理地址可以直接当指针用。
+         * [CRITICAL] PDE 中存储的是物理地址，不能直接当指针。
+         *   必须用 PHYS_TO_VIRT 转换为虚拟地址才能解引用。
          */
         uint32_t pt_phys = pde & ~0xFFFu;
-        return (page_table_t*)(uintptr_t)pt_phys;
+        return (page_table_t*)PHYS_TO_VIRT(pt_phys);
     }
 
     /*
@@ -140,15 +131,20 @@ static page_table_t* vmm_ensure_page_table(uint32_t pd_idx) {
      *
      * [WHY] 页表本身也要占一页物理内存（4KiB，1024 个 PTE × 4 字节）。
      *       所以我们向 PMM "批发"一页来用。
+     *
+     * pmm_alloc_page() 返回物理地址（void* 形式）。
+     * 需要 PHYS_TO_VIRT 才能解引用（清零、填写 PTE 等）。
+     * PDE 中存储物理地址（给 CPU/MMU 用）。
      */
-    void* new_pt = pmm_alloc_page();
-    if (!new_pt) {
+    uint32_t pt_phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+    if (!pt_phys) {
         printk("[vmm] FATAL: cannot alloc page table for PD[%u]\n", (unsigned)pd_idx);
         return NULL;
     }
 
-    /* 新页表必须全部清零（所有 PTE 的 Present=0 → 未映射） */
-    memzero_page(new_pt);
+    /* 通过虚拟地址清零新页表（所有 PTE 的 Present=0 → 未映射） */
+    page_table_t* pt_virt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
+    memzero_page(pt_virt);
 
     /*
      * 填入 PDE：高 20 位 = 页表物理地址，低位 = flags
@@ -162,10 +158,9 @@ static page_table_t* vmm_ensure_page_table(uint32_t pd_idx) {
      *   - PDE 设 Read-Only，即使 PTE 设 Writable → 最终该页也只读
      *   所以我们在 PDE 层一般给足权限，精细控制放在 PTE。
      */
-    uint32_t pt_phys = (uint32_t)(uintptr_t)new_pt;
     g_kernel_pd.entries[pd_idx] = pt_phys | PDE_PRESENT | PDE_WRITABLE;
 
-    return (page_table_t*)new_pt;
+    return pt_virt;
 }
 
 /* ============================================================================
@@ -236,7 +231,7 @@ void vmm_unmap_page(uint32_t virt) {
     }
 
     uint32_t pt_phys = pde & ~0xFFFu;
-    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
     uint32_t pti = pt_index(virt);
 
     /*
@@ -256,53 +251,40 @@ void vmm_unmap_page(uint32_t virt) {
 void vmm_init(void) {
     /*
      * ========================================================================
-     * VMM 初始化：建立 identity mapping 并开启分页
+     * VMM 初始化：用 4KiB 页表替换 boot.asm 的临时 PSE 映射
      * ========================================================================
      *
-     * [GOAL] 开启分页后，内核代码还能正常运行。
+     * [CPU STATE] 进入此函数时：
+     *   - CR0.PG = 1（boot.asm 已开启分页）
+     *   - CR3 指向 boot_pd（4MiB PSE 页，临时映射）
+     *   - 运行在虚拟地址 0xC01xxxxx（high-half）
      *
-     * [STRATEGY] Identity Mapping（恒等映射）：
-     *   对于内核当前使用的每一个物理地址 P，都映射 virt=P → phys=P。
-     *   这样开启分页后，之前所有用到的地址（代码、数据、栈、PMM bitmap、
-     *   VGA buffer...）都仍然有效。
+     * [GOAL] 建立正式的 4KiB 页表，覆盖：
+     *   1. Identity mapping:  virt 0x00000000+ → phys 0x00000000+
+     *      保留低地址映射，让 VGA (0xB8000)、Multiboot2 info 等仍可访问。
+     *   2. High-half mapping: virt 0xC0000000+ → phys 0x00000000+
+     *      内核代码/数据/栈都在这个范围。
      *
-     * [WHY] 需要映射哪些范围？
-     *
-     *   1. 低 1MiB (0x00000 - 0xFFFFF):
-     *      包含 VGA text buffer (0xB8000)、BIOS 数据区等。
-     *      虽然内核代码不在这里，但 VGA 输出/BIOS 中断需要它。
-     *
-     *   2. 内核镜像 (__kernel_phys_start - __kernel_phys_end):
-     *      内核代码、只读数据、全局变量、BSS（包括这个页目录自己！）
-     *
-     *   3. PMM 管理的内存（已被分配的页）:
-     *      PMM 的 bitmap 存储在 usable RAM 区域的开头，必须可读写。
-     *
-     *   简单做法：把 0 到 "内核结束地址或 PMM 管理范围结束" 都 identity map。
-     *   由于我们在 QEMU 里通常只有几十 MiB，多映射一些也不会浪费太多页表。
+     * [WHY] 为什么保留 identity mapping？
+     *   - PMM 内部的 bitmap 操作仍使用物理地址（identity mapping 下可直接访问）
+     *   - Multiboot2 info 指针是物理地址
+     *   - VGA text buffer 在物理 0xB8000
+     *   将来移除 identity mapping 是单独的步骤。
      */
 
-    printk("[vmm] init: setting up identity mapping...\n");
+    printk("[vmm] init: replacing boot PSE with 4KiB page tables...\n");
 
     /* 清零页目录（所有 PDE = 0 = 不存在） */
     memzero_page(&g_kernel_pd);
 
     /*
-     * 计算需要 identity map 的范围
-     *
-     * 我们取一个保守的上界：MAX(kernel_end, 16MiB)
-     * - 16MiB 足以覆盖低 1MiB + 内核 + PMM bitmap（小内存场景）
-     * - 如果内核镜像超过 16MiB（不太可能），也能覆盖
-     *
-     * [WHY] 为什么不精确计算？
-     *   精确算需要遍历 PMM 所有 region，代码复杂且收益不大。
-     *   多映射几 MiB 只多用几个页表（每个页表映射 4MiB），overhead 很小。
+     * 计算需要映射的物理范围
      */
     uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
     uint32_t map_end = kernel_end;
 
-    /* 至少映射到 16MiB，保证覆盖低端内存和常见的 PMM 区域 */
-    uint32_t min_map = 16u * 1024u * 1024u;   /* 16 MiB */
+    /* 至少映射 16MiB */
+    uint32_t min_map = 16u * 1024u * 1024u;
     if (map_end < min_map) {
         map_end = min_map;
     }
@@ -310,76 +292,74 @@ void vmm_init(void) {
     /* 向上对齐到 4KiB 页边界 */
     map_end = (map_end + VMM_PAGE_SIZE - 1u) & ~(VMM_PAGE_SIZE - 1u);
 
-    printk("[vmm] identity map: 0x00000000 - 0x%08x\n", map_end);
+    printk("[vmm] mapping phys 0x00000000 - 0x%08x\n", map_end);
 
     /*
-     * 逐页建立 identity mapping: virt == phys
+     * 逐页建立双重映射：identity + high-half
      *
-     * [WHY] 为什么一页一页映射，而不是用 4MiB 大页？
-     *   4MiB 大页 (PSE) 更快，但需要设置 CR4.PSE 位，且粒度太粗
-     *   （无法对单个 4KiB 页设置不同权限）。用 4KiB 页更灵活，
-     *   适合学习阶段理解两级页表的完整流程。
+     * [WHY] 每个物理页 P 建立两条映射：
+     *   virt P              → phys P  (identity，临时保留)
+     *   virt P+0xC0000000   → phys P  (high-half，内核正式地址)
      */
     for (uint32_t addr = 0; addr < map_end; addr += VMM_PAGE_SIZE) {
+        /* Identity map: virt == phys */
         int ret = vmm_map_page(addr, addr, PTE_PRESENT | PTE_WRITABLE);
         if (ret != 0) {
             printk("[vmm] FATAL: identity map failed at 0x%08x\n", addr);
             return;
         }
+
+        /* High-half map: virt = phys + KERNEL_VIRT_OFFSET */
+        uint32_t virt_high = addr + KERNEL_VIRT_OFFSET;
+        ret = vmm_map_page(virt_high, addr, PTE_PRESENT | PTE_WRITABLE);
+        if (ret != 0) {
+            printk("[vmm] FATAL: high-half map failed at 0x%08x\n", virt_high);
+            return;
+        }
     }
 
     uint32_t pages_mapped = map_end / VMM_PAGE_SIZE;
-    uint32_t pts_used = (pages_mapped + VMM_ENTRIES_PER_PT - 1) / VMM_ENTRIES_PER_PT;
-    printk("[vmm] mapped %u pages (%u page tables)\n",
-           (unsigned)pages_mapped, (unsigned)pts_used);
+    uint32_t pts_identity = (pages_mapped + VMM_ENTRIES_PER_PT - 1) / VMM_ENTRIES_PER_PT;
+    uint32_t pts_total = pts_identity * 2;  /* identity + high-half */
 
     /*
      * ========================================================================
-     * 关键时刻：加载 CR3 并开启分页
+     * 切换到新页目录
      * ========================================================================
      *
-     * [CPU STATE] 执行顺序：
+     * [CPU STATE] boot.asm 的 PSE 映射 → g_kernel_pd 的 4KiB 映射
      *
-     * 1. vmm_load_page_directory(pd_phys)
-     *    → mov cr3, eax
-     *    → CR3 现在指向我们的页目录
-     *    → 此时 CR0.PG 仍为 0，分页还没开
+     * [WHY] g_kernel_pd 在 .bss 中，虚拟地址 0xC0xxxxxx。
+     *   CR3 需要物理地址，所以用 VIRT_TO_PHYS 转换。
      *
-     * 2. vmm_enable_paging()
-     *    → mov eax, cr0 ; or eax, 0x80000000 ; mov cr0, eax
-     *    → CR0.PG (bit 31) 置 1
-     *    → 从 **下一条指令** 开始，所有内存访问都经过分页翻译
-     *    → 如果 identity mapping 正确，EIP 指向的物理地址 == 虚拟地址，
-     *      CPU 能正常取到下一条指令，一切继续运行
-     *    → 如果 identity mapping 有 bug，CPU 取不到下一条指令 → #PF → Triple Fault
-     *
-     * [WHY] 为什么分成两步（先 CR3 再 CR0.PG）？
-     *   Intel 手册规定：必须先把有效的页目录地址放入 CR3，再开 PG。
-     *   如果先开 PG 而 CR3 指向垃圾 → 立即 Triple Fault。
+     * [CRITICAL] 新页目录必须覆盖当前 EIP 所在的虚拟地址，
+     *   否则 CR3 切换后 CPU 取不到下一条指令 → #PF → Triple Fault。
+     *   我们的 high-half mapping 覆盖了 0xC0000000+，EIP 在此范围内。
      */
-    uint32_t pd_phys = (uint32_t)(uintptr_t)&g_kernel_pd;
-    printk("[vmm] page directory @ 0x%08x\n", pd_phys);
-    printk("[vmm] loading CR3 and enabling paging...\n");
+    uint32_t pd_phys = VIRT_TO_PHYS((uint32_t)(uintptr_t)&g_kernel_pd);
+    printk("[vmm] page directory: virt=0x%08x phys=0x%08x\n",
+           (unsigned)(uintptr_t)&g_kernel_pd, pd_phys);
+    printk("[vmm] loading new CR3...\n");
 
     vmm_load_page_directory(pd_phys);
-    vmm_enable_paging();
 
     /*
-     * 如果执行到这里，说明分页成功开启了！
-     *
-     * [CPU STATE] 现在的状态：
-     *   - CR0.PG = 1 (分页已开启)
-     *   - CR3 = pd_phys (指向内核页目录)
-     *   - 所有虚拟地址 virt ∈ [0, map_end) 都映射到 phys == virt
-     *   - 其他虚拟地址访问会触发 Page Fault (#PF, int 14)
+     * [CPU STATE] 切换成功！
+     *   - CR3 指向 g_kernel_pd（4KiB 页表）
+     *   - Identity mapping:  virt [0, map_end) → phys [0, map_end)
+     *   - High-half mapping: virt [0xC0000000, 0xC0000000+map_end) → phys [0, map_end)
+     *   - 其他虚拟地址访问会触发 Page Fault (#PF)
      */
     g_vmm_ready = 1;
 
-    printk("[vmm] paging enabled!\n");
-    printk("[vmm] identity map: %u KiB (%u pages, %u page tables)\n",
+    printk("[vmm] 4KiB paging active! mapped %u KiB (%u pages, %u page tables)\n",
            (unsigned)(map_end / 1024u),
-           (unsigned)pages_mapped,
-           (unsigned)pts_used);
+           (unsigned)(pages_mapped * 2),
+           (unsigned)pts_total);
+    printk("[vmm] identity:  0x00000000 - 0x%08x\n", map_end);
+    printk("[vmm] high-half: 0x%08x - 0x%08x\n",
+           (unsigned)KERNEL_VIRT_OFFSET,
+           (unsigned)(KERNEL_VIRT_OFFSET + map_end));
 }
 
 /* ============================================================================
@@ -405,7 +385,7 @@ int vmm_is_mapped(uint32_t virt) {
     }
 
     uint32_t pt_phys = pde & ~0xFFFu;
-    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
     uint32_t pti = pt_index(virt);
 
     return (pt->entries[pti] & PTE_PRESENT) ? 1 : 0;
@@ -426,7 +406,7 @@ int vmm_get_physical(uint32_t virt, uint32_t* phys) {
     }
 
     uint32_t pt_phys = pde & ~0xFFFu;
-    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
     uint32_t pti = pt_index(virt);
 
     uint32_t pte = pt->entries[pti];
@@ -457,7 +437,7 @@ uint32_t vmm_get_pte(uint32_t virt) {
     }
 
     uint32_t pt_phys = pde & ~0xFFFu;
-    page_table_t* pt = (page_table_t*)(uintptr_t)pt_phys;
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
     uint32_t pti = pt_index(virt);
 
     return pt->entries[pti];
