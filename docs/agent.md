@@ -65,6 +65,6 @@ my_microkernel/
     └── kernel/            # 内核实现
         ├── arch/          #   CPU 初始化 & 汇编 stubs
         ├── cmds/          #   Shell 命令模块
-        ├── core/          #   内核核心 (kmain/pmm/vmm/shell/…)
+        ├── core/          #   内核核心 (kmain/pmm/pmm_bitmap/vmm/shell/…)
         └── drivers/       #   设备驱动实现
 ```
