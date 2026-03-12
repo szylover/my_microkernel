@@ -17,6 +17,38 @@ sudo apt install -y nasm binutils grub-pc-bin xorriso qemu-system-x86 gcc-multil
 - `grub-mkrescue` 来自 `grub-pc-bin`
 - `grub-mkrescue` 生成 ISO 通常还需要 `xorriso`
 
+### 可选：开发工具
+
+```bash
+# clangd 代码索引（需要 bear 生成 compile_commands.json）
+sudo apt install -y bear
+
+# GitHub CLI（用于从命令行创建 PR、合并分支等）
+# 安装步骤（官方源）：
+sudo mkdir -p -m 755 /etc/apt/keyrings
+wget -nv -O- https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install -y gh
+```
+
+安装后首次使用需要登录：
+
+```bash
+gh auth login
+```
+
+按提示选择 `GitHub.com` → `HTTPS` → `Login with a web browser`，浏览器会打开授权页面。
+
+常用命令：
+
+```bash
+gh pr create --base main --head <分支名>   # 创建 PR
+gh pr list                                  # 查看 PR 列表
+gh pr merge <PR编号>                        # 合并 PR
+```
+
 ## 2. 构建 ISO
 
 在项目根目录执行：
