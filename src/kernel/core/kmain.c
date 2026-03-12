@@ -157,7 +157,7 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
          *   pmm_register_backend(pmm_buddy_get_ops());   // buddy
          * 不注册则 dispatch 层 fallback 到 bitmap 默认后端。
          */
-        pmm_register_backend(pmm_buddy_get_ops());
+        pmm_register_backend(pmm_bitmap_get_ops());
 
         /* Stage-2: physical memory manager. */
         pmm_init();
