@@ -1,5 +1,12 @@
 
 ## 2026-03-12
+- PMM 可插拔后端重构：新增 `pmm_ops_t` 函数指针表接口（类似 Linux `file_operations`），支持插拔式物理内存分配器后端。
+- 新增 `pmm.c`：薄 dispatch 层，通过 `g_pmm_ops` 转发所有 PMM 调用到注册的后端。
+- 原 `pmm.c` 重命名为 `pmm_bitmap.c`：bitmap 分配器成为第一个后端，函数改名为 `pmm_bitmap_*`，末尾导出 `pmm_ops_t` 操作表。
+- 新增 `pmm_bitmap.h`：bitmap 后端内部头文件，导出 `pmm_bitmap_get_ops()`。
+- `pmm.h` 扩展：新增 `pmm_ops_t` 定义、`pmm_register_backend()`、`pmm_backend_name()`。
+- 所有 PMM 调用者（vmm.c、cmd_pmm.c、cmd_free.c、kmain.c）零改动。
+- roadmap 更新：新增 Stage 9 VMA（红黑树管理），ktmalloc 明确为空闲链表，后续 stage 重编号。
 - 阶段 7（拆除 Identity Mapping）：新增 `vmm_unmap_identity()` 清除 PD[0..767]，低地址空间不再可访问。
 - PMM 修复：bitmap 指针、selftest 内存访问、mb2 info 解引用全部改用 `PHYS_TO_VIRT()`，不再依赖 identity mapping。
 - 更新 `kmain.c`：`vmm_init()` 后将 `g_mb2_info` 从物理地址转为虚拟地址，随后调用 `vmm_unmap_identity()`。
