@@ -38,7 +38,8 @@ CFLAGS += -Iinclude/arch
 CFLAGS += -Iinclude/drivers
 CFLAGS += -Iinclude/kernel
 CFLAGS += -MMD -MP
-LDFLAGS := -m elf_i386 -T linker.ld
+LINKER_SCRIPT := src/boot/linker.ld
+LDFLAGS := -m elf_i386 -T $(LINKER_SCRIPT)
 
 # Debug build: keep symbols, disable optimizations (better stepping/backtraces).
 DEBUG ?= 0
@@ -80,7 +81,7 @@ $(BUILD_DIR)/%.o: src/kernel/%.asm | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
-$(KERNEL_ELF): $(OBJS) linker.ld | $(GRUB_DIR)
+$(KERNEL_ELF): $(OBJS) $(LINKER_SCRIPT) | $(GRUB_DIR)
 	$(LD) $(LDFLAGS) $(OBJS) -o $@
 
 $(GRUB_DIR): | $(BUILD_DIR)
@@ -126,7 +127,7 @@ compdb:
 
 # When AUTO_COMPDB=1, regenerate compdb as part of `make iso`.
 # Use AUTO_COMPDB=0 in the nested make to avoid infinite recursion.
-compile_commands.json: $(KERNEL_C_SRCS) $(KERNEL_ASM_SRCS) src/boot/boot.asm Makefile linker.ld
+compile_commands.json: $(KERNEL_C_SRCS) $(KERNEL_ASM_SRCS) src/boot/boot.asm Makefile $(LINKER_SCRIPT)
 	@command -v bear >/dev/null 2>&1 || (echo "Missing tool: bear" && echo "Install: sudo apt update && sudo apt install -y bear" && exit 2)
 	@echo "[compdb] AUTO_COMPDB=1 -> updating compile_commands.json"
 	@bear -- $(MAKE) -B $(KERNEL_ELF) AUTO_COMPDB=0

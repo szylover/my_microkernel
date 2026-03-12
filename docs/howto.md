@@ -90,10 +90,10 @@ make run
 
 优先检查：
 - `src/boot/boot.asm` 是否包含完整 Multiboot2 header（包含 end tag）
-- `linker.ld` 是否保证 `.multiboot_header` 在可加载段的前部并 `KEEP()`
+- `src/boot/linker.ld` 是否保证 `.multiboot_header` 在可加载段的前部并 `KEEP()`
 
 ## 5. 目录与文件
 
 - `src/boot/boot.asm`：Multiboot2 入口与最小裸机验证输出
-- `linker.ld`：i386 链接脚本（入口 `_start`，链接地址 1MiB）
+- `src/boot/linker.ld`：i386 链接脚本（入口 `_start`，高半区链接地址）
 - `Makefile`：构建 ELF、打包 GRUB ISO、启动 QEMU

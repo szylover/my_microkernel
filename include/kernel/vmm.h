@@ -74,6 +74,21 @@ extern "C" {
 #define VMM_ENTRIES_PER_PD  1024u   /* 页目录有 1024 个 PDE */
 
 /*
+ * High-Half Kernel 地址转换
+ *
+ * [WHY] 内核链接在虚拟地址 0xC0000000+ (high-half)，但物理内存从 0 开始。
+ *   内核的直接映射区域: virt = phys + KERNEL_VIRT_OFFSET
+ *   这两个宏用于在物理地址和虚拟地址之间转换。
+ *
+ * [CRITICAL] 仅适用于内核直接映射区域（0xC0000000 → 物理 0）。
+ *   不适用于任意虚拟地址（需要查页表）。
+ */
+#define KERNEL_VIRT_OFFSET  0xC0000000u
+
+#define PHYS_TO_VIRT(paddr) ((void*)((uint32_t)(paddr) + KERNEL_VIRT_OFFSET))
+#define VIRT_TO_PHYS(vaddr) ((uint32_t)(vaddr) - KERNEL_VIRT_OFFSET)
+
+/*
  * PDE / PTE flags (低 12 位)
  *
  * [BITFIELDS] 这些宏可以用 | 组合，例如：
