@@ -1,4 +1,11 @@
 
+## 2026-03-12
+- 阶段 7（拆除 Identity Mapping）：新增 `vmm_unmap_identity()` 清除 PD[0..767]，低地址空间不再可访问。
+- PMM 修复：bitmap 指针、selftest 内存访问、mb2 info 解引用全部改用 `PHYS_TO_VIRT()`，不再依赖 identity mapping。
+- 更新 `kmain.c`：`vmm_init()` 后将 `g_mb2_info` 从物理地址转为虚拟地址，随后调用 `vmm_unmap_identity()`。
+- 更新 `mmap.c`：添加 `vmm.h` include，`g_mb2_info` 已在 kmain 中转为虚拟地址。
+- 更新 `vmm.h`：声明 `vmm_unmap_identity()`。
+
 ## 2026-03-11
 - 阶段 3（VMM 起步）：新增 `include/kernel/vmm.h`（页目录/页表类型、PDE/PTE flags、vmm_init/vmm_map_page/vmm_unmap_page API）。
 - 阶段 3（VMM 实现）：新增 `src/kernel/core/vmm.c`（identity mapping 0–16MiB + 开启分页）、`src/kernel/arch/paging_flush.asm`（CR3 加载、CR0.PG 置位、invlpg TLB 刷新）。

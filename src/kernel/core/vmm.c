@@ -362,6 +362,44 @@ void vmm_init(void) {
            (unsigned)(KERNEL_VIRT_OFFSET + map_end));
 }
 
+void vmm_unmap_identity(void) {
+    /*
+     * 拆除 identity mapping（虚拟地址 0x00000000 - 0xBFFFFFFF）
+     *
+     * [WHY] identity mapping 只是从 boot.asm PSE 过渡到正式 4KiB 页表时的临时需要。
+     *   现在内核已经完全运行在 high-half (0xC0000000+)，
+     *   所有指针已经通过 PHYS_TO_VIRT 转换，可以安全拆除。
+     *   拆除后，低地址空间留给将来的用户态进程。
+     *
+     * [CPU STATE] 拆除后：
+     *   - PD[0..767] 全部清零（只清有效条目）
+     *   - 访问 0x00000000 - 0xBFFFFFFF 将触发 #PF
+     *   - 重新加载 CR3 刷新整个 TLB
+     *
+     * [NOTE] 被清除的 PDE 所指向的页表物理页未释放（微量泄漏，将来进程管理进入后可回收）。
+     */
+
+    if (!g_vmm_ready) {
+        return;
+    }
+
+    uint32_t first_kernel_pde = pd_index(KERNEL_VIRT_OFFSET); /* 768 */
+    uint32_t cleared = 0;
+
+    for (uint32_t i = 0; i < first_kernel_pde; i++) {
+        if (g_kernel_pd.entries[i] & PDE_PRESENT) {
+            g_kernel_pd.entries[i] = 0;
+            cleared++;
+        }
+    }
+
+    /* 重新加载 CR3 做全局 TLB 刷新（比逐页 invlpg 更彻底） */
+    uint32_t pd_phys = VIRT_TO_PHYS((uint32_t)(uintptr_t)&g_kernel_pd);
+    vmm_load_page_directory(pd_phys);
+
+    printk("[vmm] identity mapping removed (%u PDEs cleared)\n", (unsigned)cleared);
+}
+
 /* ============================================================================
  * 查询辅助函数（供 shell vmm 命令使用）
  * ============================================================================ */

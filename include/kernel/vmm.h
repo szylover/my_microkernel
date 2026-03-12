@@ -149,6 +149,16 @@ typedef struct {
 void vmm_init(void);
 
 /*
+ * vmm_unmap_identity — 拆除低地址 identity mapping
+ *
+ * 清除 PD[0..767]，使虚拟地址 0x00000000 - 0xBFFFFFFF 不再可访问。
+ * 调用前必须确保所有指针已经通过 PHYS_TO_VIRT 转换为 high-half 地址。
+ *
+ * [CPU STATE] 调用后任何低地址访问将触发 #PF。
+ */
+void vmm_unmap_identity(void);
+
+/*
  * vmm_map_page — 将一个虚拟页映射到一个物理页
  *
  * @param virt   虚拟地址（必须 4KiB 对齐）

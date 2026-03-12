@@ -150,6 +150,15 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
 
         /* Stage-3: virtual memory manager (identity mapping + paging). */
         vmm_init();
+
+        /*
+         * PMM init 已经结束，将 g_mb2_info 从物理地址转换为虚拟地址。
+         * 之后 shell 命令（mmap 等）通过 high-half 地址访问 Multiboot2 info。
+         */
+        g_mb2_info = (const void*)PHYS_TO_VIRT((uint32_t)(uintptr_t)g_mb2_info);
+
+        /* 拆除 identity mapping，低地址空间留给将来的用户态进程。 */
+        vmm_unmap_identity();
     }
 
     /* --- IRQ + keyboard + shell --- */

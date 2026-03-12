@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "pmm.h"
+#include "vmm.h"
 
 #include "printk.h"
 
@@ -25,9 +26,9 @@
 #define PMM_MAX_REGIONS 32u
 
 /*
- * [ASSUMPTION]
- *   目前内核仍处于 identity mapping（物理地址 == 线性地址）。
- *   因此：PMM 返回的“物理页地址”可以直接当作指针使用。
+ * [NOTE]
+ *   PMM 返回的是物理地址。调用者需要通过 PHYS_TO_VIRT() 转换为虚拟地址
+ *   才能解引用。PMM 内部的 bitmap 指针也使用虚拟地址存储。
  */
 
 /* Multiboot2 info pointer is stored by kmain.c for later use. */
@@ -368,7 +369,8 @@ static void pmm_reserve_multiboot2_info(void) {
 	 *   后续 `mmap` 命令会解析到垃圾数据甚至崩溃。
 	 */
 	uint32_t mb2_phys = (uint32_t)(uintptr_t)g_mb2_info;
-	uint32_t mb2_size = *(const uint32_t*)((const uint8_t*)g_mb2_info + 0);
+	const uint8_t* mb2_virt = (const uint8_t*)PHYS_TO_VIRT(mb2_phys);
+	uint32_t mb2_size = *(const uint32_t*)(mb2_virt + 0);
 	bitmap_mark_used_range(mb2_phys, mb2_phys + mb2_size);
 }
 
@@ -501,9 +503,9 @@ static void pmm_selftest(void) {
 		return;
 	}
 
-	/* Write + verify a simple per-page pattern. */
+	/* Write + verify a simple per-page pattern (convert phys→virt). */
 	for (unsigned i = 0; i < TEST_PAGES; i++) {
-		uint32_t* w = (uint32_t*)pages[i];
+		uint32_t* w = (uint32_t*)PHYS_TO_VIRT((uint32_t)(uintptr_t)pages[i]);
 		uint32_t pattern = 0xC0FFEE00u ^ (i * 0x11111111u);
 		for (unsigned j = 0; j < (PMM_PAGE_SIZE / 4u); j++) {
 			w[j] = pattern;
@@ -560,7 +562,7 @@ static int pmm_add_region(
 	struct pmm_region* r = &g_regions[g_region_count];
 	r->base = layout.managed_start;
 	r->pages = layout.pages;
-	r->bitmap = (uint8_t*)(uintptr_t)layout.managed_start;
+	r->bitmap = (uint8_t*)PHYS_TO_VIRT(layout.managed_start);
 	r->bitmap_bytes = layout.bitmap_bytes;
 	r->bitmap_storage_bytes = layout.bitmap_storage_bytes;
 	r->bitmap_pages = layout.bitmap_pages;
@@ -587,7 +589,7 @@ void pmm_init(void) {
 		return;
 	}
 
-	const uint8_t* base = (const uint8_t*)g_mb2_info;
+	const uint8_t* base = (const uint8_t*)PHYS_TO_VIRT((uint32_t)(uintptr_t)g_mb2_info);
 	uint32_t total_size = *(const uint32_t*)(base + 0);
 
 	const struct mb2_tag* tag = NULL;
@@ -609,7 +611,7 @@ void pmm_init(void) {
 	uint32_t kernel_start = (uint32_t)(uintptr_t)__kernel_phys_start;
 	uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
 	uint32_t mb2_start = (uint32_t)(uintptr_t)g_mb2_info;
-	uint32_t mb2_end = mb2_start + *(const uint32_t*)((const uint8_t*)g_mb2_info + 0);
+	uint32_t mb2_end = mb2_start + *(const uint32_t*)((const uint8_t*)PHYS_TO_VIRT(mb2_start) + 0);
 
 	uint32_t added = 0;
 	for (const uint8_t* p = entries; p + mmap_tag->entry_size <= entries_end; p += mmap_tag->entry_size) {
