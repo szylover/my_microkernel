@@ -1,5 +1,10 @@
 
 ## 2026-03-12
+- 新增 `pmm_buddy.c`：buddy system 物理内存分配器后端（Linux 风格），支持 order 0..10 的 2^n 页分裂/合并。
+- 新增 `pmm_buddy.h`：buddy 后端内部头文件，导出 `pmm_buddy_get_ops()`。
+- `kmain.c`：注册 buddy 为默认 PMM 后端（`pmm_register_backend(pmm_buddy_get_ops())`）。
+- `boot.asm`：扩展 boot PSE 映射从 16MiB 到 1GiB（256 × 4MiB PSE 页循环），支持 buddy 在 vmm_init 前分配高地址页。
+- `vmm.c`：vmm_init 映射范围扩展到覆盖 PMM 全部物理页（查询 `pmm_managed_base()`/`pmm_total_pages()`），不再硬编码 16MiB。
 - PMM 可插拔后端重构：新增 `pmm_ops_t` 函数指针表接口（类似 Linux `file_operations`），支持插拔式物理内存分配器后端。
 - 新增 `pmm.c`：薄 dispatch 层，通过 `g_pmm_ops` 转发所有 PMM 调用到注册的后端。
 - 原 `pmm.c` 重命名为 `pmm_bitmap.c`：bitmap 分配器成为第一个后端，函数改名为 `pmm_bitmap_*`，末尾导出 `pmm_ops_t` 操作表。

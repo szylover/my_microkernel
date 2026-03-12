@@ -9,6 +9,7 @@
 #include "printk.h"
 
 #include "pmm.h"
+#include "pmm_buddy.h"
 #include "vmm.h"
 
 #include "pic.h"
@@ -145,7 +146,10 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         g_mb2_info = mb2_info;
         mb2_dump_tags(mb2_info);
 
-        /* Stage-2: physical memory manager (bitmap allocator). */
+        /* Stage-8: register buddy allocator as PMM backend. */
+        pmm_register_backend(pmm_buddy_get_ops());
+
+        /* Stage-2: physical memory manager. */
         pmm_init();
 
         /* Stage-3: virtual memory manager (identity mapping + paging). */
