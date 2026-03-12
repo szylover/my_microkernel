@@ -34,59 +34,60 @@
 | 5 | PMM（物理内存） | Multiboot2 mmap 解析多 region、bitmap 分配器、`pmm_alloc/free_page` | ✅ |
 | 6 | VMM（虚拟内存） | 两级页表、identity mapping 0-16MiB、CR3/CR0.PG 开启分页、Page Fault handler | ✅ |
 
-### 里程碑 C：高级内存
+### 里程碑 C：高级内存 ← **当前位置**
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
 | 7 | High-Half Kernel | 内核映射到 `0xC0000000+`，拆除低地址 identity mapping | ✅ |
-| 8 | 内核堆 (kmalloc) | `kmalloc(size)` / `kfree(ptr)`，空闲块管理（链表或红黑树） | |
+| 8 | 内核堆 (kmalloc) | `kmalloc(size)` / `kfree(ptr)`，空闲链表分配器（first-fit） | |
+| 9 | VMA（虚拟内存区域） | `vm_area_struct` 结构、红黑树管理 VMA、内核地址空间 VMA 跟踪、Page Fault 按 VMA 分发权限检查 | |
 
-### 里程碑 D：进程与用户态 ← **当前位置**
+### 里程碑 D：进程与用户态
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 9 | TSS 与 Ring 3 | Task State Segment、用户态栈、`iret` 跳转到 Ring 3 | |
-| 10 | ELF 加载器 | 解析 ELF32 文件头、加载 `.text`/`.data` 到用户地址空间 | |
-| 11 | 系统调用 (Syscall) | `int 0x80` 或 `sysenter`，实现 `write`/`exit`/`brk` 等基础 syscall | |
-| 12 | 进程管理 | PCB（进程控制块）、进程创建/销毁、`fork`/`exec`/`waitpid` | |
-| 13 | 调度器 | 时间片轮转（Round-Robin）、上下文切换（寄存器保存/恢复 + CR3 切换） | |
+| 10 | TSS 与 Ring 3 | Task State Segment、用户态栈、`iret` 跳转到 Ring 3 | |
+| 11 | ELF 加载器 | 解析 ELF32 文件头、加载 `.text`/`.data` 到用户地址空间，VMA 记录各段映射 | |
+| 12 | 系统调用 (Syscall) | `int 0x80` 或 `sysenter`，实现 `write`/`exit`/`brk` 等基础 syscall | |
+| 13 | 进程管理 | PCB（进程控制块）、per-process VMA 树与页表、`fork`（COW + VMA 复制）/`exec`/`waitpid` | |
+| 14 | 调度器 | 时间片轮转（Round-Robin）、上下文切换（寄存器保存/恢复 + CR3 切换） | |
 
 ### 里程碑 E：文件系统
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 14 | VFS 层 | 虚拟文件系统接口：`open`/`read`/`write`/`close`/`stat`/`readdir` | |
-| 15 | initrd / ramfs | 内存文件系统（把初始文件打包进内核镜像，让 ELF 加载器能读文件） | |
-| 16 | FAT32 或 ext2 | 磁盘文件系统（只读优先，后加写入），ATA/AHCI 磁盘驱动 | |
-| 17 | 设备文件 | `/dev/null`、`/dev/serial`、`/dev/console` 等字符设备 | |
+| 15 | VFS 层 | 虚拟文件系统接口：`open`/`read`/`write`/`close`/`stat`/`readdir` | |
+| 16 | initrd / ramfs | 内存文件系统（把初始文件打包进内核镜像，让 ELF 加载器能读文件） | |
+| 17 | FAT32 或 ext2 | 磁盘文件系统（只读优先，后加写入），ATA/AHCI 磁盘驱动 | |
+| 18 | 设备文件 | `/dev/null`、`/dev/serial`、`/dev/console` 等字符设备 | |
 
 ### 里程碑 F：POSIX 兼容层
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 18 | 信号 (Signals) | `SIGINT`/`SIGTERM`/`SIGKILL`、信号投递与默认处理 | |
-| 19 | 管道与重定向 | `pipe()`、`dup2()`，Shell 支持 `|` 和 `>` | |
-| 20 | mmap | 用户态 `mmap`/`munmap`（匿名映射 + 文件映射） | |
-| 21 | 用户态 libc | 移植 musl-libc（或精简子集），提供 `printf`/`malloc`/`fopen` 等 | |
-| 22 | 多用户 Shell | 用户态 `/bin/sh`（非内核内置），支持环境变量、PATH 查找、job control | |
+| 19 | 信号 (Signals) | `SIGINT`/`SIGTERM`/`SIGKILL`、信号投递与默认处理 | |
+| 20 | 管道与重定向 | `pipe()`、`dup2()`，Shell 支持 `|` 和 `>` | |
+| 21 | mmap | 用户态 `mmap`/`munmap`（匿名映射 + 文件映射），基于 VMA 管理 | |
+| 22 | 用户态 libc | 移植 musl-libc（或精简子集），提供 `printf`/`malloc`/`fopen` 等 | |
+| 23 | 多用户 Shell | 用户态 `/bin/sh`（非内核内置），支持环境变量、PATH 查找、job control | |
 
 ### 里程碑 G：移植 GCC 与 Vim
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 23 | 交叉编译工具链 | 在宿主机构建 `i686-szy-gcc` 交叉编译器（GCC + binutils） | |
-| 24 | 移植 GCC | 让 GCC 能在 SZY-KERNEL 上编译并运行简单 C 程序 | |
-| 25 | 终端子系统 | termios、伪终端（PTY）、VT100 转义序列解析 | |
-| 26 | 移植 Vim | 让 Vim 能在 SZY-KERNEL 上运行（依赖 termios + libc + 文件系统） | |
+| 24 | 交叉编译工具链 | 在宿主机构建 `i686-szy-gcc` 交叉编译器（GCC + binutils） | |
+| 25 | 移植 GCC | 让 GCC 能在 SZY-KERNEL 上编译并运行简单 C 程序 | |
+| 26 | 终端子系统 | termios、伪终端（PTY）、VT100 转义序列解析 | |
+| 27 | 移植 Vim | 让 Vim 能在 SZY-KERNEL 上运行（依赖 termios + libc + 文件系统） | |
 
 ### 里程碑 H：网络
 
 | Stage | 名称 | 内容 | 状态 |
 |-------|------|------|------|
-| 27 | 网卡驱动 | Intel E1000 (QEMU 默认网卡) 驱动：收发以太网帧 | |
-| 28 | TCP/IP 协议栈 | ARP、IP、ICMP (ping)、UDP、TCP（可考虑移植 lwIP 或自写精简版） | |
-| 29 | Socket API | `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv` | |
-| 30 | 网络工具 | 用户态 `ping`、简易 HTTP client | |
+| 28 | 网卡驱动 | Intel E1000 (QEMU 默认网卡) 驱动：收发以太网帧 | |
+| 29 | TCP/IP 协议栈 | ARP、IP、ICMP (ping)、UDP、TCP（可考虑移植 lwIP 或自写精简版） | |
+| 30 | Socket API | `socket`/`bind`/`listen`/`accept`/`connect`/`send`/`recv` | |
+| 31 | 网络工具 | 用户态 `ping`、简易 HTTP client | |
 
 ---
 
