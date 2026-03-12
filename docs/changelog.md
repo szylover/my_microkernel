@@ -7,7 +7,7 @@
 - 更新 `vmm.h`：声明 `vmm_unmap_identity()`。
 
 ## 2026-03-11
-- 阶段 3（VMM 起步）：新增 `include/kernel/vmm.h`（页目录/页表类型、PDE/PTE flags、vmm_init/vmm_map_page/vmm_unmap_page API）。
+- 阶段 3（VMM 起步）：新增 `src/include/kernel/vmm.h`（页目录/页表类型、PDE/PTE flags、vmm_init/vmm_map_page/vmm_unmap_page API）。
 - 阶段 3（VMM 实现）：新增 `src/kernel/core/vmm.c`（identity mapping 0–16MiB + 开启分页）、`src/kernel/arch/paging_flush.asm`（CR3 加载、CR0.PG 置位、invlpg TLB 刷新）。
 - 更新 `kmain.c`：在 pmm_init() 后调用 vmm_init() 开启分页。
 
@@ -27,9 +27,9 @@
 - 阶段 2（Keyboard 起步）：新增 IRQ1 键盘 scancode->ASCII（含 Shift）与环形缓冲区，对外提供 `keyboard_getc/keyboard_try_getc`。
 - 阶段 2（Shell 起步）：新增最小交互式 shell（`szy-kernel >`，行编辑 + 命令表），当前仅实现 `cls`（其余命令按 docs 规划逐步加回）。
 - 新增 `docs/shell.md`：记录 cmd 风格 shell 的 UX/分层/命令规划（help/info/cls/mmap/cpu）与阶段落地路线。
-- 阶段 2（Command 模块化）：新增 `include/kernel/cmd.h` 命令接口；将 `cls` 拆为独立命令模块（`src/kernel/cmds/cmd_cls.c`），shell 通过注册表调用。
-- 阶段 2（Console 输入层）：新增 `include/kernel/console.h`/`src/kernel/core/console.c`，统一键盘（IRQ1 缓冲）与串口（轮询）输入；shell 只依赖 console。
+- 阶段 2（Command 模块化）：新增 `src/include/kernel/cmd.h` 命令接口；将 `cls` 拆为独立命令模块（`src/kernel/cmds/cmd_cls.c`），shell 通过注册表调用。
+- 阶段 2（Console 输入层）：新增 `src/include/kernel/console.h`/`src/kernel/core/console.c`，统一键盘（IRQ1 缓冲）与串口（轮询）输入；shell 只依赖 console。
 - 阶段 2（Shell 命令）：新增 `shutdown` 命令模块（`src/kernel/cmds/cmd_shutdown.c`），尝试触发 QEMU/Bochs 关机，失败则 halt。
 - 阶段 2（Shell 命令）：新增 `cmds` 命令模块（`src/kernel/cmds/cmd_cmds.c`），列出当前所有可用命令。
-- 开发体验：新增 `.clangd`（clangd fallback 编译参数）、`make compdb`/`tools/compdb.sh`（通过 bear 生成 `compile_commands.json`），并在 `docs/agent.md` 补充 VS Code + clangd 配置说明。
+- 开发体验：新增 `.clangd`（clangd fallback 编译参数）、`make compdb`/`scripts/compdb.sh`（通过 bear 生成 `compile_commands.json`），并在 `docs/agent.md` 补充 VS Code + clangd 配置说明。
 - 更新 `docs/agent.md`：明确 clangd/`compile_commands.json` 的“每次改动同步更新”规则，并补充变更记录同步建议。

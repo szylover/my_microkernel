@@ -95,7 +95,7 @@ make gdb
 
 - 先确认你已经在终端 A 执行了 `make debug`，并且 QEMU 没退出。
 - 端口不一致时：
-  - `make debug QEMU_GDB_PORT=1234` 与 `tools/kernel.gdb` 里 `target remote :1234` 必须一致。
+  - `make debug QEMU_GDB_PORT=1234` 与 `scripts/kernel.gdb` 里 `target remote :1234` 必须一致。
 
 ### 5.2 单步“跳来跳去”或 `bt` 很奇怪
 
@@ -108,7 +108,7 @@ make gdb
 
 ## 6. 附：项目内置的 GDB 脚本
 
-- 脚本位置：`tools/kernel.gdb`
+- 脚本位置：`scripts/kernel.gdb`
 - 它会做：设置架构为 i386、加载符号、连接 `:1234`、在 `kmain` 下断。
 
 ## 7. VS Code 集成调试（推荐）

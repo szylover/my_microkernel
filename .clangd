@@ -7,8 +7,9 @@ CompileFlags:
     -ffreestanding,
     -fno-pie,
     -fno-stack-protector,
-    -Iinclude,
-    -Iinclude/arch,
-    -Iinclude/drivers,
-    -Iinclude/kernel
+    -Isrc/include,
+    -Isrc/include/arch,
+    -Isrc/include/drivers,
+    -Isrc/include/kernel,
+    # NOTE: clangd runs from workspace root, so paths stay as src/include/*
   ]

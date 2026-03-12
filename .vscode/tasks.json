@@ -12,7 +12,7 @@
     {
       "label": "Start QEMU (gdbstub)",
       "type": "shell",
-      "command": "${workspaceFolder}/tools/run_qemu_gdb.sh",
+      "command": "${workspaceFolder}/scripts/run_qemu_gdb.sh",
       "dependsOn": ["Build ISO (DEBUG=1)"],
       "isBackground": true,
       "problemMatcher": [
