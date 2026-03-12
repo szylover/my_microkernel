@@ -155,13 +155,83 @@ static const char* exception_name(uint32_t v) {
 }
 
 /*
+ * 读取 CR2 寄存器 — Page Fault 时 CPU 自动写入触发故障的虚拟地址。
+ *
+ * [WHY]
+ *   当发生 #PF (vector 14) 时，CR2 保存了试图访问但翻译失败的虚拟地址。
+ *   这是调试分页问题的关键信息：它告诉你 **是谁** 引起了 page fault。
+ */
+static inline uint32_t read_cr2(void) {
+    uint32_t val;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(val));
+    return val;
+}
+
+/*
+ * 解码 Page Fault 错误码 (error code)
+ *
+ * [BITFIELDS] #PF 错误码格式（由 CPU 自动压栈）：
+ *
+ *   bit 0 (P)    : 0 = 页面不存在 (not-present)
+ *                  1 = 页面存在但权限违规 (protection violation)
+ *   bit 1 (W/R)  : 0 = 读操作引起
+ *                  1 = 写操作引起
+ *   bit 2 (U/S)  : 0 = 在内核态 (CPL=0) 发生
+ *                  1 = 在用户态 (CPL=3) 发生
+ *   bit 3 (RSVD) : 1 = 页表条目中的保留位被置位
+ *   bit 4 (I/D)  : 1 = 取指令引起（instruction fetch）
+ *
+ * 例子：err=0x00 → 内核态读一个不存在的页
+ *       err=0x02 → 内核态写一个不存在的页
+ *       err=0x05 → 用户态读一个存在但权限不足的页
+ */
+static void page_fault_handler(const regs_t* r) {
+    uint32_t fault_addr = read_cr2();
+    uint32_t err = r->err_code;
+
+    printk("\n======== PAGE FAULT ========\n");
+    printk("Faulting address (CR2): 0x%08x\n", fault_addr);
+    printk("Error code: 0x%08x\n", err);
+
+    /* 逐位解码 */
+    printk("  %s\n", (err & 0x01u) ? "Protection violation (page present)"
+                                    : "Page not present");
+    printk("  Caused by: %s\n", (err & 0x02u) ? "write" : "read");
+    printk("  CPU mode:  %s\n", (err & 0x04u) ? "user (Ring 3)" : "kernel (Ring 0)");
+    if (err & 0x08u) {
+        printk("  Reserved bit set in page table entry!\n");
+    }
+    if (err & 0x10u) {
+        printk("  Caused by instruction fetch\n");
+    }
+
+    printk("EIP: 0x%08x\n", r->eip);
+    printk("============================\n");
+}
+
+/*
  * 汇编 stub 会调用这个函数。
  *
  * 为什么要把异常处理放在 C：
  * - 方便打印/解码（异常名、错误码、寄存器）
- * - 后面可以更容易拓展：page fault 解码 CR2、#GP 解码 selector 等
+ * - #PF 特殊处理：读 CR2、解码错误码
  */
 void isr_handler_c(const regs_t* r) {
+    /*
+     * #PF (Page Fault, vector 14) 需要特殊处理：读 CR2、解码错误码。
+     *
+     * [WHY] 分离出来方便将来做按需分页（demand paging）时
+     *       在此处分配物理页并恢复执行，而非直接 panic。
+     */
+    if (r->int_no == 14) {
+        page_fault_handler(r);
+        /* 当前阶段：page fault 是不可恢复的，halt */
+        printk("Kernel panic: #PF Page Fault\n");
+        for (;;) {
+            __asm__ volatile("hlt");
+        }
+    }
+
     printk(
         "\n[isr] %s vector=%u err=0x%08x eip=0x%08x\n",
         exception_name(r->int_no),
@@ -171,14 +241,14 @@ void isr_handler_c(const regs_t* r) {
     );
 
     /*
-     * 对 breakpoint（int3）我们允许返回，这样可以用它做“自检”。
+     * 对 breakpoint（int3）我们允许返回，这样可以用它做"自检"。
      * 其他异常先简单 halt，避免继续运行导致更难排查。
      */
     if (r->int_no == 3) {
         return;
     }
 
-    /* 进入这里说明发生了“不可恢复”的 CPU 异常。 */
+    /* 进入这里说明发生了"不可恢复"的 CPU 异常。 */
     printk("Kernel panic: ");
     printk("%s\n", exception_name(r->int_no));
 

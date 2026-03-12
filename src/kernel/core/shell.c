@@ -33,6 +33,7 @@ extern const cmd_t cmd_cmds;
 extern const cmd_t cmd_mmap;
 extern const cmd_t cmd_free;
 extern const cmd_t cmd_pmm;
+extern const cmd_t cmd_vmm;
 
 static const cmd_t* g_cmds[] = {
     &cmd_cls,
@@ -41,6 +42,7 @@ static const cmd_t* g_cmds[] = {
     &cmd_mmap,
     &cmd_free,
     &cmd_pmm,
+    &cmd_vmm,
 };
 
 unsigned shell_command_count(void) {

@@ -9,6 +9,7 @@
 #include "printk.h"
 
 #include "pmm.h"
+#include "vmm.h"
 
 #include "pic.h"
 #include "keyboard.h"
@@ -146,6 +147,9 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
 
         /* Stage-2: physical memory manager (bitmap allocator). */
         pmm_init();
+
+        /* Stage-3: virtual memory manager (identity mapping + paging). */
+        vmm_init();
     }
 
     /* --- IRQ + keyboard + shell --- */
