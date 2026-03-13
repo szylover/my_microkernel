@@ -214,6 +214,37 @@ int vmm_get_physical(uint32_t virt, uint32_t* phys);
 uint32_t vmm_get_pde(uint32_t pd_idx);
 uint32_t vmm_get_pte(uint32_t virt);
 
+/*
+ * vmm_alloc_pages — 分配 count 个连续虚拟页并映射物理内存
+ *
+ * @param count  需要的页数（每页 4KiB）
+ * @return       连续虚拟地址的起始指针，NULL = OOM
+ *
+ * [WHY] kmalloc 等高层分配器需要一块"连续可用的内存区域"。
+ *   但 PMM 给的物理页是散的（碎片化），不能直接当连续内存用。
+ *   这个函数的作用是：
+ *     ① 挑一段空闲的连续虚拟地址（比如从 0xD0000000 开始往上推）
+ *     ② 向 PMM 申请 count 个物理页（不需要连续）
+ *     ③ 用 vmm_map_page 把每个虚拟页映射到对应物理页
+ *   返回的虚拟指针可以直接读写，MMU 硬件自动做地址翻译。
+ *
+ * [CPU STATE] 分配后新的虚拟页在页表中标记为 Present + Writable。
+ */
+void* vmm_alloc_pages(unsigned count);
+
+/*
+ * vmm_free_pages — 释放由 vmm_alloc_pages 分配的虚拟页
+ *
+ * @param vaddr  vmm_alloc_pages 返回的指针
+ * @param count  当初分配的页数（调用者负责记住）
+ *
+ * [WHY] 释放过程是 alloc 的逆操作：
+ *     ① 对每页：查页表拿到物理地址 → pmm_free_page() 归还物理页
+ *     ② 对每页：vmm_unmap_page() 清除 PTE + 刷 TLB
+ *   虚拟地址空间回收暂不实现（简单的 bump allocator 不回收）。
+ */
+void vmm_free_pages(void* vaddr, unsigned count);
+
 /* 返回 VMM 是否已初始化并开启分页 */
 int vmm_is_ready(void);
 

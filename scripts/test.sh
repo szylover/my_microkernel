@@ -241,6 +241,40 @@ if [[ "${TEST_PMM}" == "1" ]]; then
   echo "[ OK ] pmm command"
 fi
 
+# Optional: verify `heap test` (vmm_alloc_pages / vmm_free_pages selftest).
+# Enable with: TEST_HEAP=1 make test
+TEST_HEAP=${TEST_HEAP:-0}
+
+if [[ "${TEST_HEAP}" == "1" ]]; then
+  echo "[test] cmd: heap test (vmm_alloc_pages selftest)"
+  LOG_HEAP_RAW="${LOG_DIR}/serial-heap-${TS}.raw.log"
+  LOG_HEAP="${LOG_DIR}/serial-heap-${TS}.log"
+
+  QEMU_TIMEOUT_HEAP_SEC=${QEMU_TIMEOUT_HEAP_SEC:-8}
+
+  ({
+    sleep 1
+    printf 'heap test\n'
+  } ) | (timeout "${QEMU_TIMEOUT_HEAP_SEC}s" "${QEMU_BIN}" \
+    -cdrom "${ISO_IMAGE}" \
+    -serial stdio \
+    -display none \
+    -no-reboot \
+    -no-shutdown \
+    >"${LOG_HEAP_RAW}" 2>&1) || true
+
+  tr -d '\r' <"${LOG_HEAP_RAW}" >"${LOG_HEAP}" || true
+
+  if ! grep -Fq -- "[heap-test] === ALL PASS ===" "${LOG_HEAP}"; then
+    echo "[FAIL] heap test: missing 'ALL PASS' marker"
+    echo "[test] heap log (last 80 lines):"
+    tail -n 80 "${LOG_HEAP}" || true
+    exit 1
+  fi
+
+  echo "[ OK ] heap test (vmm_alloc_pages selftest)"
+fi
+
 if [[ "${fail}" -ne 0 ]]; then
   echo "[test] RESULT: FAIL"
   echo "[test] Tip: open the log file to see what printed."
