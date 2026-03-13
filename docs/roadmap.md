@@ -42,6 +42,15 @@
 | 8 | 内核堆 (kmalloc) | `kmalloc(size)` / `kfree(ptr)`，空闲链表分配器（first-fit） | ✅ |
 | 9 | VMA（虚拟内存区域） | `vm_area_struct` 结构、红黑树管理 VMA、内核地址空间 VMA 跟踪、Page Fault 按 VMA 分发权限检查 | |
 
+### 里程碑 C.final：内存子系统优化
+
+> Stage 9 VMA 完成后，切换到生产级内存后端组合，为里程碑 D 做准备。
+
+| Stage | 名称 | 内容 | 状态 |
+|-------|------|------|------|
+| C.f1 | 切换 buddy + slab | `kconfig.h` 切 `KCONFIG_PMM_BACKEND=1` (buddy) + `KCONFIG_HEAP_BACKEND=1` (slab)，跑 `heap test` 验证，设为默认 | |
+| C.f2 | 内存子系统集成测试 | 在 buddy + slab + VMA 下全面回归测试（pmm/heap/vmm 命令），确认无碎片/泄漏 | |
+
 ### 里程碑 D：进程与用户态
 
 | Stage | 名称 | 内容 | 状态 |
