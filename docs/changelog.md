@@ -1,13 +1,13 @@
 
 ## 2026-03-13
+- 阶段 8（kmalloc 完成）：新增 `src/kernel/mm/heap_first_fit.c`，first-fit 空闲链表堆后端（双向链表 block_header，支持向前/向后合并）。
+- `vmm.h` 新增堆虚拟地址区间常量：`KHEAP_START` (0xE0000000) / `KHEAP_MAX_SIZE` (256MiB) / `KHEAP_END`。
+- `kmalloc.h` 新增 `heap_first_fit_get_ops()` 后端声明。
+- `kmalloc.c`：`kmalloc_init()` 实现——在 KHEAP_START 映射初始 16 页 (64KiB) 物理页，调用后端 init 建立空闲链表。
+- `kmain.c`：引导末尾注册 first-fit 后端并调用 `kmalloc_init()`。
+- `cmd_heap.c` 重写：从调 `vmm_alloc_pages` 改为调 `kmalloc/kfree`，单位从"页"变为"字节"，支持 8 个 slot 追踪，selftest 覆盖 alloc/write/read/free/stats/reuse。
+- 更新 `docs/memory-commands.md`：heap 命令文档改为 kmalloc 语义，新增合并逻辑调试组合。
 - 重构：将内存管理文件从 `kernel/core/` 拆分到 `kernel/mm/`（pmm/pmm_bitmap/pmm_buddy/vmm/kmalloc/mmap），core/ 只保留入口和基础设施（kmain/shell/printk/console）。
-- 阶段 8（kmalloc 起步）：新增 `include/kernel/kmalloc.h`（`heap_ops_t` 可插拔后端接口、`kheap_stats_t` 统计结构、`kmalloc`/`kfree`/`kheap_get_stats` 公开 API）。
-- 新增 `src/kernel/mm/kmalloc.c`：dispatch 层空壳（无后端时安全返回 NULL），和 `pmm.c` 相同的转发模式。
-- VMM 新增 `vmm_alloc_pages(count)` / `vmm_free_pages(vaddr, count)`：批量分配连续虚拟页并映射物理内存（bump allocator），为 kmalloc 堆提供底层支持。
-- `vmm_init()` 末尾初始化 `g_next_vaddr` 水位线（直接映射区顶部向上对齐到 4MiB）。
-- 新增 `cmd_heap.c`：`heap` shell 命令（status/alloc/free/test），用于测试 vmm_alloc_pages 分配/释放闭环。
-- `test.sh` 新增 `TEST_HEAP=1` 自动化测试（验证 alloc/write/read/free/PMM 一致性）。
-- 新增 `docs/memory-commands.md`：内存调试命令速查表（free/mmap/pmm/vmm/heap 全部子命令 + 调试组合）。
 
 ## 2026-03-12
 - 合并 `pmm_bitmap.h` + `pmm_buddy.h` 为 `pmm_backends.h`：所有 PMM 后端统一在一个头文件声明，切换后端无需加删 #include。

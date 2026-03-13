@@ -11,6 +11,7 @@
 #include "pmm.h"
 #include "pmm_backends.h"
 #include "vmm.h"
+#include "kmalloc.h"
 
 /* core: 内核基础设施 */
 #include "printk.h"
@@ -173,6 +174,10 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
 
         /* 拆除 identity mapping，低地址空间留给将来的用户态进程。 */
         vmm_unmap_identity();
+
+        /* Stage-8: 内核堆。注册 first-fit 后端，映射初始页并初始化。 */
+        kmalloc_register_backend(heap_first_fit_get_ops());
+        kmalloc_init();
     }
 
     /* --- IRQ + keyboard + shell --- */

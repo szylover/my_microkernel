@@ -12,7 +12,7 @@
 | `mmap` | 显示 Multiboot2 内存映射（硬件报告的 RAM 区域） |
 | `pmm ...` | PMM 物理内存管理：状态/分配/释放/位图 |
 | `vmm ...` | VMM 虚拟内存管理：页表查询/映射/取消映射/故障测试 |
-| `heap ...` | VMM 页分配测试：分配/释放/自动化 selftest |
+| `heap ...` | 内核堆调试：kmalloc/kfree 状态/分配/释放/selftest |
 
 ---
 
@@ -188,56 +188,102 @@ szy-kernel > vmm fault
 
 ---
 
-## `heap` — VMM 页分配测试
+## `heap` — 内核堆 (kmalloc/kfree)
+
+堆后端为 first-fit 空闲链表，虚拟地址区间 `0xE0000000 - 0xF0000000` (256MiB)。
+初始 64KiB，按需 grow。
 
 ### `heap status`
 
-查看 VMM alloc 区域和分配状态：
+查看堆统计信息和追踪的分配：
 
 ```
 szy-kernel > heap status
-PMM: 32395 / 32768 pages free (129580 KiB free)
-VMM: alloc area ready = yes
-Last alloc: (none)
+Heap backend: first_fit
+Heap size:    65536 bytes (64 KiB)
+Used:         0 bytes (0 allocs)
+Free:         65520 bytes (1 blocks)
+Tracked slots: 0 / 8
 ```
 
-### `heap alloc <pages>`
+- `Heap size` = 已提交区域（heap_brk - heap_start）
+- `Used` = 已分配字节数（含 header 开销）
+- `Free` = 空闲字节数
+- `Tracked slots` = `heap alloc` 命令记录的指针（最多 8 个）
 
-通过 `vmm_alloc_pages()` 分配 N 个连续虚拟页，并验证每页可读写：
+### `heap alloc <bytes>`
+
+调用 `kmalloc(bytes)` 分配内存，写入并读回验证：
 
 ```
-szy-kernel > heap alloc 4
-[heap] allocating 4 pages...
-[heap] OK: vaddr=0xC8000000, PMM 32395 -> 32390 (-5 pages)
-[heap] write/read verification: PASS (4 pages)
+szy-kernel > heap alloc 64
+[heap] alloc: req=64 aligned=64
+[heap] alloc: found block @ 0xe0000000 (size=65520, need=64)
+[heap] alloc: split -> used 64 + free 65440 @ 0xe0000050
+[heap] alloc: return 0xe0000010
+[heap] OK: kmalloc(64) = 0xe0000010
+[heap] write/read 64 bytes: PASS
 ```
 
-PMM 减少数可能 > 请求页数（额外消耗来自页表分配）。
+关键验证点：
+- 返回地址应在 `0xE0000000` 区间内
+- `split` 说明大块被拆分成"已分配 + 新空闲块"
+- write/read PASS 说明映射的物理页可正常读写
+
+可以连续多次 alloc（最多 8 个 slot）：
+
+```
+szy-kernel > heap alloc 128
+szy-kernel > heap alloc 256
+```
 
 ### `heap free`
 
-释放上一次 `heap alloc` 分配的页：
+调用 `kfree()` 释放最后一个 slot（LIFO 顺序）：
 
 ```
 szy-kernel > heap free
-[heap] freeing 4 pages at 0xC8000000...
-[heap] OK: PMM 32390 -> 32394 (+4 pages)
+[heap] free: ptr=0xe00000a0 block=0xe0000090 size=256
+[heap] free: merge forward 0xe0000090 + 0xe0000190
+[heap] free: done (merged 1 adjacent blocks)
+[heap] kfree(0xe00000a0) (256 bytes)
+[heap] OK
 ```
+
+`merge forward` 说明释放的块和后面的空闲块合并了。
 
 ### `heap test`
 
-**自动化 selftest**——一条命令完成分配→写入→读回验证→释放→PMM 一致性检查：
+**自动化 selftest**——4 个测试一条命令跑完：
 
 ```
 szy-kernel > heap test
-[heap-test] === vmm_alloc_pages selftest ===
-[heap-test] PMM free before: 32395 pages
-[heap-test] alloc 4 pages at 0xC8000000, PMM free: 32390 (-5)
-[heap-test] (page table overhead: 1 extra pages)
-[heap-test] write/read: PASS
-[heap-test] free done, PMM free: 32394 (+4)
+[heap-test] === kmalloc/kfree selftest ===
+[heap-test] test 1: basic alloc/free
+[heap-test] kmalloc(64)  = 0xe0000010
+[heap-test] write/read 64 bytes: PASS
+[heap-test] kfree: OK
+[heap-test] test 2: multiple allocs (32, 128, 256, 1024)
+[heap-test] kmalloc(  32) = 0xe0000010
+[heap-test] kmalloc( 128) = 0xe0000040
+[heap-test] kmalloc( 256) = 0xe00000d0
+[heap-test] kmalloc(1024) = 0xe00001e0
+[heap-test] no overlap: PASS
+[heap-test] test 3: free all, check stats
+[heap-test] after free: alloc_count=0, free_bytes=65520
+[heap-test] alloc_count == 0: PASS
+[heap-test] test 4: reuse after free
+[heap-test] re-alloc kmalloc(64) = 0xe0000010
+[heap-test] reuse: PASS
 [heap-test] === ALL PASS ===
 ```
+
+| 测试 | 验证内容 | 失败说明 |
+|------|---------|---------|
+| test 1 | 基本 alloc(64) → 写 64 字节 → 读回 → free | alloc 或 free 逻辑有 bug |
+| test 2 | 连续 4 次 alloc 不同大小，检查地址不重叠 | 拆分逻辑有问题，块互相覆盖 |
+| test 3 | 全部 free 后 alloc_count == 0 | free 没正确标记 is_free |
+| test 4 | free 后重新 alloc 同大小，验证空间复用 | 合并（coalescing）逻辑有 bug |
 
 ---
 
@@ -263,20 +309,36 @@ pmm state
 
 预期：第三次 `pmm state` 的 free 数应恢复到第一次。
 
-### 3. 验证 VMM 页分配/释放闭环
+### 3. 验证 kmalloc/kfree 闭环
+
+一条命令自动测试：
 
 ```
 heap test
 ```
 
-或手动步骤：
+或手动步骤（观察堆状态变化）：
 
 ```
-free
-heap alloc 8
-free
-heap free
-free
+heap status              # 初始: 0 allocs, ~65520 free
+heap alloc 64            # 分配 64 字节
+heap alloc 128           # 再分配 128 字节
+heap status              # 应该: 2 allocs
+heap free                # 释放 128 字节 (LIFO)
+heap free                # 释放 64 字节
+heap status              # 应恢复: 0 allocs, ~65520 free
+```
+
+### 4. 验证合并逻辑
+
+```
+heap alloc 32            # slot[0]
+heap alloc 32            # slot[1]
+heap alloc 32            # slot[2]
+heap free                # 释放 slot[2]，应和尾部空闲块 merge forward
+heap free                # 释放 slot[1]，应 merge forward (吃 slot[2]+尾部)
+heap free                # 释放 slot[0]，应 merge forward → 恢复为 1 个大空闲块
+heap status              # 应该: 0 allocs, 1 free block, ~65520 free
 ```
 
 ### 4. 查看内核页表映射

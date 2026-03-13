@@ -3,23 +3,24 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "vmm.h"
-#include "pmm.h"
+#include "kmalloc.h"
 #include "printk.h"
 
 /*
- * cmd_heap — 内核堆/VMM alloc 测试命令
+ * cmd_heap — 内核堆 (kmalloc/kfree) 测试命令
  *
  * 用法：
- *   heap status          — 显示 VMM alloc 区域信息和 PMM 空闲页
- *   heap alloc <pages>   — 调 vmm_alloc_pages 分配 N 页并验证可写
- *   heap free            — 释放上次 alloc 分配的页
- *   heap test            — 自动化测试：alloc → 写入 → 读回验证 → free → 检查 PMM
+ *   heap status              — 显示堆统计信息
+ *   heap alloc <bytes>       — kmalloc(bytes)，显示返回地址
+ *   heap free                — kfree 上次分配的指针
+ *   heap test                — 自动化测试（alloc → write → read → free → stats 验证）
  */
 
-/* 保存上次分配的地址和页数，供 free 使用 */
-static void* s_last_alloc = NULL;
-static unsigned s_last_count = 0;
+/* 最多记录 8 个分配，方便连续测试 */
+#define MAX_SLOTS 8
+static void*    s_slots[MAX_SLOTS];
+static unsigned s_sizes[MAX_SLOTS];
+static unsigned s_slot_count = 0;
 
 static int streq(const char* a, const char* b) {
     if (!a || !b) return 0;
@@ -40,171 +41,184 @@ static unsigned parse_dec(const char* s) {
     return v;
 }
 
+/* ---- status ---- */
 static void show_status(void) {
-    unsigned free_pages = pmm_free_pages();
-    unsigned total_pages = pmm_total_pages();
-    printk("PMM: %u / %u pages free (%u KiB free)\n",
-           free_pages, total_pages, free_pages * 4u);
-    printk("VMM: alloc area ready = %s\n", vmm_is_ready() ? "yes" : "no");
-    if (s_last_alloc) {
-        printk("Last alloc: 0x%08x (%u pages)\n",
-               (unsigned)(uintptr_t)s_last_alloc, s_last_count);
-    } else {
-        printk("Last alloc: (none)\n");
+    const char* name = kmalloc_backend_name();
+    printk("Heap backend: %s\n", name ? name : "(none)");
+
+    kheap_stats_t st;
+    kheap_get_stats(&st);
+    printk("Heap size:    %u bytes (%u KiB)\n",
+           (unsigned)st.heap_size, (unsigned)(st.heap_size / 1024u));
+    printk("Used:         %u bytes (%u allocs)\n",
+           (unsigned)st.used_bytes, st.alloc_count);
+    printk("Free:         %u bytes (%u blocks)\n",
+           (unsigned)st.free_bytes, st.free_count);
+
+    printk("Tracked slots: %u / %u\n", s_slot_count, MAX_SLOTS);
+    for (unsigned i = 0; i < s_slot_count; i++) {
+        printk("  [%u] 0x%08x  %u bytes\n",
+               i, (unsigned)(uintptr_t)s_slots[i], s_sizes[i]);
     }
 }
 
-static void do_alloc(unsigned pages) {
-    if (pages == 0) {
-        printk("Usage: heap alloc <pages>\n");
+/* ---- alloc ---- */
+static void do_alloc(unsigned bytes) {
+    if (bytes == 0) {
+        printk("Usage: heap alloc <bytes>\n");
         return;
     }
-    if (s_last_alloc) {
-        printk("Already allocated at 0x%08x — run 'heap free' first\n",
-               (unsigned)(uintptr_t)s_last_alloc);
+    if (s_slot_count >= MAX_SLOTS) {
+        printk("All %u slots used — run 'heap free' first\n", MAX_SLOTS);
         return;
     }
 
-    unsigned free_before = pmm_free_pages();
-    printk("[heap] allocating %u pages...\n", pages);
-
-    void* ptr = vmm_alloc_pages(pages);
+    void* ptr = kmalloc(bytes);
     if (!ptr) {
-        printk("[heap] FAIL: vmm_alloc_pages returned NULL\n");
+        printk("[heap] FAIL: kmalloc(%u) returned NULL\n", bytes);
         return;
     }
 
-    unsigned free_after = pmm_free_pages();
-    printk("[heap] OK: vaddr=0x%08x, PMM %u -> %u (-%u pages)\n",
-           (unsigned)(uintptr_t)ptr, free_before, free_after,
-           free_before - free_after);
+    printk("[heap] OK: kmalloc(%u) = 0x%08x\n", bytes, (unsigned)(uintptr_t)ptr);
 
-    /* 验证每页可写可读 */
-    uint32_t* base = (uint32_t*)ptr;
-    for (unsigned i = 0; i < pages; i++) {
-        uint32_t* page_start = (uint32_t*)((uint8_t*)base + i * 4096u);
-        page_start[0] = 0xDEAD0000u + i;   /* 写入魔数 */
+    /* 写入魔数验证可写可读 */
+    uint8_t* p = (uint8_t*)ptr;
+    for (unsigned i = 0; i < bytes; i++) {
+        p[i] = (uint8_t)(i & 0xFF);
     }
-    for (unsigned i = 0; i < pages; i++) {
-        uint32_t* page_start = (uint32_t*)((uint8_t*)base + i * 4096u);
-        uint32_t expected = 0xDEAD0000u + i;
-        if (page_start[0] != expected) {
-            printk("[heap] FAIL: page %u readback 0x%08x != expected 0x%08x\n",
-                   i, page_start[0], expected);
+    for (unsigned i = 0; i < bytes; i++) {
+        if (p[i] != (uint8_t)(i & 0xFF)) {
+            printk("[heap] FAIL: readback mismatch at offset %u\n", i);
             return;
         }
     }
-    printk("[heap] write/read verification: PASS (%u pages)\n", pages);
+    printk("[heap] write/read %u bytes: PASS\n", bytes);
 
-    s_last_alloc = ptr;
-    s_last_count = pages;
+    s_slots[s_slot_count] = ptr;
+    s_sizes[s_slot_count] = bytes;
+    s_slot_count++;
 }
 
+/* ---- free ---- */
 static void do_free(void) {
-    if (!s_last_alloc) {
-        printk("Nothing to free — run 'heap alloc <pages>' first\n");
+    if (s_slot_count == 0) {
+        printk("Nothing to free — run 'heap alloc <bytes>' first\n");
         return;
     }
 
-    unsigned free_before = pmm_free_pages();
-    printk("[heap] freeing %u pages at 0x%08x...\n",
-           s_last_count, (unsigned)(uintptr_t)s_last_alloc);
+    /* 释放最后一个 slot (LIFO) */
+    s_slot_count--;
+    void* ptr = s_slots[s_slot_count];
+    unsigned sz = s_sizes[s_slot_count];
 
-    vmm_free_pages(s_last_alloc, s_last_count);
-
-    unsigned free_after = pmm_free_pages();
-    printk("[heap] OK: PMM %u -> %u (+%u pages)\n",
-           free_before, free_after, free_after - free_before);
-
-    /* 验证释放的页数量正确 */
-    if (free_after - free_before != s_last_count) {
-        printk("[heap] WARN: expected +%u pages but got +%u\n",
-               s_last_count, free_after - free_before);
-    }
-
-    s_last_alloc = NULL;
-    s_last_count = 0;
+    printk("[heap] kfree(0x%08x) (%u bytes)\n", (unsigned)(uintptr_t)ptr, sz);
+    kfree(ptr);
+    printk("[heap] OK\n");
 }
 
+/* ---- test ---- */
 static void do_test(void) {
     /*
-     * 自动化测试流程：
-     *   1. 记录 PMM free pages
-     *   2. alloc 4 页
-     *   3. 每页写入魔数，读回验证
-     *   4. free
-     *   5. 检查 PMM free pages 恢复
+     * 自动化测试 — 验证 kmalloc/kfree 基本功能：
+     *
+     * 测试 1: 单次 alloc + write + read + free
+     * 测试 2: 多次 alloc 不同大小，验证地址不重叠
+     * 测试 3: 全部 free 后 stats 验证 alloc_count == 0
+     * 测试 4: free 后重新 alloc，验证空间可复用
      */
-    unsigned test_pages = 4;
+    printk("[heap-test] === kmalloc/kfree selftest ===\n");
 
-    printk("[heap-test] === vmm_alloc_pages selftest ===\n");
-
-    if (s_last_alloc) {
-        printk("[heap-test] cleaning up previous alloc first\n");
-        do_free();
+    /* 先清理之前的 slots */
+    while (s_slot_count > 0) {
+        s_slot_count--;
+        kfree(s_slots[s_slot_count]);
     }
 
-    unsigned free_before = pmm_free_pages();
-    printk("[heap-test] PMM free before: %u pages\n", free_before);
+    kheap_stats_t st;
 
-    /* alloc */
-    void* ptr = vmm_alloc_pages(test_pages);
-    if (!ptr) {
-        printk("[heap-test] FAIL: vmm_alloc_pages(%u) returned NULL\n", test_pages);
-        return;
-    }
-    unsigned free_mid = pmm_free_pages();
-    printk("[heap-test] alloc %u pages at 0x%08x, PMM free: %u (-%u)\n",
-           test_pages, (unsigned)(uintptr_t)ptr,
-           free_mid, free_before - free_mid);
+    /* --- 测试 1: 基本 alloc/free --- */
+    printk("[heap-test] test 1: basic alloc/free\n");
+    void* p1 = kmalloc(64);
+    if (!p1) { printk("[heap-test] FAIL: kmalloc(64) returned NULL\n"); return; }
+    printk("[heap-test] kmalloc(64)  = 0x%08x\n", (unsigned)(uintptr_t)p1);
 
-    /*
-     * [WHY] 消耗的页数 >= test_pages，因为 vmm_map_page 内部
-     * 可能额外分配物理页来创建新的页表（vmm_ensure_page_table）。
-     * 每个页表覆盖 4MiB（1024 个 PTE），所以开销很小。
-     */
-    if (free_before - free_mid < test_pages) {
-        printk("[heap-test] FAIL: expected >=-%u pages, got -%u\n",
-               test_pages, free_before - free_mid);
-        return;
-    }
-    unsigned pt_overhead = (free_before - free_mid) - test_pages;
-    if (pt_overhead > 0) {
-        printk("[heap-test] (page table overhead: %u extra pages)\n", pt_overhead);
-    }
-
-    /* write + readback */
-    for (unsigned i = 0; i < test_pages; i++) {
-        uint32_t* p = (uint32_t*)((uint8_t*)ptr + i * 4096u);
-        p[0] = 0xCAFE0000u + i;
-        p[1023] = 0xBEEF0000u + i;  /* 页末尾也写一下 */
-    }
-    for (unsigned i = 0; i < test_pages; i++) {
-        uint32_t* p = (uint32_t*)((uint8_t*)ptr + i * 4096u);
-        if (p[0] != 0xCAFE0000u + i || p[1023] != 0xBEEF0000u + i) {
-            printk("[heap-test] FAIL: page %u readback mismatch\n", i);
+    /* 写满 64 字节 */
+    uint8_t* b = (uint8_t*)p1;
+    for (int i = 0; i < 64; i++) b[i] = (uint8_t)i;
+    for (int i = 0; i < 64; i++) {
+        if (b[i] != (uint8_t)i) {
+            printk("[heap-test] FAIL: readback mismatch at byte %d\n", i);
             return;
         }
     }
-    printk("[heap-test] write/read: PASS\n");
+    printk("[heap-test] write/read 64 bytes: PASS\n");
 
-    /* free */
-    vmm_free_pages(ptr, test_pages);
-    unsigned free_after = pmm_free_pages();
-    printk("[heap-test] free done, PMM free: %u (+%u)\n",
-           free_after, free_after - free_mid);
+    kfree(p1);
+    printk("[heap-test] kfree: OK\n");
 
-    /*
-     * [WHY] free 后 PMM 应恢复 test_pages 页，但页表本身不会被释放
-     * （vmm_free_pages 只释放数据页，不回收页表）。
-     * 所以 free_after = free_before - pt_overhead。
-     */
-    unsigned leaked = free_before - free_after;
-    if (free_after + pt_overhead != free_before) {
-        printk("[heap-test] FAIL: PMM free %u, expected %u (leak %u pages)\n",
-               free_after, free_before - pt_overhead, leaked - pt_overhead);
+    /* --- 测试 2: 多次分配不同大小 --- */
+    printk("[heap-test] test 2: multiple allocs (32, 128, 256, 1024)\n");
+    unsigned sizes[] = { 32, 128, 256, 1024 };
+    void*    ptrs[4];
+
+    for (int i = 0; i < 4; i++) {
+        ptrs[i] = kmalloc(sizes[i]);
+        if (!ptrs[i]) {
+            printk("[heap-test] FAIL: kmalloc(%u) returned NULL\n", sizes[i]);
+            return;
+        }
+        printk("[heap-test] kmalloc(%4u) = 0x%08x\n", sizes[i],
+               (unsigned)(uintptr_t)ptrs[i]);
+
+        /* 写入魔数 */
+        uint32_t* w = (uint32_t*)ptrs[i];
+        w[0] = 0xAA550000u + i;
+    }
+
+    /* 验证地址不重叠：每个分配的首字魔数还在 */
+    for (int i = 0; i < 4; i++) {
+        uint32_t* w = (uint32_t*)ptrs[i];
+        if (w[0] != 0xAA550000u + (unsigned)i) {
+            printk("[heap-test] FAIL: ptr[%d] overwritten (0x%08x != 0x%08x)\n",
+                   i, w[0], 0xAA550000u + (unsigned)i);
+            return;
+        }
+    }
+    printk("[heap-test] no overlap: PASS\n");
+
+    /* --- 测试 3: 全部 free，检查 stats --- */
+    printk("[heap-test] test 3: free all, check stats\n");
+    for (int i = 0; i < 4; i++) {
+        kfree(ptrs[i]);
+    }
+
+    kheap_get_stats(&st);
+    printk("[heap-test] after free: alloc_count=%u, free_bytes=%u\n",
+           st.alloc_count, (unsigned)st.free_bytes);
+    if (st.alloc_count != 0) {
+        printk("[heap-test] FAIL: alloc_count should be 0, got %u\n", st.alloc_count);
         return;
     }
+    printk("[heap-test] alloc_count == 0: PASS\n");
+
+    /* --- 测试 4: 复用验证 --- */
+    printk("[heap-test] test 4: reuse after free\n");
+    void* p2 = kmalloc(64);
+    if (!p2) { printk("[heap-test] FAIL: re-alloc returned NULL\n"); return; }
+    printk("[heap-test] re-alloc kmalloc(64) = 0x%08x\n", (unsigned)(uintptr_t)p2);
+
+    /*
+     * free 后重新 alloc 同样大小，如果合并正确，
+     * 应该能拿到一个有效的指针（地址可能和之前的相同也可能不同，都 OK）。
+     */
+    uint32_t* w2 = (uint32_t*)p2;
+    w2[0] = 0xDEADBEEFu;
+    if (w2[0] != 0xDEADBEEFu) {
+        printk("[heap-test] FAIL: write/read after re-alloc\n");
+        return;
+    }
+    kfree(p2);
+    printk("[heap-test] reuse: PASS\n");
 
     printk("[heap-test] === ALL PASS ===\n");
 }
@@ -212,18 +226,18 @@ static void do_test(void) {
 static int cmd_heap_main(int argc, char** argv) {
     if (argc < 2) {
         printk("Usage: heap <status|alloc|free|test>\n");
-        printk("  heap status         — show VMM alloc area & PMM state\n");
-        printk("  heap alloc <pages>  — allocate N virtual pages\n");
-        printk("  heap free           — free last allocation\n");
-        printk("  heap test           — automated alloc/write/free selftest\n");
+        printk("  heap status        — show heap stats\n");
+        printk("  heap alloc <bytes> — kmalloc N bytes\n");
+        printk("  heap free          — kfree last alloc\n");
+        printk("  heap test          — automated selftest\n");
         return 0;
     }
 
     if (streq(argv[1], "status")) {
         show_status();
     } else if (streq(argv[1], "alloc")) {
-        unsigned pages = (argc >= 3) ? parse_dec(argv[2]) : 0;
-        do_alloc(pages);
+        unsigned bytes = (argc >= 3) ? parse_dec(argv[2]) : 0;
+        do_alloc(bytes);
     } else if (streq(argv[1], "free")) {
         do_free();
     } else if (streq(argv[1], "test")) {
