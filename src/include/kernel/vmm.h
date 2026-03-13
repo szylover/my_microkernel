@@ -89,6 +89,21 @@ extern "C" {
 #define VIRT_TO_PHYS(vaddr) ((uint32_t)(vaddr) - KERNEL_VIRT_OFFSET)
 
 /*
+ * 内核堆虚拟地址区间
+ *
+ * [WHY] 堆需要一段专属的连续虚拟地址，不能和 vmm_alloc_pages 的
+ *   bump allocator (g_next_vaddr) 共用地址空间，否则两者会互相踩踏。
+ *
+ *   我们在 0xE0000000 处固定划出 256MiB 给内核堆：
+ *     - 初始只映射少量物理页（如 64KiB），按需 grow
+ *     - kmalloc/kfree 在这个区间内做字节级分配
+ *     - vmm_alloc_pages 继续管 0xD0000000 附近的区域，互不干扰
+ */
+#define KHEAP_START     0xE0000000u                         /* 堆虚拟起始 */
+#define KHEAP_MAX_SIZE  (256u * 1024u * 1024u)              /* 256 MiB 上限 */
+#define KHEAP_END       (KHEAP_START + KHEAP_MAX_SIZE)      /* 0xF0000000 */
+
+/*
  * PDE / PTE flags (低 12 位)
  *
  * [BITFIELDS] 这些宏可以用 | 组合，例如：

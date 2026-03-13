@@ -86,6 +86,9 @@ typedef struct heap_ops {
 
 void kmalloc_register_backend(const heap_ops_t* ops);
 
+/* first-fit 空闲链表后端（Stage 8 默认） */
+const heap_ops_t* heap_first_fit_get_ops(void);
+
 /* ============================================================================
  * 公开 API
  * ============================================================================ */
