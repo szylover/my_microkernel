@@ -1,6 +1,7 @@
 #include <stddef.h>
 
 #include "kmalloc.h"
+#include "kconfig.h"
 #include "vmm.h"
 #include "pmm.h"
 #include "printk.h"
@@ -16,8 +17,8 @@
  *   2. 调用后端 init(start, initial_size)
  */
 
-/* 初始堆大小: 16 页 = 64 KiB （后端会按需 heap_grow 扩展） */
-#define KHEAP_INITIAL_PAGES 16u
+/* 初始堆大小（见 kconfig.h KCONFIG_HEAP_INITIAL_PAGES） */
+#define KHEAP_INITIAL_PAGES KCONFIG_HEAP_INITIAL_PAGES
 
 static const heap_ops_t* g_heap_ops = NULL;
 

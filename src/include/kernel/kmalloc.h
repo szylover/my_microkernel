@@ -89,6 +89,9 @@ void kmalloc_register_backend(const heap_ops_t* ops);
 /* first-fit 空闲链表后端（Stage 8 默认） */
 const heap_ops_t* heap_first_fit_get_ops(void);
 
+/* slab 分配器后端（配合 buddy PMM 更高效） */
+const heap_ops_t* heap_slab_get_ops(void);
+
 /* ============================================================================
  * 公开 API
  * ============================================================================ */

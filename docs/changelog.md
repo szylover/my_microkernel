@@ -1,5 +1,11 @@
 
 ## 2026-03-13
+- 新增 `include/kernel/kconfig.h`：内核编译期配置集中管理（PMM 后端 / 堆后端 / 初始堆大小），修改配置只需编辑此文件。
+- 新增 `src/kernel/mm/heap_slab.c`：slab 分配器堆后端（7 级 cache 32B~2048B，bitmap 管理空闲 slot，配合 buddy PMM）。
+- `kmalloc.h` 新增 `heap_slab_get_ops()` 后端声明。
+- `kmain.c` 重构：PMM / 堆后端选择改为读取 `kconfig.h` 宏，不再硬编码。
+- `kmalloc.c`：初始堆页数改为读取 `KCONFIG_HEAP_INITIAL_PAGES`。
+- `roadmap.md` 新增 Stage 8b（Slab 分配器）。
 - 阶段 8（kmalloc 完成）：新增 `src/kernel/mm/heap_first_fit.c`，first-fit 空闲链表堆后端（双向链表 block_header，支持向前/向后合并）。
 - `vmm.h` 新增堆虚拟地址区间常量：`KHEAP_START` (0xE0000000) / `KHEAP_MAX_SIZE` (256MiB) / `KHEAP_END`。
 - `kmalloc.h` 新增 `heap_first_fit_get_ops()` 后端声明。

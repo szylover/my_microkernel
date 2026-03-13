@@ -12,6 +12,7 @@
 #include "pmm_backends.h"
 #include "vmm.h"
 #include "kmalloc.h"
+#include "kconfig.h"
 
 /* core: 内核基础设施 */
 #include "printk.h"
@@ -152,13 +153,13 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         mb2_dump_tags(mb2_info);
 
         /*
-         * Stage-8: 选择 PMM 后端。
-         * 两个后端都编译进内核，切换只需改这一行：
-         *   pmm_register_backend(pmm_bitmap_get_ops());  // bitmap
-         *   pmm_register_backend(pmm_buddy_get_ops());   // buddy
-         * 不注册则 dispatch 层 fallback 到 bitmap 默认后端。
+         * PMM 后端选择（见 kconfig.h KCONFIG_PMM_BACKEND）
          */
+#if KCONFIG_PMM_BACKEND == 0
         pmm_register_backend(pmm_bitmap_get_ops());
+#elif KCONFIG_PMM_BACKEND == 1
+        pmm_register_backend(pmm_buddy_get_ops());
+#endif
 
         /* Stage-2: physical memory manager. */
         pmm_init();
@@ -175,8 +176,14 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         /* 拆除 identity mapping，低地址空间留给将来的用户态进程。 */
         vmm_unmap_identity();
 
-        /* Stage-8: 内核堆。注册 first-fit 后端，映射初始页并初始化。 */
+        /*
+         * 内核堆后端选择（见 kconfig.h KCONFIG_HEAP_BACKEND）
+         */
+#if KCONFIG_HEAP_BACKEND == 0
         kmalloc_register_backend(heap_first_fit_get_ops());
+#elif KCONFIG_HEAP_BACKEND == 1
+        kmalloc_register_backend(heap_slab_get_ops());
+#endif
         kmalloc_init();
     }
 
