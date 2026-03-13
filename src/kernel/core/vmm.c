@@ -64,6 +64,27 @@ static page_directory_t g_kernel_pd __attribute__((aligned(VMM_PAGE_SIZE)));
  */
 static int g_vmm_ready = 0;
 
+/*
+ * g_next_vaddr — 下一个可分配的虚拟地址（Bump Allocator）
+ *
+ * [WHY] vmm_alloc_pages() 需要知道"哪些虚拟地址还没被用"。
+ *   最简单的方案是 bump allocator（推进式分配）：
+ *   - 维护一个"水位线"指针，初始值设在直接映射区的上方
+ *   - 每次分配 N 页，就把水位线往上推 N × 4KB
+ *   - 不回收虚拟地址空间（free 时只释放物理页，不回退水位线）
+ *
+ *   这很粗暴，但对内核堆来说足够了：
+ *   - 内核虚拟空间有 1GB（0xC0000000 − 0xFFFFFFFF）
+ *   - 直接映射区占了前面一部分（取决于物理内存大小）
+ *   - 剩余空间给 vmm_alloc_pages 用，通常有几百 MB
+ *
+ *   将来 Stage 9 (VMA) 会用红黑树替代这个粗暴的 bump allocator。
+ *
+ * 初始值 0 表示"还没计算"，在 vmm_init() 结束时会设置为
+ * 直接映射区上方（向上对齐到 4MiB 边界，留出安全间隔）。
+ */
+static uint32_t g_next_vaddr = 0;
+
 /* ============================================================================
  * 内部辅助函数
  * ============================================================================ */
@@ -375,6 +396,23 @@ void vmm_init(void) {
     printk("[vmm] high-half: 0x%08x - 0x%08x\n",
            (unsigned)KERNEL_VIRT_OFFSET,
            (unsigned)(KERNEL_VIRT_OFFSET + map_end));
+
+    /*
+     * 初始化 vmm_alloc_pages 的虚拟地址水位线
+     *
+     * [WHY] 直接映射区占据了 [0xC0000000, 0xC0000000 + map_end)。
+     *   vmm_alloc_pages 必须从这之后开始分配，否则会和已有映射冲突。
+     *   向上对齐到 4MiB 边界（0x400000），留出安全间隔，也方便调试时
+     *   一眼区分"直接映射区地址"和"动态分配区地址"。
+     *
+     * 例如：直接映射区到 0xD0000000，水位线就从 0xD0000000 开始。
+     *       直接映射区到 0xD0123000，向上对齐到 0xD0400000。
+     */
+    uint32_t direct_map_top = KERNEL_VIRT_OFFSET + map_end;
+    uint32_t align_4m = 0x400000u;
+    g_next_vaddr = (direct_map_top + align_4m - 1u) & ~(align_4m - 1u);
+
+    printk("[vmm] alloc area: 0x%08x - 0xFFFFFFFF\n", g_next_vaddr);
 }
 
 void vmm_unmap_identity(void) {
@@ -494,4 +532,100 @@ uint32_t vmm_get_pte(uint32_t virt) {
     uint32_t pti = pt_index(virt);
 
     return pt->entries[pti];
+}
+
+/* ============================================================================
+ * vmm_alloc_pages / vmm_free_pages — 虚拟页批量分配与释放
+ *
+ * [WHY] kmalloc 等高层分配器需要连续的虚拟内存区域。
+ *   PMM 给的物理页是散的，这两个函数负责：
+ *   - 挑一段空闲的连续虚拟地址（bump allocator, g_next_vaddr）
+ *   - 向 PMM 申请物理页
+ *   - 用 vmm_map_page 建立映射
+ *   返回的指针可以直接读写，MMU 自动翻译。
+ * ============================================================================ */
+
+void* vmm_alloc_pages(unsigned count) {
+    /* 步骤 1: 前置检查 */
+    if (count == 0 || !g_vmm_ready || g_next_vaddr == 0) {
+        return NULL;
+    }
+
+    /* 步骤 2: 计算地址范围，检查溢出 */
+    uint32_t start = g_next_vaddr;
+    uint32_t total_bytes = count * VMM_PAGE_SIZE;
+    if (total_bytes > 0xFFFFFFFFu - start) {
+        return NULL;
+    }
+
+    /* 步骤 3: 推进水位线 */
+    g_next_vaddr = start + total_bytes;
+
+    /* 步骤 4: 逐页分配物理页并建立映射 */
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t virt = start + i * VMM_PAGE_SIZE;
+        uint32_t phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+
+        if (!phys || vmm_map_page(virt, phys, PTE_PRESENT | PTE_WRITABLE) != 0) {
+            /*
+             * OOM 或 map 失败 → 释放当前页（如果已分配）+ 回滚前面的页
+             *
+             * [WHY] 用 goto 做错误回滚是 Linux 内核标准风格。
+             *   把清理逻辑集中在一处，避免重复代码。
+             */
+            if (phys) {
+                pmm_free_page((void*)(uintptr_t)phys);
+            }
+            goto rollback;
+        }
+    }
+
+    /* 步骤 5: 成功，返回起始虚拟地址 */
+    return (void*)(uintptr_t)start;
+
+rollback:
+    /*
+     * 回滚已映射的页：先查物理地址 → 释放物理页 → 解除映射
+     *
+     * [WHY] 顺序很重要：vmm_unmap_page 会清除 PTE，之后就查不到物理地址了。
+     *   所以必须在 unmap 之前用 vmm_get_physical 拿到物理地址。
+     */
+    for (unsigned j = 0; j < count; j++) {
+        uint32_t rollback_virt = start + j * VMM_PAGE_SIZE;
+        uint32_t rollback_phys;
+        if (vmm_get_physical(rollback_virt, &rollback_phys) == 0) {
+            pmm_free_page((void*)(uintptr_t)rollback_phys);
+            vmm_unmap_page(rollback_virt);
+        }
+    }
+    return NULL;
+}
+
+void vmm_free_pages(void* vaddr, unsigned count) {
+    /*
+     * 释放由 vmm_alloc_pages 分配的虚拟页
+     *
+     * 逐页执行：查页表拿物理地址 → 归还物理页 → 清除映射
+     *
+     * [WHY] 顺序必须是 get_physical → free → unmap。
+     *   unmap 会清零 PTE，之后就查不到物理地址了。
+     *
+     * [NOTE] 虚拟地址空间不回收（bump allocator 的代价）。
+     *   将来 Stage 9 (VMA) 会用红黑树跟踪空闲虚拟区域。
+     */
+    if (!vaddr || count == 0 || !g_vmm_ready) {
+        return;
+    }
+
+    uint32_t base = (uint32_t)(uintptr_t)vaddr;
+
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t virt = base + i * VMM_PAGE_SIZE;
+        uint32_t phys;
+
+        if (vmm_get_physical(virt, &phys) == 0) {
+            pmm_free_page((void*)(uintptr_t)phys);
+        }
+        vmm_unmap_page(virt);
+    }
 }

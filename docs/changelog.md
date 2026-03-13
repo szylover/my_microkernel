@@ -2,6 +2,11 @@
 ## 2026-03-13
 - 阶段 8（kmalloc 起步）：新增 `include/kernel/kmalloc.h`（`heap_ops_t` 可插拔后端接口、`kheap_stats_t` 统计结构、`kmalloc`/`kfree`/`kheap_get_stats` 公开 API）。
 - 新增 `src/kernel/core/kmalloc.c`：dispatch 层空壳（无后端时安全返回 NULL），和 `pmm.c` 相同的转发模式。
+- VMM 新增 `vmm_alloc_pages(count)` / `vmm_free_pages(vaddr, count)`：批量分配连续虚拟页并映射物理内存（bump allocator），为 kmalloc 堆提供底层支持。
+- `vmm_init()` 末尾初始化 `g_next_vaddr` 水位线（直接映射区顶部向上对齐到 4MiB）。
+- 新增 `cmd_heap.c`：`heap` shell 命令（status/alloc/free/test），用于测试 vmm_alloc_pages 分配/释放闭环。
+- `test.sh` 新增 `TEST_HEAP=1` 自动化测试（验证 alloc/write/read/free/PMM 一致性）。
+- 新增 `docs/memory-commands.md`：内存调试命令速查表（free/mmap/pmm/vmm/heap 全部子命令 + 调试组合）。
 
 ## 2026-03-12
 - 合并 `pmm_bitmap.h` + `pmm_buddy.h` 为 `pmm_backends.h`：所有 PMM 后端统一在一个头文件声明，切换后端无需加删 #include。
