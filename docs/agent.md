@@ -70,6 +70,7 @@ my_microkernel/
     └── kernel/            # 内核实现
         ├── arch/          #   CPU 初始化 & 汇编 stubs
         ├── cmds/          #   Shell 命令模块
-        ├── core/          #   内核核心 (kmain/kmalloc/pmm/pmm_bitmap/pmm_buddy/vmm/shell/…)
-        └── drivers/       #   设备驱动实现
+        ├── core/          #   内核入口和基础设施 (kmain/shell/printk/console)
+        ├── drivers/       #   设备驱动实现
+        └── mm/            #   内存管理 (pmm/pmm_bitmap/pmm_buddy/vmm/kmalloc/mmap)
 ```
