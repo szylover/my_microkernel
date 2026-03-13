@@ -61,10 +61,10 @@ my_microkernel/
     ├── include/           # 公共头文件
     │   ├── arch/          #   x86 体系结构 (gdt/idt/irq/pic/io)
     │   ├── drivers/       #   设备驱动 (keyboard/serial)
-    │   └── kernel/        #   内核通用 (pmm/vmm/shell/printk/cmd/…)
+    │   └── kernel/        #   内核通用 (pmm/vmm/kmalloc/shell/printk/cmd/…)
     └── kernel/            # 内核实现
         ├── arch/          #   CPU 初始化 & 汇编 stubs
         ├── cmds/          #   Shell 命令模块
-        ├── core/          #   内核核心 (kmain/pmm/pmm_bitmap/pmm_buddy/vmm/shell/…)
+        ├── core/          #   内核核心 (kmain/kmalloc/pmm/pmm_bitmap/pmm_buddy/vmm/shell/…)
         └── drivers/       #   设备驱动实现
 ```

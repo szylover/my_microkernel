@@ -1,4 +1,8 @@
 
+## 2026-03-13
+- 阶段 8（kmalloc 起步）：新增 `include/kernel/kmalloc.h`（`heap_ops_t` 可插拔后端接口、`kheap_stats_t` 统计结构、`kmalloc`/`kfree`/`kheap_get_stats` 公开 API）。
+- 新增 `src/kernel/core/kmalloc.c`：dispatch 层空壳（无后端时安全返回 NULL），和 `pmm.c` 相同的转发模式。
+
 ## 2026-03-12
 - 合并 `pmm_bitmap.h` + `pmm_buddy.h` 为 `pmm_backends.h`：所有 PMM 后端统一在一个头文件声明，切换后端无需加删 #include。
 - `kmain.c`：头文件分组整理（libc / arch / core内存 / core基础设施 / drivers）。
