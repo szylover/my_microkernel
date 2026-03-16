@@ -8,58 +8,91 @@
 
 \begin{itemize}
   \item 解析 Multiboot2 Memory Map，获取物理内存布局
-  \item 实现可插拔 PMM 后端接口（\texttt{pmm\_ops\_t}）
-  \item 第一个后端：bitmap 分配器
-  \item 第二个后端：buddy system 分配器
-  \item Shell 调试命令：\texttt{free}、\texttt{mmap}、\texttt{pmm}
+  \item 设计可插拔 PMM 后端接口（\texttt{pmm\_ops\_t}）
+  \item 实现 bitmap 分配器和 buddy 分配器两个后端
+  \item Shell 命令：\texttt{free}、\texttt{mmap}、\texttt{pmm}
 \end{itemize}
 
 \section{背景知识：物理内存布局}
 
-% TODO:
-% - BIOS 留下的 memory map（可用区域 + 保留区域）
-% - Multiboot2 tag type=6 (memory map) 格式
-% - 典型布局：0-640K(可用) / 640K-1M(保留) / 1M+(可用)
+BIOS 通过 Multiboot2 Memory Map Tag（type=6）报告物理内存区域：
+
+\begin{lstlisting}[style=shellstyle]
+Available RAM: 0x00000000 - 0x0009FC00 (640KiB)   # 低端常规内存
+Reserved:      0x0009FC00 - 0x000FFFFF             # VGA/BIOS/ROM
+Available RAM: 0x00100000 - 0x07FE0000 (126MiB)    # 高端可用内存
+\end{lstlisting}
+
+PMM 的任务：管理"Available RAM"中的物理页（每页 4KiB），提供 alloc/free 接口。
+
+\begin{thinkbox}
+为什么 PMM 以"页"（4KiB）为单位分配，而不是字节？提示：想想后续分页机制中
+PTE 指向的最小单位是什么。
+\end{thinkbox}
 
 \section{可插拔后端架构}
 
-% TODO: pmm_ops_t 函数指针表（和 Linux file_operations 类比）
-% pmm.c dispatch 层 → 转发到 g_pmm_ops
-% 为什么要可插拔（bitmap 简单但碎片化，buddy 支持多阶分配）
+\begin{lstlisting}[style=cstyle]
+typedef struct pmm_ops {
+    const char* name;
+    void  (*init)(void);
+    void* (*alloc_page)(void);      // 返回物理地址，NULL=OOM
+    void  (*free_page)(void* page);
+    unsigned (*total_pages)(void);
+    unsigned (*free_pages)(void);
+    unsigned (*managed_base)(void);
+    // ...
+} pmm_ops_t;
+\end{lstlisting}
 
-\subsection{接口定义：\texttt{pmm.h}}
+\texttt{pmm.c} 是薄 dispatch 层：所有调用通过 \texttt{g\_pmm\_ops} 转发。
+切换后端只需在 \texttt{kmain} 中改一行 \texttt{pmm\_register\_backend()}。
 
-% TODO: pmm_ops_t 各字段详解
+\begin{designbox}
+这套"ops 函数指针表 + dispatch 层"的模式参考了 Linux 内核的 \texttt{file\_operations}。
+后续 kmalloc 和 VMA 也采用完全相同的架构，形成统一的可插拔设计风格。
+\end{designbox}
 
-\subsection{Dispatch 层：\texttt{pmm.c}}
+\section{Bitmap 分配器}
 
-% TODO: 薄转发层
+最直观的方案：每个物理页对应 1 bit。
 
-\section{Bitmap 分配器：\texttt{pmm\_bitmap.c}}
+\begin{itemize}
+  \item \texttt{alloc\_page}：线性扫描找第一个 0 bit → 置 1 → 返回物理地址
+  \item \texttt{free\_page}：物理地址 → 计算 bit 索引 → 清 0
+  \item 优点：简单，$O(1)$ free
+  \item 缺点：alloc 是 $O(n)$，不支持连续多页分配
+\end{itemize}
 
-% TODO:
-% - 每个物理页对应 1 bit（0=free, 1=used）
-% - 位图放在哪里？Multiboot2 mmap 之后动态计算
-% - pmm_bitmap_init: 解析 mmap → 标记 kernel + reserved → selftest
-% - alloc: 线性扫描找第一个 free bit
-% - free: 清对应 bit
+\section{Buddy 分配器}
 
-\section{Buddy 分配器：\texttt{pmm\_buddy.c}}
+Linux 风格的伙伴系统，支持 order 0..10（$2^0$ 到 $2^{10}$ 页）：
 
-% TODO:
-% - Linux 风格 buddy system，order 0..10 (1页..1024页)
-% - free_list[MAX_ORDER+1] 数组
-% - 分裂（split）和合并（coalesce）
-% - alloc: 从最小满足 order 的 free_list 取，向下分裂
-% - free: 归还，检查 buddy 是否也空闲 → 向上合并
+\begin{itemize}
+  \item 每个 order 维护一个 free list
+  \item \texttt{alloc}：找最小满足的 order → 如果没有则从更高 order 分裂
+  \item \texttt{free}：归还后检查 buddy 是否也空闲 → 向上合并
+\end{itemize}
+
+\begin{thinkbox}
+给定页帧号 $P$ 和分配的 order $k$，它的 buddy 页帧号是多少？
+提示：XOR 运算——\texttt{buddy = P \^{} (1 << k)}。想想为什么 XOR 能找到 buddy。
+\end{thinkbox}
 
 \section{后端切换：\texttt{kconfig.h}}
 
-% TODO: KCONFIG_PMM_BACKEND 宏控制
+\begin{lstlisting}[style=cstyle]
+#define KCONFIG_PMM_BACKEND  0   // 0=bitmap, 1=buddy
+\end{lstlisting}
 
-\section{Shell 命令}
-
-% TODO: free / mmap / pmm state / pmm alloc / pmm dump 示例
+\begin{lstlisting}[style=cstyle]
+// kmain.c
+#if KCONFIG_PMM_BACKEND == 0
+    pmm_register_backend(pmm_bitmap_get_ops());
+#elif KCONFIG_PMM_BACKEND == 1
+    pmm_register_backend(pmm_buddy_get_ops());
+#endif
+\end{lstlisting}
 
 \section{验证}
 
@@ -75,8 +108,26 @@ szy-kernel > pmm freeall
 pmm freeall: freed 3 pages
 \end{lstlisting}
 
+\section{思考与练习}
+
+\begin{exercise}
+在 \texttt{kconfig.h} 中把 \texttt{KCONFIG\_PMM\_BACKEND} 改为 1（buddy），
+重新编译运行。用 \texttt{pmm state} 对比 bitmap 和 buddy 的 free pages 数量。
+两者为什么可能不同？（提示：buddy 的内部碎片和对齐需求。）
+\end{exercise}
+
+\begin{exercise}
+运行 \texttt{pmm alloc 100} 然后 \texttt{pmm state}，观察 free 减少了多少。
+再 \texttt{pmm freeall} 后 \texttt{pmm state}，free 是否完全恢复？
+如果没有完全恢复，说明可能有内存泄漏——排查。
+\end{exercise}
+
+\begin{exercise}
+在 buddy 分配器中，尝试实现 \texttt{alloc\_pages(order)} 接口：分配 $2^{\text{order}}$
+个连续物理页。思考：bitmap 分配器能轻松支持这个需求吗？
+\end{exercise}
+
 \section{本章小结}
 
-PMM 是内存管理的基石——所有虚拟内存映射最终都需要物理页支撑。
-可插拔后端模式让我们能在不改调用方的前提下切换分配算法。
-下一章我们在 PMM 之上构建虚拟内存（分页）。
+PMM 是内存管理的基石。可插拔后端模式让我们能在不改调用方的前提下
+切换分配算法。下一章在 PMM 之上构建虚拟内存（分页）。
