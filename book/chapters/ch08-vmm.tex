@@ -685,8 +685,8 @@ uint32_t vmm_get_pte(uint32_t virt);
 
 编译并启动 QEMU 后，可以用 \texttt{vmm} 命令验证页表状态：
 
-\begin{lstlisting}[style=shellstyle]
-$ make iso && make run
+\begin{tcblisting}{consolebox}
+«\tps{\$}» «\tin{make iso \&\& make run}»
 ...
 [vmm] init: replacing boot PSE with 4KiB page tables...
 [vmm] mapping phys 0x00000000 - 0x10000000
@@ -697,7 +697,7 @@ $ make iso && make run
 [vmm] high-half: 0xc0000000 - 0xd0000000
 [vmm] alloc area: 0xd0000000 - 0xFFFFFFFF
 
-> vmm
+«\tpk{>}» «\tin{vmm}»
   PD index  Phys PT addr  Flags
   0         0x001xx000    P W
   1         0x001xx000    P W
@@ -705,9 +705,9 @@ $ make iso && make run
   768       0x002xx000    P W
   ...
 
-> vmm 0xC0000000
+«\tpk{>}» «\tin{vmm 0xC0000000}»
   virt=0xC0000000 -> phys=0x00000000 flags=P W
-\end{lstlisting}
+\end{tcblisting}
 
 启动日志确认：
 \begin{itemize}

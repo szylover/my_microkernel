@@ -493,31 +493,31 @@ void* vmm_alloc_pages(unsigned count) {
 
 \subsection{\texttt{vma list}——列出所有 VMA}
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
-> vma list
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{vma list}»
 === VMA list (rbtree, 2 entries) ===
   [0xC0000000, 0xD0000000) rwx  direct-map      (256 MiB)
   [0xE0000000, 0xE0010000) rw-  kheap           (64 KiB)
-\end{lstlisting}
+\end{tcblisting}
 
 初始状态有两个 VMA：直接映射区和内核堆。地址按升序排列（红黑树中序遍历），
 权限用 \texttt{rwx} 紧凑表示。
 
 \subsection{\texttt{vma find <addr>}——查找指定地址}
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
-> vma find 0xC1000000
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{vma find 0xC1000000}»
 0xC1000000 -> VMA [0xC0000000, 0xD0000000) 'direct-map'
   size: 262144 KiB, offset: 0x1000000, flags: rwx
 
-> vma find 0xA0000000
+«\tpk{>}» «\tin{vma find 0xA0000000}»
 0xA0000000 -> no VMA (unmapped / untracked)
-\end{lstlisting}
+\end{tcblisting}
 
 \subsection{\texttt{vma test}——自测试}
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
-> vma test
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{vma test}»
 [vma-test] === VMA selftest ===
 [vma-test] test 1: add + find
 [vma-test] PASS
@@ -528,7 +528,7 @@ void* vmm_alloc_pages(unsigned count) {
 [vma-test] test 4: remove + find
 [vma-test] PASS
 [vma-test] === ALL PASS ===
-\end{lstlisting}
+\end{tcblisting}
 
 测试使用 \hex{F1000000}--\hex{F1010000}（64\,KiB）作为临时区域，
 验证 add/find/overlap/remove 四个基本操作的正确性。

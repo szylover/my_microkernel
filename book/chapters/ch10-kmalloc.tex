@@ -406,19 +406,19 @@ typedef struct kheap_stats {
 
 Shell 输入 \texttt{heap} 查看堆状态：
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
-> heap
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{heap}»
 === Kernel Heap Status ===
   backend:     first_fit
   heap size:   65536 bytes (64 KiB)
   used:        0 bytes (0 allocations)
   free:        65520 bytes (1 free blocks)
-\end{lstlisting}
+\end{tcblisting}
 
 初始：整个 64\,KiB 是一个大空闲块（65536 $-$ 16 = 65520）。执行 \texttt{heap test}：
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
-> heap test
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{heap test}»
 [heap] alloc: req=100 aligned=104
 [heap] alloc: split -> used 104 + free 65400 @ 0xE0000078
 [heap] alloc: return 0xE0000010
@@ -426,7 +426,7 @@ test: alloc 100B -> 0xE0000010
 ...
 [heap] free: merge forward ...
 test: free all -- OK
-\end{lstlisting}
+\end{tcblisting}
 
 可验证：100\,B 对齐到 104（$\lceil 100/8 \rceil \times 8$）；
 返回地址 = \hex{E0000000} + 16；合并正确执行。

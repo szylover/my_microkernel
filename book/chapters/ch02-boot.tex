@@ -607,7 +607,7 @@ Multiboot2 info 指针是\textbf{物理地址}，但 \texttt{kmain} 在分页开
 
 编译并启动后，串口应出现类似如下输出：
 
-\begin{lstlisting}[style=shellstyle, numbers=none]
+\begin{tcblisting}{consolebox}
 [serial] init ok (COM1, 38400 baud)
 [mmap] Multiboot2 Memory Map:
   [0x0 - 0x9FC00] type=1 (available)   ~639 KiB
@@ -615,7 +615,7 @@ Multiboot2 info 指针是\textbf{物理地址}，但 \texttt{kmain} 在分页开
   ...
 [pmm] backend: bitmap
 [pmm] init ok: 32495 free pages (126 MiB)
-\end{lstlisting}
+\end{tcblisting}
 
 \begin{itemize}
   \item 如果启动后什么都看不到——检查 QEMU 是否加了 \texttt{-serial stdio}。
