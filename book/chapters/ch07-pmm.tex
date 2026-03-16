@@ -436,31 +436,31 @@ pmm_init();
 % ============================================================================
 \section{验证}
 
-\begin{lstlisting}[style=shellstyle]
-szy-kernel > mmap
+\begin{tcblisting}{consolebox}
+«\tpk{szy-kernel >}» «\tin{mmap}»
 Available RAM: 0x00000000 - 0x0009FC00 (0MB)
 Available RAM: 0x00100000 - 0x07FE0000 (126MB)
 
-szy-kernel > free
+«\tpk{szy-kernel >}» «\tin{free}»
 PMM: free 32395 / 32768 pages
 PMM: free 129580KiB, used 1492KiB
 
-szy-kernel > pmm state
+«\tpk{szy-kernel >}» «\tin{pmm state}»
 PMM: base=0x00100000, page_size=4096
 PMM: total=32768, free=32395, used=373
 PMM: backend=bitmap
 
-szy-kernel > pmm alloc 3
+«\tpk{szy-kernel >}» «\tin{pmm alloc 3}»
 pmm alloc: 0x07FC1000
 pmm alloc: 0x07FC2000
 pmm alloc: 0x07FC3000
 
-szy-kernel > pmm freeall
+«\tpk{szy-kernel >}» «\tin{pmm freeall}»
 pmm freeall: freed 3 pages
 
-szy-kernel > pmm dump 0 32
+«\tpk{szy-kernel >}» «\tin{pmm dump 0 32}»
 ################################  idx   0 addr 0x00100000
-\end{lstlisting}
+\end{tcblisting}
 
 % ============================================================================
 \section{思考与练习}

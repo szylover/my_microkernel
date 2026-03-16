@@ -118,6 +118,33 @@
 
 \lstset{style=cstyle}  % 默认 C
 
+% 终端/控制台输出样式（不用于代码，仅用于展示运行结果）
+% ---- Solarized Dark 终端配色 ----
+\definecolor{sol-base03}{HTML}{002B36}   % 背景（深蓝黑）
+\definecolor{sol-base02}{HTML}{073642}   % 背景高亮
+\definecolor{sol-base0}{HTML}{839496}    % 默认输出文字（浅灰）
+\definecolor{sol-base1}{HTML}{93A1A1}    % 次要高亮
+\definecolor{sol-cream}{HTML}{EEE8D5}    % 用户输入（亮白偏暖）
+\definecolor{sol-green}{HTML}{859900}    % 提示符 $
+\definecolor{sol-cyan}{HTML}{2AA198}     % 提示符 >（内核 shell）
+\definecolor{sol-yellow}{HTML}{B58900}   % 可选强调
+
+% 终端内快捷命令（配合 escapeinside 使用）
+\newcommand{\tin}[1]{{\color{sol-cream}\bfseries #1}}       % 用户输入
+\newcommand{\tps}[1]{{\color{sol-green}\bfseries #1}}       % Bash 提示符 $
+\newcommand{\tpk}[1]{{\color{sol-cyan}\bfseries #1}}        % 内核提示符 >
+
+\lstdefinestyle{consolestyle}{
+  basicstyle=\ttfamily\small\color{sol-base0},
+  numbers=none,
+  frame=none,
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+  escapeinside={«}{»},
+}
+
 % --- 超链接 ---
 \usepackage{hyperref}
 \hypersetup{
@@ -161,7 +188,24 @@
 
 % 设计决策高亮框
 \usepackage{tcolorbox}
-\tcbuselibrary{breakable, skins}
+\tcbuselibrary{breakable, skins, listings}
+
+% Solarized Dark 终端输出环境
+\tcbset{
+  consolebox/.style={
+    colback=sol-base03,
+    colframe=sol-base02,
+    coltitle=sol-cream,
+    fonttitle=\bfseries\ttfamily\small,
+    title={\textcolor{sol-green}{\$}~Terminal},
+    listing only,
+    listing options={style=consolestyle},
+    breakable,
+    sharp corners,
+    boxrule=0.5pt,
+    left=4pt, right=4pt, top=2pt, bottom=2pt,
+  }
+}
 
 \newtcolorbox{designbox}[1][]{
   colback=blue!3,

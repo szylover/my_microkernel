@@ -18,11 +18,11 @@
 \section{必要工具安装}
 
 % TODO: 从 docs/howto.md 整理
-\begin{lstlisting}[style=shellstyle]
-sudo apt update
-sudo apt install -y nasm gcc binutils grub-pc-bin \
-    xorriso qemu-system-x86 gcc-multilib gdb bear
-\end{lstlisting}
+\begin{tcblisting}{consolebox}
+«\tps{\$}» «\tin{sudo apt update}»
+«\tps{\$}» «\tin{sudo apt install -y nasm gcc binutils grub-pc-bin}» \
+    «\tin{xorriso qemu-system-x86 gcc-multilib gdb bear}»
+\end{tcblisting}
 
 各工具的作用：
 
@@ -44,7 +44,7 @@ sudo apt install -y nasm gcc binutils grub-pc-bin \
 \section{项目目录结构}
 
 % TODO: 从 copilot-instructions.md 的文件结构复制
-\begin{lstlisting}[style=shellstyle]
+\begin{tcblisting}{consolebox, title={Directory Structure}}
 my_microkernel/
   src/
     boot/          # Multiboot2 引导 + 链接脚本
@@ -53,19 +53,19 @@ my_microkernel/
   docs/            # 项目文档
   book/            # 本书 LaTeX 源码
   Makefile         # 顶层 wrapper
-\end{lstlisting}
+\end{tcblisting}
 
 \section{构建与运行闭环}
 
 % TODO: 详细展开 make iso / make run / make debug 流程
 
-\begin{lstlisting}[style=shellstyle]
-cd src
-make iso        # 编译内核 + 打包 ISO
-make run        # QEMU 启动
-make debug      # QEMU -S 等待 GDB 连接
-make gdb        # 另一个终端启动 GDB
-\end{lstlisting}
+\begin{tcblisting}{consolebox}
+«\tps{\$}» «\tin{cd src}»
+«\tps{\$}» «\tin{make iso}»        # 编译内核 + 打包 ISO
+«\tps{\$}» «\tin{make run}»        # QEMU 启动
+«\tps{\$}» «\tin{make debug}»      # QEMU -S 等待 GDB 连接
+«\tps{\$}» «\tin{make gdb}»        # 另一个终端启动 GDB
+\end{tcblisting}
 
 \section{VS Code 调试集成}
 

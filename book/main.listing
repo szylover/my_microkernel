@@ -1,0 +1,11 @@
+«\tpk{>}» «\tin{vma test}»
+[vma-test] === VMA selftest ===
+[vma-test] test 1: add + find
+[vma-test] PASS
+[vma-test] test 2: find outside
+[vma-test] PASS
+[vma-test] test 3: overlap detection
+[vma-test] PASS
+[vma-test] test 4: remove + find
+[vma-test] PASS
+[vma-test] === ALL PASS ===
