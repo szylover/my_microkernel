@@ -1,0 +1,9 @@
+% figures/ch05/fig02-master-pic-icw3-04-irq2-1.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \foreach \i/\label in {0/0, 1/0, 2/\textbf{1}, 3/0, 4/0, 5/0, 6/0, 7/0} {
+    \node[bitcell, fill=white] (m\i) at (\i*0.8, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of m\i] {IRQ\i};
+  }
+  \node[below=0.5cm of m2, font=\small\itshape] {Slave 挂在 IRQ2};
+  \draw[pointer] (m2.south) -- ++(0, -0.3);
+\end{tikzpicture}

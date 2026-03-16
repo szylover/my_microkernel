@@ -1,0 +1,115 @@
+\section{Maple Tree 后端：\texttt{vma\_maple.c}}
+\label{sec:vma-maple}
+
+Linux 6.1（2022 年 12 月）用 Maple Tree 取代了沿用 20 年的红黑树来管理 VMA。
+我们实现了一个教学级的 B+ tree 变体，保留 Maple Tree 的核心设计理念。
+
+\begin{whybox}
+为什么 Linux 从红黑树换到 Maple Tree？
+
+\begin{enumerate}
+  \item \textbf{缓存友好}：B-tree 节点包含多个键值对（扇出度高），
+        一次缓存行加载可比较多个键，减少缓存 miss。
+        红黑树每个节点只有一个键，每次比较都可能 cache miss。
+  \item \textbf{RCU 安全}：Maple Tree 天然支持 Read-Copy-Update，
+        读者无需加锁即可遍历。红黑树的旋转在 RCU 下很难正确实现。
+  \item \textbf{区间原生支持}：以 \texttt{[start, end)} 区间为键，
+        不像红黑树只按 \texttt{start} 排序后再检查 \texttt{end}。
+  \item \textbf{减少指针追逐}：紧凑数组存储，指针数更少。
+\end{enumerate}
+\end{whybox}
+
+\subsection{节点结构}
+
+每个节点包含最多 9 个分割键（pivot）和 10 个子节点/数据槽位：
+
+\codefile{src/kernel/mm/vma\_maple.c}
+\begin{lstlisting}[style=cstyle]
+#define MAPLE_NODE_SLOTS    10
+#define MAPLE_MAX_PIVOTS    (MAPLE_NODE_SLOTS - 1)  /* 9 */
+
+typedef struct maple_node {
+    uint32_t      pivots[MAPLE_MAX_PIVOTS];
+    uint8_t       nr_entries;
+    uint8_t       is_leaf;
+    maple_node_t* parent;
+    union {
+        maple_node_t* children[MAPLE_NODE_SLOTS]; /* 内部节点 */
+        vm_area_t*    slots[MAPLE_NODE_SLOTS];    /* 叶节点 */
+    };
+} maple_node_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig08-maple-node}
+  \caption{Maple Tree 节点布局——内部节点存子指针，叶节点存 VMA 指针}
+  \label{fig:maple-node}
+\end{figure}
+
+\begin{whybox}
+为什么扇出度选 10？
+
+Linux 的 \texttt{maple\_range\_64} 有 16 个 slot，每节点 256 字节（4 个缓存行）。
+我们的 32 位系统中，10 个 pivot + 10 个 child + 元数据 $\approx$ 96 字节（$<$ 2 个缓存行）。
+扇出度 10 意味着 256 个 VMA 只需树高 3（$10^3 = 1000 > 256$），
+每次查找最多 3 次节点访问，每次访问时同一节点的 pivot 在同一缓存行中。
+\end{whybox}
+
+\subsection{查找：从根下降到叶}
+
+与红黑树不同，Maple Tree 的查找直接沿着 B+ tree 结构下降到叶节点，
+然后在叶中线性扫描 $\leq 10$ 个条目：
+
+\codefile{src/kernel/mm/vma\_maple.c}
+\begin{lstlisting}[style=cstyle]
+static const vm_area_t* maple_find(uint32_t addr)
+{
+    maple_node_t* node = g_maple_root;
+    while (!node->is_leaf) {
+        unsigned idx = internal_find_child(node, addr);
+        node = node->children[idx];
+    }
+    for (unsigned i = 0; i < node->nr_entries; i++) {
+        vm_area_t* vma = node->slots[i];
+        if (vma && addr >= vma->start && addr < vma->end)
+            return vma;
+    }
+    return NULL;
+}
+\end{lstlisting}
+
+\subsection{插入：分裂上提}
+
+当叶节点满了（10 个条目），需要分裂：
+
+\begin{enumerate}
+  \item 分配新叶节点，把当前叶的后半部分移到新叶
+  \item 把中间键上提到父节点
+  \item 如果父节点也满了，递归分裂——这是 B-tree 增高的唯一方式
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig09-maple-split}
+  \caption{Maple Tree 叶节点分裂——后半部分移到新节点，中间键上提}
+  \label{fig:maple-split}
+\end{figure}
+
+\subsection{与红黑树的对比}
+
+\begin{designbox}
+两种后端的适用场景：
+\begin{itemize}
+  \item \textbf{红黑树}：通用自平衡 BST，实现经典，适合教学。
+        每个节点只存一个 VMA，指针追逐多，但代码逻辑清晰。
+  \item \textbf{Maple Tree}：面向现代 CPU 缓存层次优化。
+        每次节点访问比较多个键（同一缓存行），树更矮，总缓存 miss 更少。
+        代价是分裂/合并逻辑比旋转更复杂。
+\end{itemize}
+在 VMA 数量 $< 256$ 的内核启动阶段，三种后端的性能差异可忽略。
+选择哪个主要看代码风格偏好和教学目标。
+\end{designbox}
+
+% ============================================================================
+

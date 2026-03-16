@@ -1,0 +1,32 @@
+\section{思考与练习}
+
+\begin{exercise}
+注释掉 \texttt{irq\_handler\_c} 中 \texttt{pic\_send\_eoi(irq)} 的调用。
+重新运行，第一次按键后再按键还有反应吗？恢复后试试只给 master 发 EOI
+（不给 slave），IRQ8--15 的设备是否受影响？
+\end{exercise}
+
+\begin{exercise}
+修改 \texttt{KBD\_BUF\_SIZE} 为 4（极小缓冲区）。快速连续打字 10 个字符，
+\texttt{keyboard\_getc} 最多能读到几个？改成 2 呢？
+思考：环形缓冲区的有效容量是 \texttt{size - 1} 还是 \texttt{size}？
+（提示：head == tail 表示空，那满的时候 head 和 tail 是什么关系？）
+\end{exercise}
+
+\begin{exercise}
+在键盘驱动中添加对 Caps Lock 的支持。Caps Lock 的 make code 是 \hex{3A}。
+它是一个"切换键"——按一次开启，再按一次关闭。
+提示：维护一个 \texttt{g\_caps\_lock} 状态，按下时 toggle。
+Caps Lock 只影响字母键的大小写，不影响数字和符号。
+\end{exercise}
+
+\begin{exercise}
+（挑战）当前 \texttt{0xE0} 前缀（方向键等）被直接忽略。
+实现方向键的处理：上箭头 (\hex{E0} \hex{48})、下箭头 (\hex{E0} \hex{50})、
+左箭头 (\hex{E0} \hex{4B})、右箭头 (\hex{E0} \hex{4D})。
+把它们翻译成 ANSI 转义序列（如 \texttt{\textbackslash x1b[A} 表示上箭头），
+放入键盘缓冲区。Shell 可以用这些序列实现光标移动。
+\end{exercise}
+
+% ============================================================================
+

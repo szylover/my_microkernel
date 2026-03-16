@@ -1,0 +1,38 @@
+% figures/ch04/fig05-isr-stack.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm, every node/.style={font=\small}]
+  % 从高地址到低地址
+  \node[memcell, minimum width=5cm, fill=yellow!15] (efl) {eflags};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of efl] (cs) {cs};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of cs] (eip) {eip};
+  \node[memcell, minimum width=5cm, fill=orange!15, below=0cm of eip] (err) {err\_code};
+  \node[memcell, minimum width=5cm, fill=orange!15, below=0cm of err] (ino) {int\_no};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of ino] (eax) {eax};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of eax] (ecx) {ecx};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of ecx] (edx) {edx};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of edx] (ebx) {ebx};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of ebx] (espf) {esp (快照)};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of espf] (ebp) {ebp};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of ebp] (esi) {esi};
+  \node[memcell, minimum width=5cm, fill=cyan!10, below=0cm of esi] (edi) {edi};
+  \node[memcell, minimum width=5cm, fill=purple!10, below=0cm of edi] (ds) {ds};
+  \node[memcell, minimum width=5cm, fill=purple!10, below=0cm of ds] (es) {es};
+  \node[memcell, minimum width=5cm, fill=purple!10, below=0cm of es] (fs) {fs};
+  \node[memcell, minimum width=5cm, fill=purple!10, below=0cm of fs] (gs) {gs};
+
+  % Labels
+  \node[right=0.8cm of efl, font=\scriptsize\itshape] {CPU 自动};
+  \node[right=0.8cm of ino, font=\scriptsize\itshape] {stub push};
+  \node[right=0.8cm of eax, font=\scriptsize\itshape] {pushad};
+  \node[right=0.8cm of ds, font=\scriptsize\itshape] {push ds/es/fs/gs};
+
+  \node[memaddr, left=0.3cm of gs] {ESP →};
+
+  % Brace: regs_t
+  \draw[decorate, decoration={brace, amplitude=10pt}]
+    ([xshift=-1.5cm]efl.north west) -- ([xshift=-1.5cm]gs.south west)
+    node[midway, left=12pt, font=\small\bfseries, rotate=90, anchor=south] {regs\_t};
+
+  % Address direction
+  \node[above=0.3cm of efl, font=\scriptsize] {高地址 ↑};
+  \node[below=0.3cm of gs, font=\scriptsize] {低地址 ↓};
+\end{tikzpicture}

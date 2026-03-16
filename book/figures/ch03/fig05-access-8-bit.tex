@@ -1,0 +1,7 @@
+% figures/ch03/fig05-access-8-bit.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  \foreach \i/\label in {0/Ac, 1/R/W, 2/DC, 3/Ex, 4/S, 5/DPL$_0$, 6/DPL$_1$, 7/P} {
+    \node[bitcell, minimum width=1.1cm, fill=white] (a\i) at (\i*1.1, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of a\i] {bit \i};
+  }
+\end{tikzpicture}

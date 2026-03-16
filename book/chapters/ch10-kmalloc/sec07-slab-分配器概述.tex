@@ -1,0 +1,49 @@
+\section{Slab 分配器概述}
+\label{sec:slab-overview}
+
+First-Fit 每次分配 $O(n)$ 遍历且易碎片化。\term{Slab 分配器}（源自 Solaris / Linux）
+针对这两个弱点：按固定大小预切 slot，相同大小 $O(1)$ 取。
+
+\subsection{7 级 Cache}
+
+\begin{center}
+\begin{tabular}{c c c l}
+\toprule
+编号 & 大小 & 每页 Slot 数 & 适用场景 \\
+\midrule
+0 & 32\,B  & $\approx 126$ & 小结构体、链表节点 \\
+1 & 64\,B  & $\approx 63$  & 字符串缓冲区 \\
+2 & 128\,B & $\approx 31$  & 进程控制块 \\
+3 & 256\,B & $\approx 15$  & 中型数据 \\
+4 & 512\,B & $\approx 7$   & 大结构体 \\
+5 & 1024\,B & 3            & 页级缓冲 \\
+6 & 2048\,B & 1            & 最大 cache \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{kmalloc(50)} $\to$ cache-64，内部碎片 = $14$\,B。
+
+\subsection{Slab 内存布局}
+
+每个 slab 占一页（4\,KiB），页头放 \texttt{slab\_header\_t}（含 128 位 bitmap）：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig07-slab-layout}
+  \caption{Slab 内存布局}
+  \label{fig:slab-layout}
+\end{figure}
+
+分配：\texttt{bitmap\_find\_first\_set} $\to$ 清位 $\to$ 计算地址，$O(1)$。
+释放：\texttt{ptr \& \~{}0xFFF} 找到页头 header，算 slot index $\to$ 置位，$O(1)$。
+
+\begin{designbox}
+\texttt{slab\_header\_t} 放在页头而非单独分配的三个原因：
+① 避免鸡生蛋——slab 自己就是分配器，metadata 不能再 \texttt{kmalloc}；
+② \texttt{kfree} 时页对齐即得 header，$O(1)$；
+③ 每页只损失 $\sim$40\,B（$<1\%$）。
+\end{designbox}
+
+% ============================================================================
+

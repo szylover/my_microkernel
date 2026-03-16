@@ -1,0 +1,17 @@
+% figures/ch03/fig04-8.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \foreach \i/\val/\desc in {
+    0/\texttt{0xFF}/limit\_low[7:0],
+    1/\texttt{0xFF}/limit\_low[15:8],
+    2/\texttt{0x00}/base\_low[7:0],
+    3/\texttt{0x00}/base\_low[15:8],
+    4/\texttt{0x00}/base\_mid,
+    5/\texttt{0x9A}/access,
+    6/\texttt{0xCF}/flags|limit\_hi,
+    7/\texttt{0x00}/base\_high} {
+    \node[memcell, minimum width=1.5cm, minimum height=0.7cm, fill=white]
+      (byte\i) at (\i*1.6, 0) {\val};
+    \node[font=\tiny\ttfamily, above=0.1cm of byte\i] {+\i};
+    \node[font=\tiny, below=0.05cm of byte\i, text=gray] {\desc};
+  }
+\end{tikzpicture}

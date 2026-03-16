@@ -1,0 +1,59 @@
+\section{\texttt{printk} 实现概述}
+\label{sec:printk}
+
+\texttt{printk} 是内核的 \texttt{printf}——唯一的格式化输出设施。
+所有输出最终通过 \texttt{serial\_putc} 发送到串口。
+
+\subsection{核心结构}
+
+\codefile{src/kernel/core/printk.c}
+\begin{lstlisting}[style=cstyle]
+void printk(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintk(fmt, args);     // 内部实现
+    va_end(args);
+}
+\end{lstlisting}
+
+\texttt{vprintk} 逐字符扫描 \texttt{fmt}，遇到 \texttt{\%} 时解析格式说明符。
+支持的格式如表~\ref{tab:printk-formats}：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{说明符} & \textbf{参数类型} & \textbf{说明} \\
+\midrule
+\texttt{\%d} & \texttt{int}      & 有符号十进制 \\
+\texttt{\%u} & \texttt{unsigned} & 无符号十进制 \\
+\texttt{\%x} & \texttt{unsigned} & 小写十六进制（无 \texttt{0x} 前缀） \\
+\texttt{\%p} & \texttt{void*}    & 指针，格式 \texttt{0xXXXXXXXX}（固定 8 位） \\
+\texttt{\%s} & \texttt{char*}    & 字符串（NULL 安全，输出 \texttt{(null)}） \\
+\texttt{\%c} & \texttt{int}      & 单个字符 \\
+\texttt{\%\%} & —               & 字面 \texttt{\%} \\
+\bottomrule
+\end{tabular}
+\caption{\texttt{printk} 支持的格式说明符}
+\label{tab:printk-formats}
+\end{table}
+
+\subsection{格式化选项}
+
+\texttt{vprintk} 还支持：
+\begin{itemize}
+  \item \textbf{宽度} —— \texttt{\%8x} 输出至少 8 个字符（右对齐，空格填充）。
+  \item \textbf{零填充} —— \texttt{\%08x} 左侧补零。
+  \item \textbf{左对齐} —— \texttt{\%-16s} 左对齐、右侧补空格。
+\end{itemize}
+
+\begin{designbox}
+为什么从头实现 \texttt{printk} 而不用 \texttt{libc} 的 \texttt{printf}？
+
+内核没有标准 C 库（freestanding 环境）。\texttt{printf} 依赖 \texttt{FILE*}、
+\texttt{stdout}、\texttt{write} 系统调用等基础设施——这些都是我们自己要实现的东西。
+内核的 \texttt{printk} 直接写 \texttt{serial\_putc}，零依赖、零缓冲。
+\end{designbox}
+
+% ============================================================================
+

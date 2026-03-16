@@ -1,0 +1,13 @@
+% figures/ch10/fig07-slab-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west}]
+  \node[cell, minimum width=2.2cm, fill=red!12]   at (0, 0) {\small slab\_hdr};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (2.2, 0) {\small obj[0]};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (3.6, 0) {\small obj[1]};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (5.0, 0) {\small obj[2]};
+  \node[font=\small] at (7.1, 0) {$\cdots$};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (7.6, 0) {\small obj[N]};
+  \draw[{|}-{|}, thick] (0, -0.6) -- (2.2, -0.6);
+  \node[font=\scriptsize, below] at (1.1, -0.6) {$\sim$40\,B};
+  \draw[{|}-{|}, thick] (0, 0.9) -- (9.0, 0.9);
+  \node[font=\scriptsize, above] at (4.5, 0.9) {一页 = 4096\,B};
+\end{tikzpicture}

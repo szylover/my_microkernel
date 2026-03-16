@@ -1,0 +1,14 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 32 位两级页表的硬件翻译流程
+  \item 掌握 Page Directory Entry (PDE) 和 Page Table Entry (PTE) 的位域格式
+  \item 实现 \texttt{vmm\_init}：用 4\,KiB 页表替换 \texttt{boot.asm} 的临时 PSE 映射
+  \item 实现 \texttt{vmm\_map\_page} / \texttt{vmm\_unmap\_page}：基本映射原语
+  \item 理解 TLB 缓存与 \texttt{invlpg} 刷新机制
+  \item 实现 High-Half Kernel 地址转换宏 \texttt{PHYS\_TO\_VIRT} / \texttt{VIRT\_TO\_PHYS}
+  \item 实现 \texttt{vmm\_alloc\_pages} / \texttt{vmm\_free\_pages}：批量虚拟页分配
+\end{itemize}
+
+% ============================================================================
+

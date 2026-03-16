@@ -1,0 +1,42 @@
+\section{\texttt{idt\_init()}：安装所有 gate}
+
+\codefile{src/kernel/arch/idt.c}
+\begin{lstlisting}[style=cstyle]
+void idt_init(void) {
+    // 清空 IDT（256 项全部归零）
+    for (size_t i = 0; i < 256; i++) {
+        idt[i] = (idt_entry_t){0};
+    }
+
+    // CPU 异常 0..31（全部用 Interrupt Gate 0x8E）
+    const uint8_t INT_GATE = 0x8E;
+    idt_set_gate(0,  isr0,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(1,  isr1,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    // ... 每个向量对应自己的 stub ...
+    idt_set_gate(14, isr14, GDT_KERNEL_CODE_SEL, INT_GATE); // #PF
+    // ... 一直到 31 ...
+
+    // 硬件 IRQ 0x20..0x2F（先装 gate，PIC remap 在下一章）
+    idt_set_gate(0x20, irq0,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    idt_set_gate(0x21, irq1,  GDT_KERNEL_CODE_SEL, INT_GATE);
+    // ... 到 0x2F ...
+
+    // 加载 IDTR
+    idtr.limit = (uint16_t)(sizeof(idt) - 1);  // 256*8-1 = 2047
+    idtr.base  = (uint32_t)(uintptr_t)&idt[0];
+    lidt(&idtr);
+}
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{lidt} 执行后：
+\begin{itemize}
+  \item IDTR.limit = 2047, IDTR.base = \&idt[0]
+  \item 从此刻起，任何异常都会通过新 IDT 分发
+  \item 中断仍然关闭（IF=0），直到我们显式 \texttt{sti}
+  \item 未安装的向量（32--255 中大部分）条目全为 0，触发时会引发 \#GP
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
+

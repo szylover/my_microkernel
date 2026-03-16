@@ -1,0 +1,76 @@
+\section{行编辑器：\texttt{shell\_readline}}
+
+\codefile{src/kernel/core/shell.c}
+\begin{lstlisting}[style=cstyle]
+static size_t shell_readline(char* buf, size_t cap) {
+    size_t len = 0;
+    for (;;) {
+        char c = console_getc();  // 阻塞等待一个字符
+
+        if (c == '\n') {
+            printk("\n");
+            buf[len] = '\0';
+            return len;
+        }
+
+        // Backspace (0x08) 或 DEL (0x7F)
+        if (c == '\b' || (unsigned char)c == 0x7F) {
+            if (len > 0) {
+                len--;
+                printk("\b \b");  // 退格 + 空格覆盖 + 再退格
+            }
+            continue;
+        }
+
+        // 忽略其他控制字符（< 0x20）
+        if ((unsigned char)c < 0x20) continue;
+
+        // 可见字符：存入缓冲区 + 回显
+        if (len + 1 < cap) {
+            buf[len++] = c;
+            printk("%c", c);
+        }
+    }
+}
+\end{lstlisting}
+
+退格的三步序列 \texttt{\textbackslash b \textbackslash{} \textbackslash b} 详解：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch06/fig04-textbackslash-b-textbackslash-}
+  \caption{退格三步序列：\texttt{\textbackslash b} (退格) → \texttt{' '} (覆盖) → \texttt{\textbackslash b} (归位)}
+\end{figure}
+
+\subsection{命令分词：\texttt{shell\_tokenize}}
+
+\codefile{src/kernel/core/shell.c}
+\begin{lstlisting}[style=cstyle]
+static int shell_tokenize(char* line, char** argv, int argv_cap) {
+    int argc = 0;
+    char* p = line;
+    while (*p) {
+        while (*p && is_space(*p)) p++;  // 跳过空白
+        if (!*p) break;
+        if (argc >= argv_cap) break;
+        argv[argc++] = p;               // 记录 token 起始
+        while (*p && !is_space(*p)) p++; // 跳过非空白
+        if (*p) { *p = '\0'; p++; }     // 用 NUL 截断 token
+    }
+    return argc;
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch06/fig05-tokenize-textbackslash-0-argv-}
+  \caption{tokenize 将空格替换为 \texttt{\textbackslash 0}，argv[] 指向各 token 起始}
+\end{figure}
+
+\begin{warnbox}
+\texttt{shell\_tokenize} 会\textbf{修改}输入字符串（用 \texttt{\textbackslash 0} 替换空格）。
+这是 C 中常见的"零拷贝分词"技巧——不分配新内存，但调用者不能再使用原始字符串。
+\end{warnbox}
+
+% ============================================================================
+

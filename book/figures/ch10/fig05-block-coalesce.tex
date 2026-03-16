@@ -1,0 +1,17 @@
+% figures/ch10/fig05-block-coalesce.tex — auto-extracted from chapter source
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.65cm, font=\ttfamily\small, anchor=west}]
+  \node[font=\bfseries\small, anchor=west] at (-0.5, 1.2) {合并前：};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (0, 0.5) {\small hdr};
+  \node[cell, minimum width=2.2cm, fill=green!12]  at (1.4, 0.5) {\small FREE};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (3.6, 0.5) {\small hdr};
+  \node[cell, minimum width=2.2cm, fill=green!12]  at (5.0, 0.5) {\small FREE};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (7.2, 0.5) {\small hdr};
+  \node[cell, minimum width=1.4cm, fill=orange!15] at (8.6, 0.5) {\small USED};
+  \node[font=\bfseries\small, anchor=west] at (-0.5, -0.3) {合并后：};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (0, -1) {\small hdr};
+  \node[cell, minimum width=5.8cm, fill=green!12]  at (1.4, -1) {\small 合并后大块};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (7.2, -1) {\small hdr};
+  \node[cell, minimum width=1.4cm, fill=orange!15] at (8.6, -1) {\small USED};
+  \draw[-{Stealth[length=3pt]}, dashed, gray] (4.0, 0.15) -- (4.0, -0.65);
+  \node[font=\scriptsize\color{gray}] at (4.0, -0.25) {被吞并};
+\end{tikzpicture}

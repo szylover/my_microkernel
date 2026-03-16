@@ -1,0 +1,128 @@
+\section{ISR 汇编 Stub：\texttt{isr\_stubs.asm}}
+
+这是 IDT 实现中最精密的部分——必须保证汇编 push 的顺序与 C 结构体\textbf{完全一致}。
+
+\subsection{问题：栈布局不统一}
+
+当异常发生时，CPU 自动压栈：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig03-cpu}
+  \caption{异常入口时 CPU 自动压栈的内容}
+\end{figure}
+
+问题：有些异常（如 \#PF）CPU 会额外压入一个 error code，有些（如 \#DE）不会。
+如果不处理这个差异，C handler 无法用统一的结构体解析栈。
+
+\subsection{解决方案：ISR\_NOERR 和 ISR\_ERR 宏}
+
+\codefile{src/kernel/arch/isr\_stubs.asm}
+\begin{lstlisting}[style=nasmstyle]
+; 无错误码的异常：手动 push 0 对齐
+%macro ISR_NOERR 1
+isr%1:
+    push dword 0          ; 伪 err_code = 0
+    push dword %1         ; int_no
+    jmp isr_common_stub
+%endmacro
+
+; 有错误码的异常：CPU 已经 push 了 err_code
+%macro ISR_ERR 1
+isr%1:
+    push dword %1         ; int_no（err_code 已在栈上）
+    jmp isr_common_stub
+%endmacro
+\end{lstlisting}
+
+效果：无论哪种异常，进入 \texttt{isr\_common\_stub} 时栈顶布局总是统一的：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig04-isr_common_stub}
+  \caption{进入 isr\_common\_stub 时的统一栈布局}
+\end{figure}
+
+\subsection{\texttt{isr\_common\_stub}：逐指令详解}
+
+\codefile{src/kernel/arch/isr\_stubs.asm}
+\begin{lstlisting}[style=nasmstyle, numbers=left]
+isr_common_stub:
+    pushad              ; (1) 保存 8 个通用寄存器
+
+    push ds             ; (2) 保存段寄存器
+    push es             ; (3)
+    push fs             ; (4)
+    push gs             ; (5)
+
+    mov ax, 0x10        ; (6) 切换到内核数据段
+    mov ds, ax          ; (7)
+    mov es, ax          ; (8)
+    mov fs, ax          ; (9)
+    mov gs, ax          ; (10)
+
+    push esp            ; (11) 参数：指向 regs_t 的指针
+    call isr_handler_c  ; (12) 调用 C handler
+    add esp, 4          ; (13) 清理参数
+
+    pop gs              ; (14) 恢复段寄存器
+    pop fs              ; (15)
+    pop es              ; (16)
+    pop ds              ; (17)
+
+    popad               ; (18) 恢复通用寄存器
+
+    add esp, 8          ; (19) 跳过 int_no 和 err_code
+
+    iret                ; (20) 从中断返回
+\end{lstlisting}
+
+\paragraph{第 2 行：\texttt{pushad}}
+
+\texttt{pushad} 一次性压入 8 个通用寄存器，顺序是：
+EAX → ECX → EDX → EBX → ESP → EBP → ESI → EDI。
+
+\begin{warnbox}
+\texttt{pushad} 压入的 ESP 是\textbf{执行 pushad 之前}的值（即"当时的快照"），
+不是当前栈指针。这意味着 \texttt{regs\_t} 中的 \texttt{esp} 字段只是参考值，
+不能用来恢复栈。\texttt{popad} 恢复时会跳过 ESP 字段。
+\end{warnbox}
+
+\paragraph{第 3--6 行：保存段寄存器}
+
+\texttt{push ds/es/fs/gs} 的顺序决定了 \texttt{regs\_t} 中对应字段的位置。
+\textbf{顺序必须严格匹配}——下面会看到 C 结构体的字段排列。
+
+\paragraph{第 7--11 行：切换到内核数据段}
+
+异常可能发生在段寄存器指向非内核段的时候（将来用户态会遇到）。
+在调用 C handler 前，先确保 DS/ES 指向内核数据段 \hex{10}。
+
+\paragraph{第 12--14 行：调用 C handler}
+
+\texttt{push esp} 把当前栈指针作为参数传给 \texttt{isr\_handler\_c}。
+此时 ESP 恰好指向刚才 push 的所有数据的起始位置——也就是 \texttt{regs\_t*}。
+
+\paragraph{第 20 行：\texttt{add esp, 8}}
+
+跳过栈上的 \texttt{int\_no} 和 \texttt{err\_code}（各 4 字节），
+让 ESP 指向 CPU 自动压入的 EIP/CS/EFLAGS。
+
+\paragraph{第 21 行：\texttt{iret}}
+
+\texttt{iret}（Interrupt Return）从栈上弹出 EIP、CS、EFLAGS，恢复到中断前的执行状态。
+
+\begin{cpustate}
+\texttt{iret} 执行时 CPU 弹出三个值：
+
+\begin{enumerate}
+  \item 弹出 EIP → 恢复程序计数器
+  \item 弹出 CS → 恢复代码段（如果 CS.RPL 变了，触发特权级切换）
+  \item 弹出 EFLAGS → 恢复标志位（包括 IF，如果原来中断是开的就恢复开启）
+\end{enumerate}
+
+如果发生了特权级切换（如从 Ring 0 回到 Ring 3），还会额外弹出 ESP 和 SS。
+\end{cpustate}
+
+% ============================================================================
+

@@ -1,0 +1,14 @@
+\section{本章小结}
+
+PMM 的核心数据结构和算法：
+
+\begin{enumerate}
+  \item \textbf{\texttt{pmm\_ops\_t}}：9 个函数指针，定义后端接口
+  \item \textbf{\texttt{pmm.c}}：薄 dispatch 层，\texttt{g\_pmm\_ops} 指针转发
+  \item \textbf{Bitmap}：\texttt{pmm\_region} 结构体 × 多区域，每页 1 bit，线性扫描分配
+  \item \textbf{Buddy}：\texttt{free\_list[MAX\_ORDER+1]}，$2^k$ 分裂/合并
+  \item \textbf{初始化}：解析 mmap → 计算位图放置 → 保留内核 + mb2 → selftest
+\end{enumerate}
+
+下一章在 PMM 之上构建虚拟内存管理器（VMM）——两级页表和分页机制。
+

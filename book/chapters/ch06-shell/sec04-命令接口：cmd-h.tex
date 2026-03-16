@@ -1,0 +1,50 @@
+\section{命令接口：\texttt{cmd.h}}
+
+\codefile{src/include/kernel/cmd.h}
+\begin{lstlisting}[style=cstyle]
+typedef int (*cmd_fn_t)(int argc, char** argv);
+
+typedef struct {
+    const char* name;   // 命令名（如 "cls"）
+    const char* help;   // 帮助文本
+    cmd_fn_t fn;        // 处理函数
+} cmd_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch06/fig02-cmd_t}
+  \caption{\texttt{cmd\_t} 结构体的内存布局与指针指向}
+\end{figure}
+
+每个命令做成独立编译单元（一个 \texttt{.c} 文件），在文件末尾导出一个
+\texttt{const cmd\_t}：
+
+\codefile{src/kernel/cmds/cmd\_cls.c}
+\begin{lstlisting}[style=cstyle]
+// cmd_cls.c
+static int cmd_cls_main(int argc, char** argv) {
+    (void)argc; (void)argv;
+    printk("\x1b[2J\x1b[H");  // ANSI 清屏 + 光标归位
+    return 0;
+}
+
+const cmd_t cmd_cls = {
+    .name = "cls",
+    .help = "Clear screen (serial ANSI)",
+    .fn   = cmd_cls_main,
+};
+\end{lstlisting}
+
+\begin{designbox}
+为什么用 \texttt{const cmd\_t}（全局常量）而非注册函数？
+
+\begin{enumerate}
+  \item 编译期确定：不需要运行时动态分配内存（此时堆还没初始化）
+  \item 链接器自动包含：只要 \texttt{.o} 文件被链接进来，\texttt{cmd\_t} 就存在
+  \item Shell 只需 \texttt{extern} 声明 + 加入数组即可
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+

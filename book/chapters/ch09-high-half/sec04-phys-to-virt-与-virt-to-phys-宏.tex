@@ -1,0 +1,32 @@
+\section{\texttt{PHYS\_TO\_VIRT} 与 \texttt{VIRT\_TO\_PHYS} 宏}
+
+在 \texttt{vmm.h} 中定义了两个核心转换宏：
+
+\codefile{src/include/kernel/vmm.h}
+\begin{lstlisting}[style=cstyle, caption={地址转换宏（vmm.h）}]
+#define KERNEL_VIRT_OFFSET  0xC0000000u
+
+#define PHYS_TO_VIRT(paddr) \
+    ((void*)((uint32_t)(paddr) + KERNEL_VIRT_OFFSET))
+
+#define VIRT_TO_PHYS(vaddr) \
+    ((uint32_t)(vaddr) - KERNEL_VIRT_OFFSET)
+\end{lstlisting}
+
+\begin{whybox}[title={作用域限制}]
+这两个宏\textbf{仅适用于内核直接映射区域}。
+
+对于通过 \texttt{vmm\_alloc\_pages()} 动态映射的虚拟地址（如内核堆），
+物理页可能是不连续的，$\text{virt} - \hex{C0000000} \neq \text{phys}$。
+这些地址需要通过查询页表（\texttt{vmm\_get\_physical()}）来获取物理地址。
+
+简单规则：
+\begin{itemize}
+  \item PMM 返回的物理地址 → 用 \texttt{PHYS\_TO\_VIRT} 转换后解引用
+  \item PDE/PTE 中存储的始终是物理地址（给 CPU/MMU 用）
+  \item 内核堆指针（\texttt{kmalloc} 返回值）→ 不能用 \texttt{VIRT\_TO\_PHYS}
+\end{itemize}
+\end{whybox}
+
+% ============================================================================
+

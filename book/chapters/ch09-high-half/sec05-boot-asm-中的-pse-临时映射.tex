@@ -1,0 +1,86 @@
+\section{boot.asm 中的 PSE 临时映射}
+
+在第~\ref{ch:vmm}~章中我们已经知道，\texttt{boot.asm} 使用 4\,MiB PSE 大页
+建立临时映射。这里我们详细分析为什么需要\textbf{同时}建立 identity mapping 和
+high-half mapping。
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle, caption={boot.asm：构建双重 PSE 映射}]
+; PSE PDE: [31:22]=phys_base | PS(bit7) | RW(bit1) | P(bit0)
+;   flags = 0x83
+xor ecx, ecx              ; ecx = 0..255
+.fill_pse:
+    mov eax, ecx
+    shl eax, 22            ; eax = ecx * 4 MiB
+    or  eax, 0x83          ; PS | RW | Present
+    mov [boot_pd + ecx*4],         eax  ; identity: PD[i]
+    mov [boot_pd + 768*4 + ecx*4], eax  ; high-half: PD[768+i]
+    inc ecx
+    cmp ecx, 256
+    jb  .fill_pse
+\end{lstlisting}
+
+这段代码会产生如下映射：
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  \textbf{PDE 范围} & \textbf{虚拟地址} & \textbf{映射到物理地址} \\
+  \midrule
+  PD[0..255]     & \hex{00000000}--\hex{3FFFFFFF} & \hex{00000000}--\hex{3FFFFFFF} \\
+  PD[768..1023]  & \hex{C0000000}--\hex{FFFFFFFF} & \hex{00000000}--\hex{3FFFFFFF} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\begin{whybox}
+为什么不能只建 high-half mapping，跳过 identity mapping？
+
+因为在开启分页的那一瞬间，\texttt{EIP} 仍然指向物理地址 $\sim$\hex{001xxxxx}
+（\texttt{boot.asm} 的 \texttt{.boot} 段链接在低地址）。
+如果没有 identity mapping，\reg{CR0.PG} 置 1 后 CPU 取下一条指令时会
+Page Fault → Double Fault → Triple Fault → 重启。
+
+\textbf{时序回顾}：
+\begin{enumerate}
+  \item \texttt{mov cr0, eax} — 开启分页，此时 EIP $\approx$ \hex{001xxxxx}
+  \item CPU 取下一条指令 → 虚拟地址 \hex{001xxxxx} → identity mapping 翻译 → 物理 \hex{001xxxxx} ✓
+  \item \texttt{jmp \_start\_high} — 跳转到虚拟地址 \hex{C01xxxxx}
+  \item CPU 取指 → \hex{C01xxxxx} → high-half mapping 翻译 → 物理 \hex{001xxxxx} ✓
+  \item 从此以后，代码运行在 high-half，identity mapping 变成了"遗产"
+\end{enumerate}
+\end{whybox}
+
+开启分页的关键指令序列：
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle, caption={boot.asm：开启分页并跳转到 high-half}]
+; 加载页目录物理地址到 CR3
+mov eax, boot_pd
+mov cr3, eax
+
+; 开启分页 (CR0.PG = 1)
+; [CPU STATE] 从下一条指令开始，所有内存访问经过 MMU
+mov eax, cr0
+or  eax, 0x80000000     ; bit 31 = PG
+mov cr0, eax
+
+; --- 分页已开启，identity mapping 保证 EIP 仍然有效 ---
+
+; 跳转到 high-half 虚拟地址
+mov eax, _start_high    ; _start_high 链接在 0xC01xxxxx
+jmp eax
+\end{lstlisting}
+
+\begin{cpustate}
+执行 \texttt{mov cr0, eax}（PG=1）后：
+\begin{itemize}
+  \item CR3 → \texttt{boot\_pd}（物理地址）
+  \item EIP 仍在低地址（$\sim$\hex{001xxxxx}），通过 PD[0] 的 identity mapping 继续运行
+  \item \texttt{jmp \_start\_high} 后，EIP 切换到 \hex{C01xxxxx}，通过 PD[768] 的 high-half mapping 运行
+  \item 此后内核栈、全局变量等均位于 \hex{C0xxxxxx}+ 虚拟地址
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
+

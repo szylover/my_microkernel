@@ -1,0 +1,14 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解内核为什么需要字节级堆分配器——PMM 只能以 4\,KiB 页为粒度
+  \item 掌握堆虚拟地址区域规划：\hex{E0000000}--\hex{F0000000}，256\,MiB
+  \item 理解 \texttt{heap\_ops\_t} 可插拔后端接口（与 \texttt{pmm\_ops\_t} 同一模式）
+  \item 实现 First-Fit 空闲链表：\texttt{block\_header\_t}、分配拆分、释放合并
+  \item 了解 Slab 分配器后端：固定大小 cache + bitmap
+  \item 实现 \texttt{kmalloc\_init}：映射物理页并初始化后端
+  \item 掌握 \texttt{kheap\_stats\_t} 统计信息的含义
+\end{itemize}
+
+% ============================================================================
+

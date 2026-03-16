@@ -1,0 +1,9 @@
+% figures/ch06/fig04-textbackslash-b-textbackslash-.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0.5cm]
+  \node[font=\ttfamily] (s0) {szy-kernel > helo};
+  \node[font=\ttfamily, below=0.5cm of s0] (s1) {szy-kernel > hel\textvisiblespace};
+  \node[font=\ttfamily, below=0.5cm of s1] (s2) {szy-kernel > hel};
+  \node[right=1cm of s0, font=\scriptsize\itshape] {按 Backspace 前};
+  \node[right=1cm of s1, font=\scriptsize\itshape] {\textbackslash b 退格 → 空格覆盖 'o'};
+  \node[right=1cm of s2, font=\scriptsize\itshape] {再 \textbackslash b 退格到正确位置};
+\end{tikzpicture}

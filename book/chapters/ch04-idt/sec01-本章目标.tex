@@ -1,0 +1,13 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 中断与异常的完整机制：向量号、异常分类、错误码
+  \item 掌握 IDT 门描述符的 8 字节二进制布局（逐 bit）
+  \item 理解 Interrupt Gate 与 Trap Gate 的区别
+  \item 设计 ISR 汇编 stub → C handler 的栈布局约定
+  \item 实现 \texttt{regs\_t} 结构体，与汇编 push 顺序严格对应
+  \item 用 \texttt{int3} 自检验证整条链路
+\end{itemize}
+
+% ============================================================================
+

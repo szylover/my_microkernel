@@ -1,0 +1,16 @@
+\section{本章小结}
+
+本章我们完整拆解了 GDT 的每一个字节：
+
+\begin{enumerate}
+  \item \textbf{段选择子}（16 位）= index + TI + RPL
+  \item \textbf{描述符}（8 字节）= 碎片化的 base/limit + access byte + flags
+  \item \textbf{段寄存器}的双面结构：可见的 selector + 不可见的 hidden cache
+  \item \textbf{gdt\_flush.asm}：lgdt 加载表 → far jump 刷新 CS → mov 刷新 DS/SS
+\end{enumerate}
+
+GDT 是 x86 保护模式的基础设施，也是后续 TSS（Ring 3 栈切换）和
+IDT（中断门需要代码段 selector）的前置条件。
+
+下一章我们设置 IDT，让内核能捕获 CPU 异常并打印诊断信息。
+

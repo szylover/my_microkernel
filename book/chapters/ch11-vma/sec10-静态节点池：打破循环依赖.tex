@@ -1,0 +1,67 @@
+\section{静态节点池：打破循环依赖}
+\label{sec:vma-pool}
+
+回顾初始化顺序（第~\ref{ch:kmalloc}~章）：
+
+\codefile{src/kernel/mm/vma.c}
+\begin{lstlisting}[style=cstyle]
+pmm_init();        /* 1. 物理内存 */
+vmm_init();        /* 2. 页表 */
+kmalloc_init();    /* 3. 内核堆 */
+vma_init();        /* 4. VMA — 依赖 kmalloc */
+\end{lstlisting}
+
+VMA 初始化在 \texttt{kmalloc\_init()} \emph{之后}——所以后端\emph{可以}用 \texttt{kmalloc}
+分配内部节点。但存在一个微妙问题：
+
+\begin{whybox}
+如果 \texttt{kmalloc} 的堆增长（\texttt{heap\_grow}）需要调 \texttt{vmm\_alloc\_pages}，
+而 \texttt{vmm\_alloc\_pages} 内部想注册 VMA（跟踪新分配的虚拟地址区间），
+VMA 的 \texttt{add} 又要 \texttt{kmalloc} 分配红黑树节点——
+循环依赖！
+
+解决方案：红黑树后端使用\textbf{静态节点池}（编译期 \texttt{static} 数组），
+预分配固定数量的节点（如 256 个），完全绕开 \texttt{kmalloc}。
+代价是 VMA 上限固定，但内核启动阶段区域数量很少，256 足够。
+\end{whybox}
+
+静态节点池的实现使用空闲链表，实现 $O(1)$ 的分配和释放：
+
+\codefile{src/kernel/mm/vma\_rbtree.c}
+\begin{lstlisting}[style=cstyle]
+static rb_node_t  g_pool[RB_MAX_NODES];
+static rb_node_t* g_free_head;   /* 空闲链表头 */
+
+static void pool_init(void)
+{
+    g_free_head = &g_pool[0];
+    for (unsigned i = 0; i < RB_MAX_NODES - 1; i++)
+        g_pool[i].right = &g_pool[i + 1];
+    g_pool[RB_MAX_NODES - 1].right = NULL;
+}
+
+static rb_node_t* pool_alloc(void)
+{
+    if (!g_free_head) return NULL;
+    rb_node_t* n = g_free_head;
+    g_free_head = n->right;
+    n->color = RB_RED;   /* 新节点默认红色 */
+    n->parent = n->left = n->right = NIL;
+    return n;
+}
+
+static void pool_free(rb_node_t* n)
+{
+    n->right = g_free_head;
+    g_free_head = n;
+}
+\end{lstlisting}
+
+用 \texttt{right} 指针串联空闲节点，省掉额外的 \texttt{next} 字段。
+分配时从头部取，释放时插回头部——均为 $O(1)$。
+
+Maple Tree 后端同理，使用独立的节点池（\texttt{maple\_node\_t g\_node\_pool[64]}）
+和 VMA 数据池（\texttt{vm\_area\_t g\_vma\_pool[256]}）。
+
+% ============================================================================
+

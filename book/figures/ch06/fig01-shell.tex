@@ -1,0 +1,16 @@
+% figures/ch06/fig01-shell.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  layer/.style={draw, rounded corners, minimum width=9cm, minimum height=0.9cm, font=\small},
+  arr/.style={-{Stealth[length=3pt]}, thick},
+]
+  \node[layer, fill=gray!10]   (input)  at (0, 4) {输入层 \texttt{console.c} — keyboard\_try\_getc + serial\_try\_getc};
+  \node[layer, fill=blue!10]   (line)   at (0, 3) {行编辑 \texttt{shell\_readline()} — 回显 / Backspace / Enter};
+  \node[layer, fill=green!10]  (parse)  at (0, 2) {命令解析 \texttt{shell\_tokenize()} — 空格分词 → argv[]};
+  \node[layer, fill=orange!10] (disp)   at (0, 1) {命令分发 \texttt{shell\_dispatch()} — 遍历 g\_cmds[] 匹配 name};
+  \node[layer, fill=cyan!10]   (cmds)   at (0, 0) {命令实现 \texttt{cmds/*.c} — 每个命令一个独立编译单元};
+
+  \draw[arr] (input) -- (line);
+  \draw[arr] (line)  -- (parse);
+  \draw[arr] (parse) -- (disp);
+  \draw[arr] (disp)  -- (cmds);
+\end{tikzpicture}

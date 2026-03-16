@@ -1,0 +1,12 @@
+% figures/ch04/fig02-type_attr-8-bit.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  \foreach \i/\label in {0/Type$_0$, 1/Type$_1$, 2/Type$_2$, 3/Type$_3$,
+                          4/0, 5/DPL$_0$, 6/DPL$_1$, 7/P} {
+    \node[bitcell, fill=white] (t\i) at (\i*1.0, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of t\i] {bit \i};
+  }
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (0, -0.4) -- (3.5, -0.4) node[midway, below=5pt, font=\small] {Type (4 bit)};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (4.5, -0.4) -- (6.5, -0.4) node[midway, below=5pt, font=\small] {DPL};
+\end{tikzpicture}

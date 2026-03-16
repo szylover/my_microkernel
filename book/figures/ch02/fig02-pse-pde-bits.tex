@@ -1,0 +1,22 @@
+% figures/ch02/fig02-pse-pde-bits.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  bitcell/.style={draw, minimum width=0.7cm, minimum height=0.6cm,
+                  font=\ttfamily\small, anchor=west},
+]
+  \node[bitcell, minimum width=4.2cm, fill=blue!12] at (0, 0) {\small phys[31:22]};
+  \node[bitcell, minimum width=2.8cm, fill=gray!10] at (4.2, 0) {\small 保留/PAT};
+  \node[bitcell, fill=red!15]   at (7, 0) {\small 1};
+  \node[bitcell, fill=gray!10]  at (7.7, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (8.4, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (9.1, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (9.8, 0) {\small 0};
+  \node[bitcell, fill=green!15] at (10.5, 0) {\small 1};
+  \node[bitcell, fill=green!15] at (11.2, 0) {\small 1};
+
+  \node[font=\scriptsize, above] at (2.1, 0.6) {bits 31--22};
+  \node[font=\scriptsize, above] at (7.0, 0.6) {PS};
+  \node[font=\scriptsize, above] at (10.5, 0.6) {RW};
+  \node[font=\scriptsize, above] at (11.2, 0.6) {P};
+
+  \node[font=\scriptsize, below] at (6, -0.3) {0x83 = 1000\,0011$_2$ = PS $|$ RW $|$ Present};
+\end{tikzpicture}

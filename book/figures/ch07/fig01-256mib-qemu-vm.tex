@@ -1,0 +1,22 @@
+% figures/ch07/fig01-256mib-qemu-vm.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % 地址轴
+  \draw[-{Stealth}, thick] (0, 0) -- (12, 0) node[right, font=\small] {物理地址};
+
+  % 区域
+  \fill[green!20] (0, 0.2) rectangle (1.2, 0.8);
+  \node[font=\tiny] at (0.6, 0.5) {640K};
+  \node[font=\tiny, below] at (0.6, 0.15) {\hex{0}};
+
+  \fill[red!20] (1.2, 0.2) rectangle (2, 0.8);
+  \node[font=\tiny] at (1.6, 0.5) {保留};
+  \node[font=\tiny, below] at (1.6, 0.15) {VGA/ROM};
+
+  \fill[green!30] (2, 0.2) rectangle (10, 0.8);
+  \node[font=\small] at (6, 0.5) {可用 RAM（\textasciitilde 126 MiB）};
+  \node[font=\tiny, below] at (2, 0.15) {\hex{100000}};
+  \node[font=\tiny, below] at (10, 0.15) {\hex{7FE0000}};
+
+  \fill[orange!20] (10, 0.2) rectangle (12, 0.8);
+  \node[font=\tiny] at (11, 0.5) {ACPI/保留};
+\end{tikzpicture}

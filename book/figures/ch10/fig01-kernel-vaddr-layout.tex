@@ -1,0 +1,24 @@
+% figures/ch10/fig01-kernel-vaddr-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=7cm, font=\small, anchor=south west},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  \node[block, minimum height=1.6cm, fill=red!10] (dm) at (0, 0)
+    {\parbox{6.5cm}{\centering\textbf{直接映射区}\\
+     \texttt{virt = phys + 0xC0000000}}};
+  \node[block, minimum height=1.2cm, fill=yellow!15] (alloc) at (0, 1.6)
+    {\parbox{6.5cm}{\centering\textbf{VMM 动态分配区}\\
+     \texttt{vmm\_alloc\_pages} bump}};
+  \node[block, minimum height=1.8cm, fill=green!15] (heap) at (0, 2.8)
+    {\parbox{6.5cm}{\centering\textbf{内核堆}\\
+     \texttt{kmalloc}/\texttt{kfree}，初始 64\,KiB，按需 grow}};
+  \node[block, minimum height=0.8cm, fill=gray!10] (unmapped) at (0, 4.6)
+    {\parbox{6.5cm}{\centering 未映射 / 保留}};
+  \node[addr] at (-0.2, 0)    {\hex{C0000000}};
+  \node[addr] at (-0.2, 1.6)  {\hex{D0000000}};
+  \node[addr] at (-0.2, 2.8)  {\hex{E0000000}};
+  \node[addr] at (-0.2, 4.6)  {\hex{F0000000}};
+  \node[addr] at (-0.2, 5.4)  {\hex{FFFFFFFF}};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (7.2, 2.8) -- (7.2, 4.6) node[midway, right=8pt, font=\scriptsize] {256\,MiB};
+\end{tikzpicture}

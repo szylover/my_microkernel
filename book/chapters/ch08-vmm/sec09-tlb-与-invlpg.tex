@@ -1,0 +1,44 @@
+\section{TLB 与 \texttt{invlpg}}
+
+\term{TLB}（Translation Lookaside Buffer）是 CPU 内部的\term{页表翻译缓存}。
+每次虚拟地址翻译都需要两次内存访问（读 PDE + 读 PTE），TLB 将最近的翻译结果
+缓存起来，命中时可以跳过页表查找。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch08/fig06-tlb-flow}
+  \caption{TLB 命中与未命中流程}
+  \label{fig:tlb-flow}
+\end{figure}
+
+当我们修改了一个 PTE（改映射或取消映射），TLB 中可能还缓存着\textbf{过时}的翻译。
+必须用 \texttt{invlpg} 指令使对应条目失效：
+
+\codefile{src/kernel/arch/paging\_flush.asm}
+\begin{lstlisting}[style=nasmstyle]
+; void vmm_invlpg(uint32_t virt_addr);
+vmm_invlpg:
+    mov eax, [esp + 4]      ; eax = virt_addr
+    invlpg [eax]            ; 使该虚拟地址的 TLB 条目失效
+    ret
+\end{lstlisting}
+
+\begin{whybox}
+为什么不每次都重新加载 \reg{CR3}（刷新\textbf{全部} TLB）？
+
+重新加载 CR3 会使\textbf{所有}非 Global 的 TLB 条目失效，代价远大于
+\texttt{invlpg} 只失效一条。在高频映射操作中（如缺页处理），
+\texttt{invlpg} 的性能优势很明显。但在大批量拆除映射时
+（如 \texttt{vmm\_unmap\_identity}），重新加载 CR3 反而更简单高效。
+\end{whybox}
+
+\begin{thinkbox}
+\texttt{vmm\_unmap\_identity()} 清除了数百个 PDE 后调用
+\texttt{vmm\_load\_page\_directory()} 重新加载 CR3。
+如果改成对每个被清除的 PDE 覆盖的虚拟地址逐页 \texttt{invlpg}，
+需要多少次 \texttt{invlpg} 调用？
+（提示：每个 PDE 覆盖 1024 页。假设清除了 16 个 PDE\ldots）
+\end{thinkbox}
+
+% ============================================================================
+

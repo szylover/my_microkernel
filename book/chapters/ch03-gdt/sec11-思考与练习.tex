@@ -1,0 +1,29 @@
+\section{思考与练习}
+
+\begin{exercise}
+在 GDB 中的 \texttt{gdt\_flush} 处，执行 \texttt{lgdt} 前后分别用
+\texttt{info reg cs ds} 查看段寄存器值。\texttt{lgdt} 前后 CS 的值有变化吗？
+\texttt{jmp 0x08:.flush\_cs} 后呢？画出这三个时间点段寄存器的状态变化。
+\end{exercise}
+
+\begin{exercise}
+把内核代码段的 access 从 \hex{9A} 改为 \hex{92}（变成数据段描述符）。
+重新编译运行。会在什么时候崩溃？（提示：far jump 时 CPU 发现 CS 指向的
+不是代码段……）错误是 \#GP 还是 Triple Fault？
+\end{exercise}
+
+\begin{exercise}
+在 GDT 中添加第 4 个条目：DPL=3 的用户代码段（access=\hex{FA}，
+base=0，limit=\hex{FFFFF}，flags=\hex{C0}）。计算它的 selector。
+不需要使用它，只需确认添加后内核正常启动。这是 Stage 10 (Ring 3) 的准备。
+\end{exercise}
+
+\begin{exercise}
+（挑战）注释掉 \texttt{gdt\_flush} 中的 \texttt{mov ss, ax} 一行。
+运行后内核似乎仍然工作？为什么没有立刻崩溃？
+提示：GRUB 设置的 SS 可能和我们的 \hex{10} 一样——用 GDB 验证你的猜想。
+如果 GRUB 的 SS 配置不同（比如用了不同的 GDT 布局），会怎样？
+\end{exercise}
+
+% ============================================================================
+

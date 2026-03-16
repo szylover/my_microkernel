@@ -1,0 +1,12 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 保护模式下段式内存管理的完整机制
+  \item 掌握 GDT 描述符的 8 字节二进制布局（逐 bit）
+  \item 实现平坦内存模型的 GDT：Null + Kernel Code + Kernel Data
+  \item 理解段寄存器的可见部分（selector）与不可见部分（hidden cache）
+  \item 掌握 \texttt{lgdt} + far jump + \texttt{mov} 刷新段寄存器的完整流程
+\end{itemize}
+
+% ============================================================================
+

@@ -1,0 +1,88 @@
+\section{GDT 描述符的 8 字节布局}
+
+这是 x86 最"反直觉"的数据结构之一——由于历史兼容性（286→386），
+字段被拆成不连续的碎片散布在 8 个字节中。
+
+\subsection{内存中的字节布局}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig03-gdt-layout}
+  \caption{GDT 描述符的 8 字节内存布局（地址从下到上递增）}
+  \label{fig:gdt-layout}
+\end{figure}
+
+\subsection{对应的 C 结构体}
+
+\codefile{src/include/arch/gdt.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct __attribute__((packed)) {
+    uint16_t limit_low;   // 字节 0-1: limit 的低 16 位 [0:15]
+    uint16_t base_low;    // 字节 2-3: base 的低 16 位 [0:15]
+    uint8_t  base_mid;    // 字节 4:   base 的中间 8 位 [16:23]
+    uint8_t  access;      // 字节 5:   访问字节 (P/DPL/S/Type)
+    uint8_t  gran;        // 字节 6:   高4位=flags, 低4位=limit[16:19]
+    uint8_t  base_high;   // 字节 7:   base 的最高 8 位 [24:31]
+} gdt_entry_t;
+\end{lstlisting}
+
+\begin{warnbox}
+\texttt{\_\_attribute\_\_((packed))} 是\textbf{必须的}。没有它，编译器可能在
+\texttt{base\_mid} 后面插入 padding 字节来对齐 \texttt{access}，导致整个结构体
+从 8 字节膨胀到 12 字节——CPU 会把 padding 当作描述符的一部分，结果完全错乱。
+\end{warnbox}
+
+\begin{thinkbox}
+为什么 base 被拆成三段（low/mid/high）而非一个连续的 32 位字段？
+
+因为 286 时代 base 只有 24 位（3 字节），386 扩展到 32 位时在末尾加了 1 字节。
+Intel 必须向后兼容 286 的描述符格式，所以新增的 8 位只能塞到字节 7。
+这就是为什么 base 是"碎片化"的——历史包袱。
+\end{thinkbox}
+
+\subsection{重组逻辑：\texttt{gdt\_set\_entry}}
+
+因为字段是碎片化的，填充描述符需要位操作来拆分和重组：
+
+\codefile{src/kernel/arch/gdt.c}
+\begin{lstlisting}[style=cstyle]
+static void gdt_set_entry(int idx, uint32_t base, uint32_t limit,
+                          uint8_t access, uint8_t flags) {
+    // --- limit 拆分：低 16 位放 limit_low，高 4 位放 gran 的低半 ---
+    gdt[idx].limit_low = (uint16_t)(limit & 0xFFFF);
+    //   limit = 0x000FFFFF
+    //   limit & 0xFFFF = 0xFFFF → limit_low
+
+    // --- base 拆分：3 段 ---
+    gdt[idx].base_low  = (uint16_t)(base & 0xFFFF);
+    //   base = 0x00000000
+    //   base & 0xFFFF = 0x0000 → base_low
+
+    gdt[idx].base_mid  = (uint8_t)((base >> 16) & 0xFF);
+    //   (base >> 16) & 0xFF = 0x00 → base_mid
+
+    gdt[idx].base_high = (uint8_t)((base >> 24) & 0xFF);
+    //   (base >> 24) & 0xFF = 0x00 → base_high
+
+    // --- access 直接赋值（完整的 8 位） ---
+    gdt[idx].access = access;
+
+    // --- gran 字节：高 4 位是 flags，低 4 位是 limit 的 [16:19] ---
+    gdt[idx].gran = (uint8_t)((flags & 0xF0) | ((limit >> 16) & 0x0F));
+    //   flags = 0xC0 → 高 4 位 = 0xC (= 1100b → G=1, D/B=1)
+    //   (limit >> 16) & 0x0F = 0x0F → 低 4 位
+    //   结果: 0xCF
+}
+\end{lstlisting}
+
+对于我们的内核代码段（base=0, limit=\hex{FFFFF}, access=\hex{9A}, flags=\hex{C0}），
+实际写入内存的 8 字节是：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig04-8}
+  \caption{内核代码段描述符在内存中的实际 8 字节}
+\end{figure}
+
+% ============================================================================
+

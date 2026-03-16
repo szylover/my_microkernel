@@ -1,0 +1,19 @@
+% figures/ch07/fig02-pmm.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, rounded corners, minimum width=3.5cm, minimum height=0.7cm, font=\small},
+  arr/.style={-{Stealth[length=3pt]}, thick},
+]
+  \node[block, fill=gray!10]   (caller) {调用者 (vmm.c, kmalloc.c)};
+  \node[block, fill=blue!10, below=0.8cm of caller] (api) {pmm.h 公开 API};
+  \node[block, fill=green!10, below=0.8cm of api]   (disp) {pmm.c dispatch 层};
+  \node[block, fill=orange!10, below left=1cm and -0.5cm of disp]  (bm) {pmm\_bitmap.c};
+  \node[block, fill=cyan!10, below right=1cm and -0.5cm of disp]   (bd) {pmm\_buddy.c};
+
+  \draw[arr] (caller) -- (api);
+  \draw[arr] (api) -- (disp);
+  \draw[arr] (disp) -- (bm) node[midway, left, font=\scriptsize] {g\_pmm\_ops};
+  \draw[arr] (disp) -- (bd);
+
+  \node[right=0.5cm of bm, font=\scriptsize\itshape] {bitmap 后端};
+  \node[right=0.5cm of bd, font=\scriptsize\itshape] {buddy 后端};
+\end{tikzpicture}

@@ -1,0 +1,37 @@
+% figures/ch04/fig01-idt-gate-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \node[memcell, minimum width=6cm, fill=green!10] (b0) {offset\_low [7:0]};
+  \node[memaddr, left=0.3cm of b0] {+0};
+
+  \node[memcell, minimum width=6cm, fill=green!10, above=0cm of b0] (b1) {offset\_low [15:8]};
+  \node[memaddr, left=0.3cm of b1] {+1};
+
+  \node[memcell, minimum width=6cm, fill=blue!10, above=0cm of b1] (b2) {selector [7:0]};
+  \node[memaddr, left=0.3cm of b2] {+2};
+
+  \node[memcell, minimum width=6cm, fill=blue!10, above=0cm of b2] (b3) {selector [15:8]};
+  \node[memaddr, left=0.3cm of b3] {+3};
+
+  \node[memcell, minimum width=6cm, fill=gray!15, above=0cm of b3] (b4) {zero (must be 0)};
+  \node[memaddr, left=0.3cm of b4] {+4};
+
+  \node[memcell, minimum width=6cm, fill=red!10, above=0cm of b4] (b5) {type\_attr};
+  \node[memaddr, left=0.3cm of b5] {+5};
+
+  \node[memcell, minimum width=6cm, fill=green!10, above=0cm of b5] (b6) {offset\_high [23:16]};
+  \node[memaddr, left=0.3cm of b6] {+6};
+
+  \node[memcell, minimum width=6cm, fill=green!10, above=0cm of b6] (b7) {offset\_high [31:24]};
+  \node[memaddr, left=0.3cm of b7] {+7};
+
+  % Braces
+  \draw[decorate, decoration={brace, amplitude=8pt}]
+    ([xshift=0.3cm]b1.north east) -- ([xshift=0.3cm]b0.south east)
+    node[midway, right=10pt, font=\small, text=green!50!black] {handler 地址低 16 位};
+  \draw[decorate, decoration={brace, amplitude=8pt}]
+    ([xshift=0.3cm]b3.north east) -- ([xshift=0.3cm]b2.south east)
+    node[midway, right=10pt, font=\small, text=blue!50!black] {代码段 selector};
+  \draw[decorate, decoration={brace, amplitude=8pt}]
+    ([xshift=0.3cm]b7.north east) -- ([xshift=0.3cm]b6.south east)
+    node[midway, right=10pt, font=\small, text=green!50!black] {handler 地址高 16 位};
+\end{tikzpicture}

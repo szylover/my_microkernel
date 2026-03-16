@@ -1,0 +1,33 @@
+\section{可插拔后端：\texttt{heap\_ops\_t} 接口}
+
+与第~\ref{ch:pmm}~章的 \texttt{pmm\_ops\_t} 相同模式——接口与实现解耦：
+
+\codefile{src/include/kernel/kmalloc.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct heap_ops {
+    const char* name;
+    void  (*init)(void* start, size_t size);
+    void* (*alloc)(size_t size);
+    void  (*free)(void* ptr);
+    void  (*stats)(kheap_stats_t* out);
+} heap_ops_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig02-kmalloc-dispatch}
+  \caption{\texttt{kmalloc} 可插拔后端调用链}
+  \label{fig:kmalloc-dispatch}
+\end{figure}
+
+\texttt{kconfig.h} 编译期选择后端（\texttt{0}=first\_fit, \texttt{1}=slab），
+\texttt{kmain.c} 启动时注册并调用 \texttt{kmalloc\_init()}。
+
+\begin{thinkbox}
+"dispatch + 后端"模式在 Linux 内核中随处可见（VFS、I/O 调度器、协议栈）。
+如果不用函数指针表，而在每个调用点用 \texttt{\#if} 选择实现，会有什么问题？
+（提示：代码膨胀与维护成本）
+\end{thinkbox}
+
+% ============================================================================
+

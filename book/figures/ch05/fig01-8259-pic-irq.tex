@@ -1,0 +1,33 @@
+% figures/ch05/fig01-8259-pic-irq.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  chip/.style={draw, minimum width=2.5cm, minimum height=3.5cm, font=\small\bfseries},
+  irqline/.style={draw, -{Stealth[length=3pt]}, thick},
+]
+  % Master PIC
+  \node[chip, fill=blue!10] (master) {Master PIC};
+  \node[above=0.1cm of master, font=\small] {端口 \hex{20}/\hex{21}};
+
+  % Slave PIC
+  \node[chip, fill=orange!10, right=3cm of master] (slave) {Slave PIC};
+  \node[above=0.1cm of slave, font=\small] {端口 \hex{A0}/\hex{A1}};
+
+  % CPU
+  \node[draw, minimum width=1.5cm, minimum height=1cm, left=2.5cm of master, fill=gray!10] (cpu) {CPU};
+
+  % CPU ← Master
+  \draw[irqline] (master.west) -- (cpu.east) node[midway, above, font=\scriptsize] {INTR};
+
+  % Master ← Slave (on IRQ2)
+  \draw[irqline] (slave.west) -- (master.east) node[midway, above, font=\scriptsize] {IRQ2};
+
+  % IRQ lines on master (left side labels)
+  \foreach \i/\dev in {0/PIT Timer, 1/Keyboard, 2/Cascade, 3/COM2, 4/COM1, 5/LPT2, 6/FDC, 7/LPT1} {
+    \node[right=0.2cm of master.north east, yshift={-\i*0.42cm-0.3cm}, font=\tiny, anchor=west, text width=2.5cm] {IRQ\i: \dev};
+  }
+
+  % IRQ lines on slave
+  \foreach \i/\dev in {8/CMOS RTC, 9/Free, 10/Free, 11/Free, 12/PS\slash 2 Mouse, 13/FPU, 14/Primary ATA, 15/Secondary ATA} {
+    \pgfmathtruncatemacro{\idx}{\i-8}
+    \node[right=0.2cm of slave.north east, yshift={-\idx*0.42cm-0.3cm}, font=\tiny, anchor=west, text width=2.8cm] {IRQ\i: \dev};
+  }
+\end{tikzpicture}

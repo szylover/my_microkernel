@@ -1,0 +1,82 @@
+\section{UART 16550 串口输出}
+\label{sec:serial}
+
+在 OS 开发中，串口是最可靠的调试输出通道——
+VGA 文本模式需要正确的显存映射，而串口只需要几个 I/O 端口。
+QEMU 可以将串口输出重定向到终端（\texttt{-serial stdio}），非常方便。
+
+\subsection{16550 寄存器表}
+
+COM1 的基地址为 \hex{3F8}，各寄存器偏移如表~\ref{tab:uart-regs}：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cllp{5.5cm}}
+\toprule
+\textbf{偏移} & \textbf{DLAB=0} & \textbf{DLAB=1} & \textbf{说明} \\
+\midrule
++0 & DATA（读/写） & DLL（除数低字节） & 收发数据 / 波特率低字节 \\
++1 & IER（中断使能） & DLM（除数高字节） & 中断控制 / 波特率高字节 \\
++2 & IIR / FCR & — & 中断识别 / FIFO 控制 \\
++3 & LCR（线路控制） & — & 数据位/停止位/校验/DLAB \\
++4 & MCR（Modem 控制） & — & RTS/DTR/OUT 控制 \\
++5 & LSR（线路状态） & — & bit\,0=DataReady, bit\,5=THR Empty \\
+\bottomrule
+\end{tabular}
+\caption{UART 16550 寄存器（COM1 = \hex{3F8}）}
+\label{tab:uart-regs}
+\end{table}
+
+\texttt{DLAB}（Divisor Latch Access Bit）是 LCR 的 bit\,7。
+当 DLAB=1 时，偏移 +0 和 +1 变为波特率除数寄存器。
+
+\subsection{\texttt{serial\_init()} 初始化步骤}
+
+\codefile{src/kernel/drivers/serial.c}
+\begin{lstlisting}[style=cstyle]
+void serial_init(void) {
+    outb(COM1 + 1, 0x00);  // 1. 关闭所有中断
+    outb(COM1 + 3, 0x80);  // 2. 设置 DLAB=1
+    outb(COM1 + 0, 0x03);  // 3. 除数低字节=3 -> 38400 baud
+    outb(COM1 + 1, 0x00);  // 4. 除数高字节=0
+    outb(COM1 + 3, 0x03);  // 5. 8N1, DLAB=0
+    outb(COM1 + 2, 0xC7);  // 6. 启用 FIFO, 清缓冲, 14B 阈值
+    outb(COM1 + 4, 0x0B);  // 7. RTS/DTR/OUT2 置位
+}
+\end{lstlisting}
+
+逐步解析：
+\begin{enumerate}
+  \item 关中断——此时 PIC/IDT 还没设好，串口中断会引发异常。
+  \item DLAB=1——让偏移 +0/+1 变成除数寄存器。
+  \item 除数 = 3——波特率 = $115200 \div 3 = 38400$。
+  \item 除数高字节 = 0。
+  \item LCR = \texttt{0x03} = 8 数据位、无校验、1 停止位（8N1），同时 DLAB=0。
+  \item FCR = \texttt{0xC7} = 启用 FIFO + 清空收发缓冲区 + 14 字节触发阈值。
+  \item MCR = \texttt{0x0B} = RTS + DTR + OUT2（OUT2 在 PC 上与 IRQ 线相连）。
+\end{enumerate}
+
+\subsection{发送一个字符}
+
+\codefile{src/kernel/drivers/serial.c}
+\begin{lstlisting}[style=cstyle]
+void serial_putc(char c) {
+    if (c == '\n') {
+        while (!serial_transmit_empty()) {}
+        outb(COM1, '\r');       // CRLF: 先回车
+    }
+    while (!serial_transmit_empty()) {} // 等 THR 空
+    outb(COM1, (uint8_t)c);
+}
+
+static int serial_transmit_empty(void) {
+    return (inb(COM1 + 5) & 0x20) != 0;  // LSR bit5
+}
+\end{lstlisting}
+
+发送前轮询 LSR 的 bit\,5（Transmitter Holding Register Empty）。
+遇到 \texttt{'\textbackslash n'} 时先发 \texttt{'\textbackslash r'}（CR），
+确保串口终端换行后光标回到行首（否则输出会呈"阶梯状"）。
+
+% ============================================================================
+

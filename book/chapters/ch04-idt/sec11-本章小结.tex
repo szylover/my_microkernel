@@ -1,0 +1,15 @@
+\section{本章小结}
+
+IDT 是内核的"异常/中断事件分发表"。本章涵盖了：
+
+\begin{enumerate}
+  \item \textbf{IDT 门描述符}（8 字节）：offset 拆分 + selector + type\_attr 逐 bit
+  \item \textbf{ISR 汇编 stub}：NOERR/ERR 宏统一栈布局 → pushad → push 段寄存器 → call C
+  \item \textbf{regs\_t 结构体}：字段顺序严格对应汇编 push 顺序（图 \ref{fig:isr-stack}）
+  \item \textbf{Page Fault 特殊处理}：读 \reg{CR2} + 5 bit 错误码解析
+  \item \textbf{int3 自检}：验证整条链路 ISR stub → C handler → iret
+\end{enumerate}
+
+有了 IDT，内核不再"闷死"——任何 CPU 错误都会被捕获并打印诊断信息。
+下一章我们接入硬件中断：初始化 8259 PIC，让键盘能触发 IRQ 并输入字符。
+

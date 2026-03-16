@@ -1,0 +1,12 @@
+% figures/ch07/fig05-buddy-allocator-free_list-orde.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \foreach \k/\sz in {0/1, 1/2, 2/4, 3/8, 4/16} {
+    \node[font=\small\ttfamily, anchor=east] (lbl\k) at (-0.5, -\k*0.7) {free\_list[\k]};
+    \node[memcell, minimum width=1.5cm, fill=green!15, right=0.2cm of lbl\k] (n\k) {$2^{\k}$ 页};
+    \node[memcell, minimum width=1.5cm, fill=green!15, right=0.3cm of n\k] (m\k) {$2^{\k}$ 页};
+    \draw[pointer] (n\k.east) -- (m\k.west);
+    \node[right=0.3cm of m\k, font=\scriptsize\ttfamily] {→ NULL};
+  }
+  \node[font=\small, above=0.3cm of n0] {order 0: 单页 (4K)};
+  \node[font=\small, above=0.3cm of n4] {order 4: 16 页 (64K)};
+\end{tikzpicture}

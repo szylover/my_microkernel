@@ -1,0 +1,14 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 High-Half Kernel 的地址空间布局：用户态 0--3\,GiB / 内核态 3--4\,GiB
+  \item 掌握直接映射（Direct Mapping）的原理与公式 $\text{virt} = \text{phys} + \hex{C0000000}$
+  \item 理解 \texttt{boot.asm} 中 PSE 临时映射为何需要同时建立 identity 与 high-half
+  \item 掌握 \texttt{PHYS\_TO\_VIRT} / \texttt{VIRT\_TO\_PHYS} 宏的使用场景与限制
+  \item 实现 \texttt{vmm\_unmap\_identity()}：拆除 identity mapping，释放低地址空间
+  \item 理解指针转换的必要性：\texttt{g\_mb2\_info}、PMM bitmap 等指针的迁移
+  \item 掌握拆除后的 CPU 状态变化与 TLB 刷新
+\end{itemize}
+
+% ============================================================================
+

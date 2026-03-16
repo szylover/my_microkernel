@@ -1,0 +1,18 @@
+\section{架构设计}
+
+Shell 采用五层架构，各层通过清晰的函数接口解耦：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch06/fig01-shell}
+  \caption{Shell 五层架构}
+\end{figure}
+
+\begin{thinkbox}
+为什么要把输入抽象成 Console 层？如果 Shell 直接调 \texttt{keyboard\_getc()}，
+将来要支持串口远程调试（QEMU \texttt{-serial stdio}）时需要改 shell.c。
+有了 Console 层，输入源的增减只改 console.c 一处。
+\end{thinkbox}
+
+% ============================================================================
+

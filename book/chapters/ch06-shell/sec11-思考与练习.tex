@@ -1,0 +1,26 @@
+\section{思考与练习}
+
+\begin{exercise}
+添加一个 \texttt{echo} 命令，将 \texttt{argv[1..argc-1]} 用空格连接后打印。
+示例：\texttt{echo hello world} 输出 \texttt{hello world}。
+\end{exercise}
+
+\begin{exercise}
+当前 \texttt{shell\_readline} 的缓冲区是 128 字节。如果用户连续输入 200 个字符
+（不按回车），超出部分会怎样？修改为在超出时发出 \texttt{\textbackslash a}（BEL，蜂鸣器）提醒。
+\end{exercise}
+
+\begin{exercise}
+实现命令历史：用上箭头键（ANSI \texttt{\textbackslash x1b[A}）回显上一条命令。
+提示：维护 \texttt{history[8][128]} 环形数组。键盘驱动需要先支持方向键
+（ch05 的挑战练习）。
+\end{exercise}
+
+\begin{exercise}
+（挑战）让 \texttt{streq} 支持前缀匹配：输入 \texttt{shut} 自动匹配到
+\texttt{shutdown}（如果只有一个候选）。如果有多个候选，打印所有匹配项。
+这就是简单的 Tab 补全。
+\end{exercise}
+
+% ============================================================================
+

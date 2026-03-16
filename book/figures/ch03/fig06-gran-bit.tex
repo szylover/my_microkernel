@@ -1,0 +1,13 @@
+% figures/ch03/fig06-gran-bit.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  \foreach \i/\label in {
+    0/Lim$_{16}$, 1/Lim$_{17}$, 2/Lim$_{18}$, 3/Lim$_{19}$,
+    4/AVL, 5/L, 6/D/B, 7/G} {
+    \node[bitcell, minimum width=1.1cm, fill=white] (g\i) at (\i*1.1, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of g\i] {bit \i};
+  }
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (0, -0.4) -- (3.3, -0.4) node[midway, below=5pt, font=\small] {limit[16:19]};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (3.3, -0.4) -- (8.7, -0.4) node[midway, below=5pt, font=\small] {flags};
+\end{tikzpicture}

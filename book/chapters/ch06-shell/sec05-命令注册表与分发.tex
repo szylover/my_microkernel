@@ -1,0 +1,62 @@
+\section{命令注册表与分发}
+
+\subsection{注册表：静态指针数组}
+
+\codefile{src/kernel/core/shell.c}
+\begin{lstlisting}[style=cstyle]
+// shell.c 中
+extern const cmd_t cmd_cls;
+extern const cmd_t cmd_shutdown;
+extern const cmd_t cmd_cmds;
+// ... 每加一个命令就加一行 extern ...
+
+static const cmd_t* g_cmds[] = {
+    &cmd_cls,
+    &cmd_shutdown,
+    &cmd_cmds,
+    &cmd_mmap,
+    &cmd_free,
+    &cmd_pmm,
+    &cmd_vmm,
+    &cmd_heap,
+    &cmd_vma,
+};
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch06/fig03-g_cmds-cmd_t}
+  \caption{\texttt{g\_cmds[]} 是指向各 \texttt{cmd\_t} 常量的指针数组}
+\end{figure}
+
+\subsection{分发逻辑}
+
+\codefile{src/kernel/core/shell.c}
+\begin{lstlisting}[style=cstyle]
+static void shell_dispatch(char* line) {
+    if (!line || !*line) return;
+
+    char* argv[16];
+    int argc = shell_tokenize(line, argv, 16);
+    if (argc <= 0) return;
+
+    // 遍历注册表，匹配 name
+    for (size_t i = 0; i < sizeof(g_cmds)/sizeof(g_cmds[0]); i++) {
+        if (streq(argv[0], g_cmds[i]->name)) {
+            g_cmds[i]->fn(argc, argv);
+            return;
+        }
+    }
+
+    printk("Unknown command: %s\n", argv[0]);
+}
+\end{lstlisting}
+
+\begin{thinkbox}
+当前遍历是 $O(n)$——对几十个命令完全够用。如果将来命令数量上千
+（不太可能在内核态），可以改为排序数组 + 二分查找或哈希表。
+但这是过度工程化——\term{YAGNI}（You Aren't Gonna Need It）。
+\end{thinkbox}
+
+% ============================================================================
+

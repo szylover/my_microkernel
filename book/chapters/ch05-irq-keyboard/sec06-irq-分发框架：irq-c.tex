@@ -1,0 +1,71 @@
+\section{IRQ 分发框架：\texttt{irq.c}}
+
+\subsection{函数指针数组}
+
+\codefile{src/kernel/arch/irq.c}
+\begin{lstlisting}[style=cstyle]
+static irq_handler_t g_irq_handlers[16];  // 初始全为 NULL
+
+void irq_install_handler(uint8_t irq, irq_handler_t handler) {
+    if (irq < 16) {
+        g_irq_handlers[irq] = handler;
+    }
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch05/fig03-irq-g_irq_handlers}
+  \caption{IRQ 分发表：\texttt{g\_irq\_handlers} 函数指针数组}
+\end{figure}
+
+\subsection{统一 C 入口}
+
+\codefile{src/kernel/arch/irq.c}
+\begin{lstlisting}[style=cstyle]
+void irq_handler_c(const irq_regs_t* r) {
+    uint8_t irq = (uint8_t)(r->int_no - 0x20u);
+
+    // 调用已注册的 handler（如果有）
+    if (irq < 16 && g_irq_handlers[irq]) {
+        g_irq_handlers[irq](r);
+    }
+
+    // 统一发送 EOI
+    pic_send_eoi(irq);
+}
+\end{lstlisting}
+
+\begin{designbox}
+EOI 在 dispatcher 中统一发送，而非让每个 handler 自己发。好处：
+\begin{enumerate}
+  \item 驱动开发者不会忘记发 EOI
+  \item handler 只需专注于设备逻辑
+  \item 将来做更复杂的 IRQ 优先级管理时只改 dispatcher 一处
+\end{enumerate}
+\end{designbox}
+
+\subsection{IRQ 汇编 Stub}
+
+IRQ stub 和 ISR stub 结构相同（push err\_code=0 → push int\_no → pushad → call C）：
+
+\codefile{src/kernel/arch/irq\_stubs.asm}
+\begin{lstlisting}[style=nasmstyle]
+%macro IRQ 2
+irq%1:
+    push dword 0          ; err_code = 0（硬件 IRQ 无 error code）
+    push dword %2         ; int_no = vector (0x20 + irq)
+    jmp irq_common_stub
+%endmacro
+
+IRQ 0, 0x20    ; IRQ0 → 向量 0x20
+IRQ 1, 0x21    ; IRQ1 → 向量 0x21（键盘）
+; ... 共 16 个 ...
+\end{lstlisting}
+
+\texttt{irq\_common\_stub} 和 \texttt{isr\_common\_stub} 完全一样
+（pushad → push 段寄存器 → call C → 恢复 → iret），
+只是调用的 C 函数不同（\texttt{irq\_handler\_c} vs \texttt{isr\_handler\_c}）。
+
+% ============================================================================
+

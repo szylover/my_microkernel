@@ -1,0 +1,38 @@
+\section{背景知识：8259 PIC 硬件架构}
+
+PC 有两片级联的 8259A PIC（Programmable Interrupt Controller），
+
+每片管理 8 条 IRQ 线，合计 16 条：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch05/fig01-8259-pic-irq}
+  \caption{8259 PIC 主从级联架构与 IRQ 分配}
+\end{figure}
+
+\subsection{为什么必须 Remap？}
+
+PIC 上电后的默认映射：
+
+\begin{longtable}{lcl}
+  \toprule
+  \textbf{IRQ} & \textbf{默认向量} & \textbf{冲突} \\
+  \midrule
+  IRQ0 & 8  & \#DF (Double Fault) \\
+  IRQ1 & 9  & Coprocessor Segment Overrun \\
+  IRQ7 & 15 & Reserved \\
+  \bottomrule
+\end{longtable}
+
+IRQ0-7 的默认向量 8-15 和 CPU 异常\textbf{完全重叠}！如果不 remap，
+按键盘（IRQ1）会被 CPU 当成向量 9（Coprocessor Segment Overrun）处理。
+
+\begin{thinkbox}
+如果你忘了做 remap 就启用了 IRQ1，按键盘后会发生什么？
+CPU 认为向量 9 是一个异常，会调用 \texttt{isr9} 的 handler。
+ISR handler 打印 ``Coprocessor Segment Overrun'' 然后 halt。
+键盘表现为：按一下就死机。
+\end{thinkbox}
+
+% ============================================================================
+

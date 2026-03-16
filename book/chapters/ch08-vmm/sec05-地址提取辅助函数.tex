@@ -1,0 +1,24 @@
+\section{地址提取辅助函数}
+
+虚拟地址需要拆成 PD index 和 PT index：
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+static inline uint32_t pd_index(uint32_t virt) {
+    return (virt >> 22) & 0x3FFu;  // 高 10 位
+}
+
+static inline uint32_t pt_index(uint32_t virt) {
+    return (virt >> 12) & 0x3FFu;  // 中 10 位
+}
+\end{lstlisting}
+
+例如，虚拟地址 \hex{C0100000}：
+\begin{itemize}
+  \item \texttt{pd\_index} = \hex{C0100000} >> 22 = \texttt{768} = PDE[768]
+  \item \texttt{pt\_index} = (\hex{C0100000} >> 12) \& \hex{3FF} = \texttt{256} = PTE[256]
+  \item offset = \hex{C0100000} \& \hex{FFF} = 0
+\end{itemize}
+
+% ============================================================================
+

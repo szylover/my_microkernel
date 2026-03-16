@@ -1,0 +1,30 @@
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{手动页表查找}：给定虚拟地址 \hex{C0B8000}，手工计算 PD index、PT index
+和 offset。如果该地址通过 \texttt{vmm\_init} 被映射到
+\texttt{phys = virt $-$ \hex{C0000000}}，写出该 PDE 和 PTE 的完整 32 位值
+（假设 flags = \texttt{PTE\_PRESENT | PTE\_WRITABLE}）。
+\end{exercise}
+
+\begin{exercise}
+\textbf{页表内存开销分析}：假设 \texttt{vmm\_init} 需要映射 256\,MiB 物理内存
+（identity + high-half 双重映射），需要多少个 Page Table？这些页表本身
+占多少物理内存？与 4\,MiB 的单级平坦页表相比，节省了多少？
+（提示：256\,MiB / 4\,MiB-per-PDE = 64 个 Page Table × 2 = 128 × 4\,KiB = 512\,KiB）
+\end{exercise}
+
+\begin{exercise}
+\textbf{拆除 identity mapping 后的陷阱}：在 \texttt{vmm\_unmap\_identity()} 执行后，
+如果内核代码中仍有一处 \texttt{*(char*)0xB8000 = 'X';} 尝试直接写 VGA buffer，
+会发生什么？如何修改这行代码让它在 high-half 环境下正确工作？
+\end{exercise}
+
+\begin{exercise}
+\textbf{添加只读映射支持}：修改 \texttt{vmm\_map\_page}，当 flags 中不包含
+\texttt{PTE\_WRITABLE} 时，映射的页面应该是只读的。编写一个测试：
+映射一个只读页，尝试写入，观察是否触发 Page Fault。
+（提示：当前 \reg{CR0}.WP=0 时 Ring\,0 不受 Read-Only 限制，
+需要在 \texttt{vmm\_enable\_paging} 中同时设置 WP 位。）
+\end{exercise}
+

@@ -1,0 +1,33 @@
+\section{命令实现示例}
+
+\subsection{\texttt{cmd\_cls}：清屏}
+
+\codefile{src/kernel/cmds/cmd\_cls.c}
+\begin{lstlisting}[style=cstyle]
+printk("\x1b[2J\x1b[H");
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{\textbackslash x1b[2J}：ANSI 转义序列——清除整个屏幕
+  \item \texttt{\textbackslash x1b[H}：光标移到左上角 (1,1)
+\end{itemize}
+
+这只对支持 ANSI 的串口终端有效。QEMU \texttt{-serial stdio} 的宿主终端通常支持。
+
+\subsection{\texttt{cmd\_shutdown}：关机}
+
+\codefile{src/kernel/cmds/cmd\_shutdown.c}
+\begin{lstlisting}[style=cstyle]
+outw(0x604, 0x2000);   // QEMU ACPI 关机
+outw(0xB004, 0x2000);  // Bochs 关机
+cpu_halt_forever();     // cli + hlt 循环
+\end{lstlisting}
+
+\begin{whybox}
+为什么要尝试两个不同的端口？因为 QEMU 和 Bochs 的 ACPI 关机端口不同。
+如果两个都无效（真实硬件），就退化为 \texttt{cli; hlt}——CPU 停止，
+电源不会关闭但系统不再响应。
+\end{whybox}
+
+% ============================================================================
+

@@ -1,0 +1,20 @@
+% figures/ch10/fig03-block-header-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west},
+]
+  \node[font=\scriptsize, anchor=south] at (0.2, 0.9) {\texttt{block}};
+  \draw[-{Stealth[length=4pt]}, thick, blue!60!black] (0.2, 0.9) -- (0.2, 0.7);
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (0, 0) {\small size};
+  \node[cell, minimum width=1.4cm, fill=red!12]  at (1.6, 0) {\small free};
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (3.0, 0) {\small next};
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (4.6, 0) {\small prev};
+  \node[cell, minimum width=4.2cm, fill=green!12] at (6.2, 0)
+    {\small 用户数据区};
+  \draw[{|}-{|}, thick] (0, -0.6) -- (6.2, -0.6);
+  \node[font=\scriptsize, below] at (3.1, -0.6) {HEADER\_SIZE = 16B};
+  \draw[{|}-{|}, thick] (6.2, -0.6) -- (10.4, -0.6);
+  \node[font=\scriptsize, below] at (8.3, -0.6) {\texttt{size} 字节};
+  \node[font=\scriptsize, anchor=south, text=green!40!black] at (6.4, 0.9)
+    {\texttt{kmalloc} 返回此处};
+  \draw[-{Stealth[length=4pt]}, thick, green!50!black] (6.4, 0.9) -- (6.4, 0.7);
+\end{tikzpicture}

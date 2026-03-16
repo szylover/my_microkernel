@@ -1,0 +1,28 @@
+\section{堆的虚拟地址区域规划}
+
+内核堆需要一段专属连续虚拟地址。在第~\ref{ch:high-half}~章高半区布局基础上细分：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig01-kernel-vaddr-layout}
+  \caption{内核虚拟地址空间细分布局}
+  \label{fig:kernel-vaddr-layout}
+\end{figure}
+
+\texttt{vmm.h} 中定义的三个宏：
+
+\codefile{src/include/kernel/vmm.h}
+\begin{lstlisting}[style=cstyle]
+#define KHEAP_START     0xE0000000u
+#define KHEAP_MAX_SIZE  (256u * 1024u * 1024u)    /* 256 MiB */
+#define KHEAP_END       (KHEAP_START + KHEAP_MAX_SIZE)  /* 0xF0000000 */
+\end{lstlisting}
+
+\begin{designbox}
+堆区域必须和 \texttt{vmm\_alloc\_pages} 的地址空间分开。后者内部用 bump allocator
+（\texttt{g\_next\_vaddr} 单调递增），如果堆也用同一空间，两个分配器会互相踩踏。
+隔离到不同区间后各管各的，互不干扰。
+\end{designbox}
+
+% ============================================================================
+

@@ -1,0 +1,7 @@
+% figures/ch04/fig06-pf-5.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  \foreach \i/\label in {0/P, 1/W/R, 2/U/S, 3/RSVD, 4/I/D} {
+    \node[bitcell, fill=white, minimum width=1.2cm] (pf\i) at (\i*1.3, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of pf\i] {bit \i};
+  }
+\end{tikzpicture}

@@ -1,0 +1,14 @@
+% figures/ch04/fig04-isr_common_stub.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \node[memcell, minimum width=5cm, fill=yellow!15] (efl) {EFLAGS};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of efl] (cs) {CS};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of cs] (eip) {EIP};
+  \node[memcell, minimum width=5cm, fill=orange!15, below=0cm of eip] (err) {err\_code};
+  \node[memcell, minimum width=5cm, fill=orange!15, below=0cm of err] (ino) {int\_no};
+
+  \node[right=0.5cm of efl, font=\scriptsize\itshape] {CPU 自动压入};
+  \node[right=0.5cm of err, font=\scriptsize\itshape] {stub 确保存在};
+  \node[right=0.5cm of ino, font=\scriptsize\itshape] {stub push};
+
+  \node[memaddr, left=0.3cm of ino] {ESP →};
+\end{tikzpicture}

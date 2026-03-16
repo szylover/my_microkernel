@@ -1,0 +1,80 @@
+\section{背景知识：中断与异常}
+
+CPU 在执行指令的过程中，可能被两种事件打断：
+
+\begin{itemize}
+  \item \textbf{异常（Exception）}：\term{同步}事件，由 CPU 执行指令时产生
+    （如除零、非法指令、Page Fault）。异常和造成它的指令有确定的因果关系。
+  \item \textbf{中断（Interrupt）}：\term{异步}事件，由外部硬件触发
+    （如键盘按键、定时器到期、磁盘完成 I/O）。与当前执行的指令无关。
+\end{itemize}
+
+无论是异常还是中断，CPU 的处理方式相同：
+\begin{enumerate}
+  \item 用向量号 $N$（0--255）在 IDT 中查找第 $N$ 个门描述符
+  \item 从描述符中取出 handler 的地址（\reg{CS}:offset）
+  \item 在栈上保存当前的 \reg{EFLAGS}、\reg{CS}、\reg{EIP}（发生特权级切换时还保存 \reg{SS}、\reg{ESP}）
+  \item 跳转到 handler 执行
+\end{enumerate}
+
+\subsection{异常的三种分类}
+
+\begin{longtable}{l p{7.5cm} l}
+  \toprule
+  \textbf{类型} & \textbf{特征} & \textbf{例子} \\
+  \midrule
+  Fault  & EIP 指向\textbf{故障指令}。handler 修复问题后 \texttt{iret} 会重新执行该指令。
+         & \#PF, \#GP \\
+  Trap   & EIP 指向故障指令\textbf{的下一条}。\texttt{iret} 继续执行后续代码。
+         & \texttt{int3}, \texttt{int N} \\
+  Abort  & 不可恢复的严重错误，EIP 可能无意义。
+         & \#DF \\
+  \bottomrule
+\end{longtable}
+
+\begin{thinkbox}
+Page Fault 为什么是 Fault 而非 Trap？
+
+因为 handler 需要\textbf{修复}故障（如分配物理页并建立映射），然后让 CPU
+\textbf{重新执行}那条触发 \#PF 的指令。如果 EIP 跳过了故障指令（像 Trap 那样），
+CPU 就永远不会读到那个页面的数据了。这就是\term{按需分页}（demand paging）的基础。
+\end{thinkbox}
+
+\subsection{向量号分配}
+
+\begin{longtable}{rcll}
+  \toprule
+  \textbf{向量} & \textbf{助记符} & \textbf{名称} & \textbf{有错误码？} \\
+  \midrule
+  0  & \#DE & 除零               & 否 \\
+  1  & \#DB & 调试               & 否 \\
+  2  & NMI  & 不可屏蔽中断       & 否 \\
+  3  & \#BP & 断点 (\texttt{int3}) & 否 \\
+  4  & \#OF & 溢出               & 否 \\
+  5  & \#BR & BOUND 范围超出     & 否 \\
+  6  & \#UD & 无效操作码         & 否 \\
+  7  & \#NM & 设备不可用         & 否 \\
+  8  & \#DF & Double Fault       & \textbf{是}（总是 0） \\
+  9  &      & 协处理器段越界     & 否 \\
+  10 & \#TS & 无效 TSS           & \textbf{是} \\
+  11 & \#NP & 段不存在           & \textbf{是} \\
+  12 & \#SS & 栈段错误           & \textbf{是} \\
+  13 & \#GP & 通用保护           & \textbf{是} \\
+  14 & \#PF & Page Fault         & \textbf{是} \\
+  16 & \#MF & x87 浮点异常       & 否 \\
+  17 & \#AC & 对齐检查           & \textbf{是} \\
+  18 & \#MC & 机器检查           & 否 \\
+  19 & \#XM & SIMD 浮点异常      & 否 \\
+  \midrule
+  32--47 & IRQ0--15 & 硬件中断（PIC remap 后） & 否 \\
+  128    & ---      & 系统调用（\texttt{int 0x80}） & 否 \\
+  \bottomrule
+\end{longtable}
+
+\begin{warnbox}
+有错误码的异常和没有错误码的异常，在 ISR 汇编 stub 中必须区别对待。
+如果搞混了，整个栈布局都会偏移——C handler 读到的寄存器值全是错的。
+\end{warnbox}
+
+% ============================================================================
+

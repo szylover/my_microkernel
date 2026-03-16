@@ -1,0 +1,70 @@
+\section{C 异常处理：\texttt{isr\_handler\_c}}
+
+\codefile{src/kernel/arch/idt.c}
+\begin{lstlisting}[style=cstyle]
+void isr_handler_c(const regs_t* r) {
+    // Page Fault 特殊路径
+    if (r->int_no == 14) {
+        page_fault_handler(r);
+        printk("Kernel panic: #PF Page Fault\n");
+        for (;;) __asm__ volatile("hlt");
+    }
+
+    // 打印异常信息
+    printk("\n[isr] %s vector=%u err=0x%08x eip=0x%08x\n",
+           exception_name(r->int_no),
+           r->int_no, r->err_code, r->eip);
+
+    // Breakpoint (int3) 允许返回 → 用于自检
+    if (r->int_no == 3) return;
+
+    // 其他异常不可恢复
+    printk("Kernel panic: %s\n", exception_name(r->int_no));
+    for (;;) __asm__ volatile("hlt");
+}
+\end{lstlisting}
+
+\subsection{Page Fault Handler：\reg{CR2} 与错误码}
+
+\codefile{src/include/arch/idt.h}
+\begin{lstlisting}[style=cstyle]
+static inline uint32_t read_cr2(void) {
+    uint32_t val;
+    __asm__ volatile("mov %%cr2, %0" : "=r"(val));
+    return val;
+}
+\end{lstlisting}
+
+\reg{CR2} 在 \#PF 发生时由 CPU 自动写入故障虚拟地址。
+
+错误码的逐 bit 含义：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig06-pf-5}
+  \caption{\#PF 错误码的低 5 位}
+\end{figure}
+
+\begin{bitfield}
+  \bit{0}{P (Present)：0=页不存在（not-present），1=权限违规（页存在但不允许访问）}
+  \bit{1}{W/R：0=读操作引起，1=写操作引起}
+  \bit{2}{U/S：0=在 Ring 0（内核态）发生，1=在 Ring 3（用户态）发生}
+  \bit{3}{RSVD：PTE 中的保留位被错误置位（硬件级错误，通常是写 PTE 的代码有 bug）}
+  \bit{4}{I/D：1=取指令（instruction fetch）引起，0=数据访问引起}
+\end{bitfield}
+
+常见错误码示例：
+
+\begin{longtable}{rl}
+  \toprule
+  \textbf{err\_code} & \textbf{含义} \\
+  \midrule
+  \hex{00} & 内核态读一个不存在的页 \\
+  \hex{02} & 内核态写一个不存在的页 \\
+  \hex{05} & 用户态读一个存在但权限不足的页 \\
+  \hex{07} & 用户态写一个存在但权限不足的页 \\
+  \bottomrule
+\end{longtable}
+
+% ============================================================================
+

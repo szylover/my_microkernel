@@ -1,0 +1,18 @@
+% figures/ch05/fig04-irq-handler-head-tail.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % 缓冲区数组
+  \foreach \i in {0,...,9} {
+    \node[memcell, minimum width=1.2cm, minimum height=0.6cm] (buf\i) at (\i*1.3, 0) {};
+    \node[font=\tiny\ttfamily, above=0.1cm of buf\i] {\i};
+  }
+  \node[font=\small\ttfamily, above=0.8cm of buf4, text width=8cm, align=center] {g\_kbd\_buf[128]（只画前 10 个）};
+
+  % 内容
+  \node[font=\ttfamily\small] at (buf2) {'a'};
+  \node[font=\ttfamily\small] at (buf3) {'b'};
+  \node[font=\ttfamily\small] at (buf4) {'c'};
+
+  % head / tail pointers
+  \draw[pointer, red!60!black] (buf2.south) -- ++(0, -0.6) node[below, font=\small] {tail（消费者读取）};
+  \draw[pointer, blue!60!black] (buf5.south) -- ++(0, -0.6) node[below, font=\small] {head（IRQ 写入）};
+\end{tikzpicture}

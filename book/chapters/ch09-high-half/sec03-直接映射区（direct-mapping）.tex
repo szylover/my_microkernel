@@ -1,0 +1,41 @@
+\section{直接映射区（Direct Mapping）}
+
+内核启动后，需要频繁访问物理内存（页表、PMM bitmap、设备寄存器等）。
+\term{直接映射}将一段连续的物理内存"平移"到内核虚拟地址空间中：
+
+\begin{equation}
+\text{virt} = \text{phys} + \hex{C0000000}
+\label{eq:direct-map}
+\end{equation}
+
+例如：
+\begin{itemize}
+  \item 物理 \hex{00000000} → 虚拟 \hex{C0000000}
+  \item 物理 \hex{000B8000}（VGA text buffer）→ 虚拟 \hex{C00B8000}
+  \item 物理 \hex{00100000}（内核加载地址）→ 虚拟 \hex{C0100000}
+\end{itemize}
+
+直接映射区的大小取决于物理内存的总量（但不超过 1\,GiB，否则会占满整个内核地址空间）。
+我们的 \texttt{vmm\_init()} 在建立映射时会计算这个范围：
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle, caption={直接映射范围计算（vmm.c 节选）}]
+uint32_t map_end = kernel_end;
+
+/* 至少映射 16 MiB（覆盖 VGA、BIOS 区域等） */
+if (map_end < 16u * 1024u * 1024u)
+    map_end = 16u * 1024u * 1024u;
+
+/* 覆盖 PMM 管理的全部物理页 */
+uint32_t pmm_end = pmm_managed_base()
+                 + pmm_total_pages() * VMM_PAGE_SIZE;
+if (pmm_end > map_end)
+    map_end = pmm_end;
+
+/* 不超过 1 GiB */
+if (map_end > 0x40000000u)
+    map_end = 0x40000000u;
+\end{lstlisting}
+
+% ============================================================================
+

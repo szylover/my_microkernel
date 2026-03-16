@@ -1,0 +1,18 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 VMA 的核心价值——让 Page Fault handler 区分"合法的按需分页"与"非法访问"
+  \item 掌握 \texttt{vma\_ops\_t} 可插拔后端接口（与 \texttt{pmm\_ops\_t}/\texttt{heap\_ops\_t} 同一模式）
+  \item 理解 \texttt{vm\_area\_t} 结构体中各字段的含义
+  \item 掌握 VMA 权限标志（\texttt{VMA\_READ}/\texttt{WRITE}/\texttt{EXEC}）与 PTE 标志位的映射关系
+  \item 理解 \texttt{vma.c} dispatch 层的转发逻辑
+  \item 实现排序数组后端：二分查找 $O(\log n)$ find + 有序插入/删除
+  \item 实现红黑树后端：5 条性质、旋转操作、$O(\log n)$ find/add/remove
+  \item 实现 Maple Tree 后端：B+ tree 变体、高扇出缓存友好、节点分裂/上提
+  \item 理解静态节点池的必要性（打破 kmalloc 循环依赖）
+  \item 掌握 Page Fault 集成：三种诊断结果
+  \item 理解引导阶段区域注册与 \texttt{vmm\_alloc\_pages} 的 VMA 自动跟踪
+\end{itemize}
+
+% ============================================================================
+

@@ -1,0 +1,27 @@
+% figures/ch08/fig04-pd-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum width=5cm, minimum height=0.5cm, font=\ttfamily\small, anchor=north},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  \node[font=\bfseries] at (2.5, 1) {page\_directory\_t (4\,KiB)};
+  \node[cell, fill=red!10]  (e0) at (0, 0.3) {entries[0] — PDE 0};
+  \node[cell, fill=red!10]  (e1) at (0, -0.2) {entries[1] — PDE 1};
+  \node[cell, fill=red!10]  (e2) at (0, -0.7) {entries[2] — PDE 2};
+  \node[font=\small] at (2.5, -1.2) {$\vdots$};
+  \node[cell, fill=yellow!15] (e768) at (0, -1.7) {entries[768] — \hex{C0000000}};
+  \node[font=\small] at (2.5, -2.2) {$\vdots$};
+  \node[cell, fill=red!10]  (e1023) at (0, -2.7) {entries[1023] — PDE 1023};
+
+  % 标注
+  \node[addr] at (-0.1, 0.05) {+\hex{000}};
+  \node[addr] at (-0.1, -0.45) {+\hex{004}};
+  \node[addr] at (-0.1, -0.95) {+\hex{008}};
+  \node[addr] at (-0.1, -1.95) {+\hex{C00}};
+  \node[addr] at (-0.1, -2.95) {+\hex{FFC}};
+
+  % 花括号标注 identity / high-half
+  \draw[decorate, decoration={brace, amplitude=5pt}] (5.1, 0.3) -- (5.1, -0.7)
+    node[midway, right=6pt, font=\scriptsize] {Identity map};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (5.1, -1.7) -- (5.1, -2.7)
+    node[midway, right=6pt, font=\scriptsize] {High-half (内核)};
+\end{tikzpicture}

@@ -1,0 +1,13 @@
+% figures/ch07/fig06-buddy-order-2-order-1.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % order 2 block (4 pages)
+  \node[memcell, minimum width=6cm, fill=cyan!20, minimum height=0.8cm] (big) {order 2 (4 页)};
+  \node[above=0.2cm of big, font=\small] {从 free\_list[2] 取出};
+
+  % 分裂成两个 order 1
+  \node[memcell, minimum width=2.8cm, fill=orange!20, minimum height=0.8cm, below left=1cm and -1.5cm of big] (left) {order 1 (2 页)};
+  \node[memcell, minimum width=2.8cm, fill=green!20, minimum height=0.8cm, below right=1cm and -1.5cm of big] (right) {order 1 (2 页)};
+
+  \draw[-{Stealth[length=4pt]}, thick] (big.south west) -- (left.north) node[midway, left, font=\scriptsize] {返回给调用者};
+  \draw[-{Stealth[length=4pt]}, thick] (big.south east) -- (right.north) node[midway, right, font=\scriptsize] {放回 free\_list[1]};
+\end{tikzpicture}

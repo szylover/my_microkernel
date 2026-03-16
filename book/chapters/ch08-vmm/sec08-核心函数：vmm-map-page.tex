@@ -1,0 +1,50 @@
+\section{核心函数：\texttt{vmm\_map\_page}}
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+int vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags) {
+    // 对齐检查
+    if ((virt & 0xFFFu) || (phys & 0xFFFu)) {
+        printk("[vmm] map: unaligned virt=0x%08x phys=0x%08x\n",
+               virt, phys);
+        return -1;
+    }
+
+    uint32_t pdi = pd_index(virt);
+    uint32_t pti = pt_index(virt);
+
+    page_table_t* pt = vmm_ensure_page_table(pdi);
+    if (!pt) return -1;  // PMM OOM
+
+    // 写入 PTE：高 20 位 = 物理帧地址, 低 12 位 = flags
+    pt->entries[pti] = (phys & ~0xFFFu) | (flags & 0xFFFu);
+
+    // 分页已开启则刷新 TLB
+    if (g_vmm_ready) {
+        vmm_invlpg(virt);
+    }
+
+    return 0;
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch08/fig05-map-page-flow}
+  \caption{\texttt{vmm\_map\_page} 执行流程}
+  \label{fig:map-page-flow}
+\end{figure}
+
+\begin{cpustate}
+调用 \texttt{vmm\_map\_page(\hex{C0200000}, \hex{200000}, PTE\_PRESENT | PTE\_WRITABLE)} 后：
+
+\begin{itemize}
+  \item PDE[768] 的 Present 位被置 1（如果页表刚创建）
+  \item PDE[768] 指向的 Page Table 的 PTE[512] = \hex{200003}（\hex{200000} | 0x3）
+  \item 如果 TLB 中缓存了 \hex{C0200000} 的旧条目，\texttt{invlpg} 使其失效
+  \item 此后访问虚拟地址 \hex{C0200000} 将读写物理地址 \hex{200000}
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
+

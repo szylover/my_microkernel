@@ -1,0 +1,31 @@
+\section{思考与练习}
+
+\begin{exercise}
+在 \texttt{kmain} 中触发除零异常：\\
+\texttt{\_\_asm\_\_ volatile("int \$0");}\\
+观察串口输出的 EIP。它指向哪条指令？和 \texttt{int3} 的行为有什么不同？
+（提示：\texttt{int N} 对所有 $N$ 都是 Trap 语义——EIP 指向下一条。
+但真正的除零 \texttt{1/0} 是 Fault——EIP 指向 \texttt{div} 指令本身。）
+\end{exercise}
+
+\begin{exercise}
+故意将 \texttt{isr\_common\_stub} 中 \texttt{pushad} 和 \texttt{push ds/es/fs/gs}
+的顺序对调。然后触发 \texttt{int3}，看 C handler 打印的 \texttt{r->eip}。
+它还正确吗？参考图 \ref{fig:isr-stack} 分析为什么。
+\end{exercise}
+
+\begin{exercise}
+将所有异常的 \texttt{type\_attr} 从 \hex{8E}（Interrupt Gate）改为
+\hex{8F}（Trap Gate）。运行后键盘是否还能正常输入？
+（提示：Trap Gate 不关中断，异常处理期间可能被键盘 IRQ 打断。
+在当前简单内核中可能没问题，但在更复杂的场景下会导致嵌套中断问题。）
+\end{exercise}
+
+\begin{exercise}
+（挑战）当前 \texttt{idt\_init} 中 \texttt{int3} 的 DPL=0。
+这意味着将来的用户态程序不能用 \texttt{int3} 做调试断点。
+把它改成 DPL=3（\texttt{type\_attr = 0xEE}），并解释 \hex{EE} 的逐 bit 含义。
+\end{exercise}
+
+% ============================================================================
+

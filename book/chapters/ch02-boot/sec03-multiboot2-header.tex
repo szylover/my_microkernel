@@ -1,0 +1,43 @@
+\section{Multiboot2 Header}
+
+GRUB 扫描 OS 映像的前 32\,KiB，寻找 8 字节对齐的 Multiboot2 header。
+header 格式如下：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch02/fig01-mb2-header}
+  \caption{Multiboot2 Header 格式}
+  \label{fig:mb2-header}
+\end{figure}
+
+校验和的计算使四个 32 位字段之和在 $2^{32}$ 模下为 0：
+$$\texttt{checksum} = \texttt{0x100000000} - (\texttt{magic} + \texttt{arch} + \texttt{length})$$
+
+对应的汇编实现：
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+section .multiboot_header
+align 8
+header_start:
+    dd 0xe85250d6                       ; Multiboot2 magic
+    dd 0                                ; architecture: i386
+    dd header_end - header_start        ; header length
+    dd 0x100000000 - (0xe85250d6 + 0 + (header_end - header_start))
+
+    ; Required end tag
+    dw 0    ; type
+    dw 0    ; flags
+    dd 8    ; size
+align 8
+header_end:
+\end{lstlisting}
+
+\begin{warnbox}
+Multiboot2 header 必须位于映像的前 32\,KiB 内，且 8 字节对齐。
+链接脚本必须确保 \texttt{.multiboot\_header} 是映像中最早的段，
+否则 GRUB 会报 ``\texttt{error: no multiboot header found}'' 并拒绝加载。
+\end{warnbox}
+
+% ============================================================================
+

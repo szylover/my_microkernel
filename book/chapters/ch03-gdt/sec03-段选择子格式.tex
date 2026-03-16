@@ -1,0 +1,39 @@
+\section{段选择子格式}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig02-16}
+  \caption{段选择子的 16 位布局}
+\end{figure}
+
+\begin{bitfield}
+  \bit{0--1}{RPL (Requested Privilege Level)：请求的特权级。0=内核，3=用户。
+    当 selector 加载到段寄存器时，CPU 检查 $\max(\text{CPL}, \text{RPL}) \le \text{DPL}$。}
+  \bit{2}{TI (Table Indicator)：0=在 GDT 中查找，1=在 LDT 中查找。我们只用 GDT。}
+  \bit{3--15}{Index：GDT 中的描述符索引。GDT 条目编号从 0 开始，每个 8 字节。
+    selector 的 Index 字段 $\times$ 8 就是 GDT 中的字节偏移。}
+\end{bitfield}
+
+我们的选择子取值：
+
+\begin{longtable}{rrlll}
+  \toprule
+  \textbf{Selector} & \textbf{二进制} & \textbf{Index} & \textbf{RPL} & \textbf{用途} \\
+  \midrule
+  \hex{00} & \texttt{0000000000000000} & 0 & 0 & Null（无效，CPU 用于检查） \\
+  \hex{08} & \texttt{0000000000001000} & 1 & 0 & 内核代码段 \\
+  \hex{10} & \texttt{0000000000010000} & 2 & 0 & 内核数据段 \\
+  \bottomrule
+\end{longtable}
+
+\codefile{src/include/arch/gdt.h}
+\begin{lstlisting}[style=cstyle]
+// gdt.h
+enum {
+    GDT_KERNEL_CODE_SEL = 0x08,  // Index=1, TI=0, RPL=0
+    GDT_KERNEL_DATA_SEL = 0x10,  // Index=2, TI=0, RPL=0
+};
+\end{lstlisting}
+
+% ============================================================================
+

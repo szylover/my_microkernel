@@ -1,0 +1,21 @@
+% figures/ch05/fig03-irq-g_irq_handlers.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % Array
+  \foreach \i in {0,...,7} {
+    \node[memcell, minimum width=2.5cm, minimum height=0.5cm] (h\i) at (0, -\i*0.5) {};
+    \node[memaddr, left=0.1cm of h\i, font=\tiny\ttfamily] {[\i]};
+  }
+  \node[font=\small\ttfamily, above=0.2cm of h0] {g\_irq\_handlers[16]};
+
+  % NULL for most
+  \foreach \i in {0,2,3,4,5,6,7} {
+    \node[font=\tiny\ttfamily, text=gray] at (h\i) {NULL};
+  }
+
+  % Handler for IRQ1
+  \node[font=\tiny\ttfamily, text=blue!60!black] at (h1) {keyboard\_irq1\_handler};
+
+  % Arrow to handler function
+  \node[draw, minimum width=3.5cm, fill=green!10, right=3cm of h1, font=\small] (kbdfn) {keyboard\_irq1\_handler()};
+  \draw[pointer] (h1.east) -- (kbdfn.west);
+\end{tikzpicture}

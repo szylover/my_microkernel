@@ -1,0 +1,17 @@
+% figures/ch04/fig03-cpu.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % CPU 自动压栈（从高到低）
+  \node[memcell, minimum width=5cm, fill=yellow!15] (efl) {EFLAGS};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of efl] (cs) {CS};
+  \node[memcell, minimum width=5cm, fill=yellow!15, below=0cm of cs] (eip) {EIP};
+  \node[memcell, minimum width=5cm, fill=red!15, below=0cm of eip] (err) {err\_code（仅部分异常）};
+
+  \node[right=0.5cm of efl, font=\scriptsize\itshape] {CPU 自动压入};
+  \node[right=0.5cm of err, font=\scriptsize\itshape, text=red!60!black] {只有向量 8,10-14,17 有};
+
+  \node[memaddr, left=0.3cm of err] {ESP →};
+
+  % 高地址标注
+  \node[above=0.3cm of efl, font=\scriptsize] {高地址 ↑};
+  \node[below=0.3cm of err, font=\scriptsize] {低地址 ↓};
+\end{tikzpicture}

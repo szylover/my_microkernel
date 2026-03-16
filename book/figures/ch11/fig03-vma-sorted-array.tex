@@ -1,0 +1,20 @@
+% figures/ch11/fig03-vma-sorted-array.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, minimum width=1.8cm,
+               font=\ttfamily\small, anchor=west},
+  lbl/.style={font=\scriptsize\color{gray}, anchor=south},
+]
+  \node[cell, fill=green!12] (a0) at (0, 0) {area[0]};
+  \node[cell, fill=green!12] (a1) at (1.8, 0) {area[1]};
+  \node[cell, fill=green!12] (a2) at (3.6, 0) {area[2]};
+  \node[cell, fill=gray!8]   (a3) at (5.4, 0) {(空)};
+  \node[cell, fill=gray!8]   (a4) at (7.2, 0) {$\cdots$};
+
+  \node[lbl] at (0.9, 0.9) {start=\hex{C000}};
+  \node[lbl] at (2.7, 0.9) {start=\hex{D000}};
+  \node[lbl] at (4.5, 0.9) {start=\hex{E000}};
+
+  \draw[{Stealth[length=4pt]}-, thick, blue!60!black]
+    (5.4, -0.7) -- (5.4, -0.4);
+  \node[font=\scriptsize\color{blue!60!black}] at (5.4, -0.9) {\texttt{g\_count = 3}};
+\end{tikzpicture}

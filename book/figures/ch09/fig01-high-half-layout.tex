@@ -1,0 +1,34 @@
+% figures/ch09/fig01-high-half-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=6cm, font=\small, anchor=south west},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  % 用户态区域
+  \node[block, minimum height=4.5cm, fill=blue!8] (user) at (0, 0)
+    {\parbox{5.5cm}{\centering\small\textbf{用户态空间}\\[2pt]
+     \texttt{0x00000000 -- 0xBFFFFFFF}\\[2pt]
+     进程代码、数据、堆、栈\\
+     \textit{（3\,GiB，每进程独立）}}};
+
+  % 内核区域
+  \node[block, minimum height=1.5cm, fill=red!10] (kern) at (0, 4.5)
+    {\parbox{5.5cm}{\centering\small\textbf{内核空间}\\[2pt]
+     \texttt{0xC0000000 -- 0xFFFFFFFF}\\
+     \textit{（1\,GiB，所有进程共享）}}};
+
+  % 地址标注
+  \node[addr] at (-0.2, 0)    {\hex{00000000}};
+  \node[addr] at (-0.2, 4.5)  {\hex{C0000000}};
+  \node[addr] at (-0.2, 6.0)  {\hex{FFFFFFFF}};
+
+  % PD index 标注
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (6.2, 0) -- (6.2, 4.5) node[midway, right=8pt, font=\scriptsize] {PD[0..767]};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (6.2, 4.5) -- (6.2, 6.0) node[midway, right=8pt, font=\scriptsize] {PD[768..1023]};
+
+  % 内核子区域
+  \draw[dashed, gray] (0.1, 5.25) -- (5.9, 5.25);
+  \node[font=\scriptsize, anchor=west] at (0.3, 5.6) {动态分配区 / 堆};
+  \node[font=\scriptsize, anchor=west] at (0.3, 4.9) {直接映射区};
+\end{tikzpicture}

@@ -1,0 +1,113 @@
+\section{汇编详解：\texttt{gdt\_flush.asm}}
+
+这是整个 GDT 初始化中最关键也最容易出错的部分。逐条指令解释：
+
+\codefile{src/kernel/arch/gdt\_flush.asm}
+\begin{lstlisting}[style=nasmstyle, numbers=left]
+bits 32
+global gdt_flush
+
+gdt_flush:
+    mov eax, [esp + 4]      ; (1) 取函数参数：gdtr_ptr
+    lgdt [eax]              ; (2) 加载 GDTR
+
+    jmp 0x08:.flush_cs      ; (3) far jump 刷新 CS
+
+.flush_cs:
+    mov ax, 0x10            ; (4)
+    mov ds, ax              ; (5) 刷新 DS
+    mov es, ax              ; (6) 刷新 ES
+    mov fs, ax              ; (7) 刷新 FS
+    mov gs, ax              ; (8) 刷新 GS
+    mov ss, ax              ; (9) 刷新 SS
+    mov esp, esp            ; (10) SS 后的安全指令
+
+    ret                     ; (11) 返回
+\end{lstlisting}
+
+\paragraph{第 5 行：\texttt{mov eax, [esp + 4]}}
+
+\texttt{gdt\_flush} 使用 cdecl 调用约定。进入函数时栈布局：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig09-gdt_flush}
+  \caption{进入 gdt\_flush 时的栈布局}
+\end{figure}
+
+\texttt{[esp + 4]} 跳过返回地址，取到 \texttt{gdtr\_ptr}。
+
+\paragraph{第 6 行：\texttt{lgdt [eax]}}
+
+CPU 从 \texttt{eax} 指向的 6 字节中读取 limit（2 字节）和 base（4 字节），
+写入 GDTR 内部寄存器。
+
+\begin{cpustate}
+\texttt{lgdt} 执行后：
+\begin{itemize}
+  \item GDTR.limit = 23, GDTR.base = \&gdt[0]
+  \item CPU \textbf{知道}新 GDT 在哪了
+  \item 但 \reg{CS}/\reg{DS}/\reg{SS} 的 hidden cache \textbf{仍然是旧的}
+  \item 此时用旧 GDT 还是新 GDT 取决于 hidden cache（旧的）
+\end{itemize}
+\end{cpustate}
+
+\paragraph{第 8 行：\texttt{jmp 0x08:.flush\_cs} — Far Jump}
+
+这是\textbf{最关键的一条指令}。它不是普通的 \texttt{jmp}（只改 \reg{EIP}），
+而是 \term{far jump}：同时修改 \reg{CS} 和 \reg{EIP}。
+
+\begin{itemize}
+  \item \texttt{0x08} → 写入 \reg{CS}（新的 selector）
+  \item \texttt{.flush\_cs} → 写入 \reg{EIP}（跳转目标）
+\end{itemize}
+
+由于 \reg{CS} 被重新加载，CPU 用新 selector (\hex{08}) 去\textbf{新 GDT} 查表，
+找到描述符 1（内核代码段），把 base/limit/权限缓存到 \reg{CS} 的 hidden part。
+
+\begin{cpustate}
+far jump 执行后：
+\begin{itemize}
+  \item \reg{CS} 的可见部分 = \hex{08}（index=1, RPL=0）
+  \item \reg{CS} 的 hidden cache = GDT[1] 的完整描述符
+  \item 后续取指令使用新的代码段描述符
+  \item \reg{DS}/\reg{SS} 等仍然使用旧缓存——还需要继续刷新
+\end{itemize}
+\end{cpustate}
+
+\begin{whybox}
+为什么刷新 \reg{CS} 必须用 far jump，不能用 \texttt{mov cs, ax}？
+
+因为 x86 \textbf{没有} \texttt{mov cs, reg} 这条指令——\reg{CS} 不能被直接赋值。
+唯一能修改 \reg{CS} 的途径是：far jump、far call、far ret、\texttt{iret}。
+这些指令会同时修改 \reg{CS} 和 \reg{EIP}，确保代码执行流不会"断裂"。
+\end{whybox}
+
+\paragraph{第 11--16 行：刷新数据段寄存器}
+
+\codefile{src/kernel/arch/gdt\_flush.asm}
+\begin{lstlisting}[style=nasmstyle]
+    mov ax, 0x10    ; selector = 0x10 = GDT[2] (内核数据段)
+    mov ds, ax      ; DS hidden cache ← GDT[2]
+    mov es, ax      ; ES hidden cache ← GDT[2]
+    mov fs, ax      ; FS hidden cache ← GDT[2]
+    mov gs, ax      ; GS hidden cache ← GDT[2]
+\end{lstlisting}
+
+每条 \texttt{mov ds, ax} 都会触发 CPU：
+\begin{enumerate}
+  \item 检查 selector 是否有效（index 在 GDT 范围内、P=1、权限检查通过）
+  \item 将 GDT[2] 的描述符缓存到对应段寄存器的 hidden part
+\end{enumerate}
+
+\paragraph{第 17--18 行：\texttt{mov ss, ax} + \texttt{mov esp, esp}}
+
+\reg{SS} 比较特殊：修改 \reg{SS} 后，CPU 会在\textbf{下一条指令执行完}之前
+\textbf{禁止中断和异常}（硬件行为）。这是为了保证 SS:ESP 的原子性——
+防止中断在 SS 改了但 ESP 还没改的"半截"状态到来。
+
+\texttt{mov esp, esp} 是一条无害指令（空操作），目的是消耗这个"抑制窗口"。
+之后 \texttt{ret} 正常返回到 C 代码。
+
+% ============================================================================
+

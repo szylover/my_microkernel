@@ -1,0 +1,55 @@
+\section{Access 字节：逐 bit 详解}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig05-access-8-bit}
+  \caption{access 字节的 8 个 bit}
+\end{figure}
+
+\begin{bitfield}
+  \bit{7}{P (Present) = 1：此描述符有效。P=0 时访问该段会触发 \#NP (Segment Not Present)。}
+  \bit{5--6}{DPL (Descriptor Privilege Level)：段的最低访问权限。
+    $00_b$ = Ring 0（只有内核能访问），$11_b$ = Ring 3（用户态可访问）。}
+  \bit{4}{S (Descriptor Type) = 1：代码/数据段。
+    S=0 表示系统段（TSS、LDT、Call Gate 等），我们将来做 TSS 时会用到。}
+  \bit{3}{Ex (Executable) = 1：代码段（此段中的内容可以执行）。
+    Ex=0：数据段（此段中的内容只能读/写，不能执行）。}
+  \bit{2}{DC (Direction/Conforming)：
+    \begin{itemize}
+      \item 数据段：方向位。0=向上增长（正常），1=向下增长（用于栈段扩展）
+      \item 代码段：一致性位。0=非一致，1=一致（允许低特权级代码跳入）
+    \end{itemize}
+    我们设为 0。}
+  \bit{1}{RW (Readable/Writable)：
+    \begin{itemize}
+      \item 代码段：1=可读（可以读取代码段中的数据），0=仅可执行
+      \item 数据段：1=可写，0=只读
+    \end{itemize}
+    我们代码段和数据段都设为 1。}
+  \bit{0}{Ac (Accessed)：CPU 访问此段后自动置 1。OS 可用它做"最近使用"跟踪。
+    初始化时设为 0 即可。}
+\end{bitfield}
+
+\paragraph{内核代码段 access = \hex{9A}}
+
+$$\hex{9A} = 10011010_b$$
+
+\begin{center}
+\begin{tabular}{c|c|c|c|c|c|c|c}
+P & DPL & DPL & S & Ex & DC & RW & Ac \\
+\hline
+1 & 0 & 0 & 1 & 1 & 0 & 1 & 0 \\
+\end{tabular}
+\end{center}
+
+含义：有效（P=1）、Ring 0（DPL=00）、代码/数据段（S=1）、可执行（Ex=1）、
+非一致（DC=0）、可读（RW=1）、未访问（Ac=0）。
+
+\paragraph{内核数据段 access = \hex{92}}
+
+$$\hex{92} = 10010010_b$$
+
+与代码段的唯一区别：Ex=0（不可执行）。RW=1 在数据段表示可写。
+
+% ============================================================================
+

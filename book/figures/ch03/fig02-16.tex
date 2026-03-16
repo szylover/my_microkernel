@@ -1,0 +1,21 @@
+% figures/ch03/fig02-16.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  % 16 bit selector
+  \foreach \i/\label in {0/RPL$_0$, 1/RPL$_1$, 2/TI, 3/Idx$_0$, 4/Idx$_1$,
+                          5/Idx$_2$, 6/Idx$_3$, 7/Idx$_4$, 8/Idx$_5$,
+                          9/Idx$_6$, 10/Idx$_7$, 11/Idx$_8$, 12/Idx$_9$,
+                          13/Idx$_{10}$, 14/Idx$_{11}$, 15/Idx$_{12}$} {
+    \node[bitcell, fill=white] at (\i*0.7, 0) {\label};
+  }
+  % bit numbers
+  \foreach \i in {0,...,15} {
+    \node[font=\tiny\ttfamily, above] at (\i*0.7+0.35, 0.3) {\i};
+  }
+  % grouping
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (0, -0.35) -- (1.4, -0.35) node[midway, below=5pt, font=\small] {RPL (2 bit)};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (1.4, -0.35) -- (2.1, -0.35) node[midway, below=5pt, font=\small] {TI};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (2.1, -0.35) -- (11.2, -0.35) node[midway, below=5pt, font=\small] {Index (13 bit)};
+\end{tikzpicture}

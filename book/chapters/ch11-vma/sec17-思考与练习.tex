@@ -1,0 +1,48 @@
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{\#PF handler 中集成 VMA 检查}
+
+修改 \texttt{irq.c} 中的 Page Fault handler：
+\begin{enumerate}
+  \item 读取 \texttt{CR2}（故障地址）
+  \item 调用 \texttt{vma\_find(cr2)} 获取 VMA
+  \item 如果返回 NULL：打印 ``\texttt{SEGFAULT: addr=0x... not in any VMA}'' 并 panic
+  \item 如果返回非 NULL 但权限不匹配：打印 ``\texttt{PERMISSION DENIED}'' 并 panic
+  \item 如果权限匹配：打印 ``\texttt{demand-page candidate}''（暂不实现实际分页）
+\end{enumerate}
+测试：将 \hex{A0000000} 解引用，确认触发 Case 1 的 panic 输出。
+\end{exercise}
+
+\begin{exercise}
+\textbf{VMA 区域合并}
+
+当新增 VMA 与相邻 VMA 满足以下条件时自动合并：
+\begin{itemize}
+  \item 新 VMA 的 \texttt{start} == 已有 VMA 的 \texttt{end}（或反之）
+  \item 两者的 \texttt{flags} 完全相同
+\end{itemize}
+合并后更新 \texttt{end}（或 \texttt{start}）并移除多余节点。
+这减少了 VMA 总数，使红黑树更扁平、查找更快。
+
+思考：合并可能影响 \texttt{vma\_remove(start)} 的语义——
+如果用户按原始 \texttt{start} 移除，但该区域已被合并到更大的 VMA 中，
+应该怎么处理？
+\end{exercise}
+
+\begin{exercise}
+\textbf{VMA 统计与碎片分析}
+
+给 \texttt{vma\_ops\_t} 新增 \texttt{stats} 函数指针，收集以下信息：
+\begin{enumerate}
+  \item 已注册 VMA 总数
+  \item 已覆盖的虚拟地址总量（KiB）
+  \item VMA 之间最大空洞的大小——即相邻 VMA 之间最大的 \texttt{gap}
+  \item 节点池利用率（\texttt{pool\_used / VMA\_MAX\_NODES}）
+\end{enumerate}
+在 \texttt{vma count} 命令中显示这些统计信息。
+地址空间碎片化可定义为：
+$$\text{fragmentation} = 1 - \frac{\max(\text{gap})}
+  {\text{total unmapped space}} $$
+\end{exercise}
+

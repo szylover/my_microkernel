@@ -1,0 +1,44 @@
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{实现 Best-Fit 分配算法}
+
+复制 \texttt{heap\_first\_fit.c} 为 \texttt{heap\_best\_fit.c}，
+修改 \texttt{alloc}：遍历\textbf{整个}链表，找 \texttt{size} 差值最小的空闲块。
+在 \texttt{kconfig.h} 新增 \texttt{KCONFIG\_HEAP\_BACKEND == 2}。
+测试：反复分配 32B/128B/64B，释放 128B，再分配 100B——对比两种算法行为。
+
+思考：Best-Fit 一定减少碎片吗？在什么负载下反而更差？
+\end{exercise}
+
+\begin{exercise}
+\textbf{堆增长（\texttt{heap\_grow}）集成}
+
+当前 First-Fit 找不到块就返回 NULL。扩展它：
+① 调 \texttt{heap\_grow(size + HEADER\_SIZE)}；
+② 找链表最后一个块 last，算末尾 \texttt{last\_end}；
+③ 若 last 是 free 就扩 size，否则在 \texttt{last\_end} 建新空闲块；
+④ 递归重试分配。
+\end{exercise}
+
+\begin{exercise}
+\textbf{碎片率统计}
+
+给 \texttt{kheap\_stats\_t} 新增 \texttt{fragmentation} 字段：
+$$\text{fragmentation} = \left(1 - \frac{\max(\text{单块 free size})}
+  {\sum \text{free\_bytes}}\right) \times 100\%$$
+碎片率 = 0 表示所有空闲内存连续；趋近 100\% 表示碎片化严重。
+在 \texttt{heap} 命令中显示该指标。
+\end{exercise}
+
+\begin{exercise}
+\textbf{Slab 的 \texttt{kfree} 流程分析}
+
+阅读 \texttt{heap\_slab.c}，画出 \texttt{kfree} 完整流程图（标注数据结构）：
+\texttt{ptr \& \~{}0xFFF} → 读 \texttt{cache\_idx}/\texttt{obj\_size} →
+计算 slot index → \texttt{bitmap\_set\_bit} → 若从 full 变非满则移到 partial。
+
+\textbf{进阶}：当 slab 全空（\texttt{free\_count == capacity}）时，
+是否应把整页还给 PMM？好处和风险各是什么？
+\end{exercise}
+

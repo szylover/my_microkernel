@@ -1,0 +1,18 @@
+\section{统计信息：\texttt{kheap\_stats\_t}}
+
+\codefile{src/kernel/mm/kmalloc.c}
+\begin{lstlisting}[style=cstyle]
+typedef struct kheap_stats {
+    size_t   heap_size;     /* 已提交区域总大小 */
+    size_t   used_bytes;    /* 已分配字节（含 header 开销） */
+    size_t   free_bytes;    /* 空闲字节 */
+    unsigned alloc_count;   /* 活跃分配数 */
+    unsigned free_count;    /* 空闲块数 */
+} kheap_stats_t;
+\end{lstlisting}
+
+注意 \texttt{used\_bytes + free\_bytes $\neq$ heap\_size}——差值是空闲块 header 的开销。
+\texttt{free\_count} 很大但 \texttt{free\_bytes} 很小说明碎片化严重。
+
+% ============================================================================
+

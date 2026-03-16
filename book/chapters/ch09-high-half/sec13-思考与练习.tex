@@ -1,0 +1,50 @@
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{手动计算 PDE index}
+
+给定虚拟地址 \hex{C0100000}（内核入口点），请手工计算：
+\begin{enumerate}
+  \item PD index（高 10 位）的值是多少？
+  \item 它落在 PD[768..1023] 中的哪个位置？
+  \item 如果物理地址是 \hex{00100000}，该 PTE 的内容（含 flags Present+RW）应该是什么？
+\end{enumerate}
+
+\textit{提示}：$\hex{C0100000} \gg 22 = \hex{300} = 768$。
+PT index $= (\hex{C0100000} \gg 12)\ \&\ \hex{3FF} = \hex{100} = 256$。
+PTE $= \hex{00100000}\ |\ \hex{03} = \hex{00100003}$。
+\end{exercise}
+
+\begin{exercise}
+\textbf{模拟遗忘转换的后果}
+
+假设开发者在 \texttt{kmain.c} 中忘记了这一行：
+\begin{lstlisting}[style=cstyle]
+g_mb2_info = (const void*)PHYS_TO_VIRT(
+    (uint32_t)(uintptr_t)g_mb2_info);
+\end{lstlisting}
+
+请分析：
+\begin{enumerate}
+  \item 在 \texttt{vmm\_unmap\_identity()} 调用之前，访问 \texttt{g\_mb2\_info} 会崩溃吗？为什么？
+  \item 调用之后呢？具体会触发什么异常？CPU 的错误码（error code）会包含哪些信息？
+  \item 如果使用 GDB 调试，应该在哪里设置断点来定位此问题？
+\end{enumerate}
+\end{exercise}
+
+\begin{exercise}
+\textbf{VGA text mode 输出的 high-half 适配}
+
+当前内核的 \texttt{printk} 通过串口输出，不受 identity mapping 拆除影响。
+请设计并实现一个简单的 VGA text mode 驱动，要求：
+\begin{enumerate}
+  \item 定义 VGA buffer 的 high-half 虚拟地址常量
+  \item 实现 \texttt{vga\_putchar(char c)} 和 \texttt{vga\_clear()}
+  \item 考虑：如果 VGA 所在的物理页 \hex{B8000} 没有被直接映射覆盖
+        （map\_end $<$ \hex{B9000}），你的驱动还能工作吗？如何修复？
+\end{enumerate}
+
+\textit{提示}：我们 \texttt{vmm\_init()} 至少映射 16\,MiB，\hex{B8000} $<$ 16\,MiB，
+所以直接映射一定覆盖了 VGA 区域。
+\end{exercise}
+

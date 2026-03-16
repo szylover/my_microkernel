@@ -1,0 +1,69 @@
+\section{可插拔后端架构}
+
+\subsection{\texttt{pmm\_ops\_t}：后端操作表}
+
+\codefile{src/include/kernel/pmm.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct pmm_ops {
+    const char* name;                    // "bitmap" / "buddy"
+
+    void  (*init)(void);                 // 解析 mmap → 建立数据结构
+    void* (*alloc_page)(void);           // 分配一个物理页，返回物理地址
+    void  (*free_page)(void* page);      // 释放一个物理页
+
+    unsigned (*total_pages)(void);       // 管理的总页数
+    unsigned (*free_pages)(void);        // 当前空闲页数
+    unsigned (*managed_base)(void);      // 管理区域的物理起始地址
+
+    unsigned (*page_addr)(unsigned idx); // 页索引 → 物理地址
+    int (*page_is_used)(unsigned idx);   // 页索引 → 使用状态
+} pmm_ops_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig02-pmm}
+  \caption{PMM 三层可插拔架构}
+\end{figure}
+
+\subsection{Dispatch 层：\texttt{pmm.c}}
+
+\codefile{src/kernel/mm/pmm.c}
+\begin{lstlisting}[style=cstyle]
+static const pmm_ops_t* g_pmm_ops = NULL;
+
+void pmm_register_backend(const pmm_ops_t* ops) {
+    g_pmm_ops = ops;
+}
+
+void pmm_init(void) {
+    if (!g_pmm_ops) g_pmm_ops = pmm_bitmap_get_ops();  // 默认 bitmap
+    printk("[pmm] backend: %s\n", g_pmm_ops->name);
+    g_pmm_ops->init();
+}
+
+void* pmm_alloc_page(void) {
+    if (!g_pmm_ops) return NULL;
+    return g_pmm_ops->alloc_page();
+}
+
+void pmm_free_page(void* page) {
+    if (!g_pmm_ops) return;
+    g_pmm_ops->free_page(page);
+}
+// ... 其他函数同理 ...
+\end{lstlisting}
+
+\begin{designbox}
+这套"ops 函数指针表 + dispatch 薄层"的模式在本项目中反复出现：
+\begin{itemize}
+  \item PMM: \texttt{pmm\_ops\_t} → \texttt{pmm.c}
+  \item Heap: \texttt{heap\_ops\_t} → \texttt{kmalloc.c}
+  \item VMA: \texttt{vma\_ops\_t} → \texttt{vma.c}
+\end{itemize}
+这是 Linux 内核 \texttt{file\_operations} 模式的简化版——
+接口固定，实现可替换，调用者零改动。
+\end{designbox}
+
+% ============================================================================
+

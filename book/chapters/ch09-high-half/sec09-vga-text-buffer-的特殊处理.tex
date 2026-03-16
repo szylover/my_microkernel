@@ -1,0 +1,24 @@
+\section{VGA text buffer 的特殊处理}
+
+\begin{thinkbox}
+VGA text buffer 位于物理地址 \hex{B8000}。拆除 identity mapping 后，
+通过 \hex{B8000} 访问 VGA 会触发 Page Fault。
+内核应该如何继续输出到屏幕？
+
+\textbf{方案分析}：
+\begin{itemize}
+  \item 方案 A：通过 high-half 直接映射访问 \hex{C00B8000}
+        （$= \hex{B8000} + \hex{C0000000}$）
+  \item 方案 B：放弃 VGA，只使用串口（serial port）输出
+\end{itemize}
+
+我们的内核选择了方案 B：\texttt{printk} 完全通过串口（I/O 端口 \hex{3F8}）输出。
+串口使用 \texttt{in}/\texttt{out} 指令访问 I/O 端口空间，不经过内存映射，
+因此不受 identity mapping 拆除的影响。
+
+如果将来需要 VGA 输出，只需将 VGA 基地址改为 \hex{C00B8000} 即可。
+这正是直接映射区的方便之处——任何物理设备地址加上 \hex{C0000000} 就能访问。
+\end{thinkbox}
+
+% ============================================================================
+

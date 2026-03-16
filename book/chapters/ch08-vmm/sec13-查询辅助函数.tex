@@ -1,0 +1,19 @@
+\section{查询辅助函数}
+
+VMM 提供几个查询函数供 Shell 命令和上层代码使用：
+
+\codefile{src/include/kernel/vmm.h}
+\begin{lstlisting}[style=cstyle]
+// 查询虚拟地址是否已映射（返回 1=已映射, 0=未映射, -1=错误）
+int vmm_is_mapped(uint32_t virt);
+
+// 查询虚拟地址对应的物理地址
+int vmm_get_physical(uint32_t virt, uint32_t* phys);
+
+// 直接读取 PDE / PTE 原始值（供调试命令使用）
+uint32_t vmm_get_pde(uint32_t pd_idx);
+uint32_t vmm_get_pte(uint32_t virt);
+\end{lstlisting}
+
+% ============================================================================
+
