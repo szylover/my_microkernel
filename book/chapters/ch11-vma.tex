@@ -8,53 +8,133 @@
 
 \begin{itemize}
   \item 理解 VMA 的作用：显式跟踪每个虚拟内存区域的地址范围和权限
-  \item 实现可插拔 VMA 后端接口（\texttt{vma\_ops\_t}）
-  \item 第一个后端：红黑树（经典 Linux 风格）
-  \item Page Fault handler 集成 VMA 权限检查
+  \item 设计可插拔 VMA 后端接口（\texttt{vma\_ops\_t}）
+  \item 实现第一个后端：红黑树（经典 Linux 风格）
+  \item 集成 VMA 权限检查到 Page Fault handler
   \item Shell 命令：\texttt{vma list}、\texttt{vma find}、\texttt{vma test}
 \end{itemize}
 
 \section{背景知识：为什么需要 VMA}
 
-% TODO:
-% - Page Fault 发生时，内核需要判断：是合法的按需分页 vs 非法访问
-% - 没有 VMA → 只能 panic
-% - 有 VMA → 查询地址属于哪个区域 → 检查权限 → 合法则分配页，不合法则 kill 进程
+在之前的实现中，内核"知道"有哪些映射（直接映射区、堆、vmm\_alloc\_pages），
+但这些信息散落在各处代码中。当 Page Fault 发生时，handler 无法判断：
+\begin{itemize}
+  \item 是\textbf{合法的按需分页}——页面应该存在但还没映射？
+  \item 还是\textbf{真正的非法访问}——写入只读区、访问未分配区域？
+\end{itemize}
 
-\subsection{Linux 的 VMA}
+VMA 将每个虚拟内存区域显式注册，记录地址范围 $[\text{start}, \text{end})$ 和权限。
 
-% TODO: Linux vm_area_struct 简介（对比学习）
+\begin{thinkbox}
+Linux 中 \texttt{/proc/self/maps} 显示的就是当前进程的 VMA 列表。
+在你的 Linux 终端执行 \texttt{cat /proc/self/maps}，观察每行的地址范围和权限标志
+（r/w/x/p）。想想这些 VMA 是哪个子系统创建的（ELF loader? mmap? stack?）。
+\end{thinkbox}
 
-\section{可插拔后端架构}
+\section{可插拔后端：\texttt{vma\_ops\_t}}
 
-% TODO: vma_ops_t（init/add/remove/find/dump/count）
-% vma.c dispatch → g_vma_ops
-% 和 pmm_ops_t / heap_ops_t 完全同一模式
+\begin{lstlisting}[style=cstyle]
+typedef struct vm_area {
+    uint32_t    start;   // 起始虚拟地址（包含，页对齐）
+    uint32_t    end;     // 结束虚拟地址（不包含，页对齐）
+    uint32_t    flags;   // VMA_READ | VMA_WRITE | VMA_EXEC
+    const char* name;    // 人类可读名称
+} vm_area_t;
+
+typedef struct vma_ops {
+    const char* name;
+    void (*init)(void);
+    int  (*add)(uint32_t start, uint32_t end, uint32_t flags, const char* name);
+    int  (*remove)(uint32_t start);
+    const vm_area_t* (*find)(uint32_t addr);
+    void (*dump)(void);
+    unsigned (*count)(void);
+} vma_ops_t;
+\end{lstlisting}
+
+和 PMM/kmalloc 完全同构的三层架构：\texttt{vma.h}（接口）→ \texttt{vma.c}（dispatch）→ 后端实现。
+
+\begin{designbox}
+\texttt{vm\_area\_t} 不包含红黑树节点等内部字段——它是面向调用者的公开结构。
+后端内部可以在自己的结构体中嵌入 \texttt{vm\_area\_t}，但对外只暴露这个轻量接口。
+这保持了接口和实现的完全解耦。
+\end{designbox}
 
 \section{VMA 权限标志}
 
-% TODO: VMA_READ(0x01), VMA_WRITE(0x02), VMA_EXEC(0x04)
-% 与 PTE flags 的关系
+\begin{lstlisting}[style=cstyle]
+#define VMA_READ    0x01u   // 可读
+#define VMA_WRITE   0x02u   // 可写
+#define VMA_EXEC    0x04u   // 可执行
+\end{lstlisting}
 
-\section{红黑树后端：\texttt{vma\_rbtree.c}}
+与 PTE flags 的对应关系：
+\begin{itemize}
+  \item \texttt{VMA\_WRITE} → \texttt{PTE\_WRITABLE}
+  \item \texttt{VMA\_EXEC} → 将来配合 NX 位使用
+  \item VMA flags 是"软件层面"的权限，PTE flags 是"硬件层面"
+\end{itemize}
 
-% TODO:
-% - 红黑树基本性质（5 条）
-% - 旋转（左旋、右旋）图示
-% - 插入修复（3 种 case + 镜像）
-% - 删除修复（4 种 case + 镜像）
-% - 为什么用红黑树而不是链表（O(log n) vs O(n)）
-% - 静态节点池（避免和 kmalloc 循环依赖）
+\section{红黑树后端}
+
+\begin{whybox}
+为什么用红黑树？VMA 按起始地址排序，查找（给定地址找到包含它的 VMA）是
+$O(\log n)$。虽然内核 VMA 数量不大（几十个），链表的 $O(n)$ 也能接受，
+但红黑树是 Linux 内核的经典实现（6.1 前），学习价值更高。
+\end{whybox}
+
+红黑树的五条性质：
+\begin{enumerate}
+  \item 每个节点是红色或黑色
+  \item 根节点是黑色
+  \item NULL 叶子视为黑色
+  \item 红节点的子节点必须是黑色（不允许连续红节点）
+  \item 从任意节点到所有叶子路径上的黑色节点数量相同
+\end{enumerate}
+
+这保证了最长路径 $\le 2 \times$ 最短路径 → $O(\log n)$ 操作。
+
+\begin{thinkbox}
+为什么用静态节点池（\texttt{g\_pool[64]}）分配红黑树节点，而非 \texttt{kmalloc}？
+想想两个方向的循环依赖：VMA 需要节点内存 → 用 kmalloc → kmalloc 的堆区需要 VMA 跟踪。
+\end{thinkbox}
 
 \section{Page Fault 集成}
 
-% TODO: idt.c 中 page_fault_handler 调用 vma_find
-% 三种情况：无VMA(非法) / 有VMA权限不符(保护违规) / 有VMA页不存在(demand paging候选)
+\begin{lstlisting}[style=cstyle]
+// idt.c 的 page_fault_handler 中
+if (vma_is_ready()) {
+    const vm_area_t* vma = vma_find(fault_addr);
+    if (vma) {
+        printk("VMA: [0x%08x, 0x%08x) '%s' flags=%c%c%c\n", ...);
+        if ((err & 0x02) && !(vma->flags & VMA_WRITE))
+            printk("  -> WRITE to read-only VMA!\n");
+    } else {
+        printk("VMA: no VMA covers 0x%08x (invalid access)\n", fault_addr);
+    }
+}
+\end{lstlisting}
+
+三种诊断结果：
+\begin{enumerate}
+  \item 无 VMA 覆盖 → 访问了未分配的地址空间（一定是 bug）
+  \item 有 VMA 但权限不符 → 如写入只读区域（权限违规）
+  \item 有 VMA 且权限匹配但页不存在 → \term{demand paging} 候选（将来实现）
+\end{enumerate}
 
 \section{Boot 区域注册}
 
-% TODO: kmain.c 中注册 direct-map + kheap
-% vmm_alloc_pages/vmm_free_pages 自动注册/移除 VMA
+\begin{lstlisting}[style=cstyle]
+// kmain.c
+vma_register_backend(vma_rbtree_get_ops());
+vma_init();
+vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
+        VMA_READ | VMA_WRITE | VMA_EXEC, "direct-map");
+vma_add(KHEAP_START, KHEAP_START + 64*1024,
+        VMA_READ | VMA_WRITE, "kheap");
+\end{lstlisting}
+
+\texttt{vmm\_alloc\_pages} 和 \texttt{vmm\_free\_pages} 也自动注册/移除 VMA。
 
 \section{验证}
 
@@ -63,6 +143,9 @@ szy-kernel > vma list
 VMA regions (2):
   [ 0] 0xC0000000 - 0xD0000000  256 MiB  rwx  direct-map
   [ 1] 0xE0000000 - 0xE0010000   64 KiB  rw-  kheap
+
+szy-kernel > vma find 0xDEAD0000
+0xDEAD0000 -> no VMA (unmapped / untracked)
 
 szy-kernel > vma test
 [vma-test] === VMA selftest ===
@@ -73,8 +156,44 @@ szy-kernel > vma test
 [vma-test] === ALL PASS ===
 \end{lstlisting}
 
+\section{思考与练习}
+
+\begin{exercise}
+运行 \texttt{vmm fault} 触发 Page Fault，观察输出中是否有 VMA 诊断信息。
+\hex{DEAD0000} 有 VMA 覆盖吗？错误码中 bit 0 (P) 的值说明了什么？
+\end{exercise}
+
+\begin{exercise}
+用 \texttt{vma find 0xC0100000}（内核代码区）和 \texttt{vma find 0xE0000010}（堆区）
+查看它们分别属于哪个 VMA、权限标志是什么。
+思考：为什么 direct-map 有 \texttt{x}（可执行）标志而 kheap 没有？
+\end{exercise}
+
+\begin{exercise}
+运行 \texttt{vma test} 后再运行 \texttt{vma count}，确认测试清理后 VMA 数量
+恢复到初始值（2）。如果 count 不对，说明 remove 有 bug。
+\end{exercise}
+
+\begin{exercise}
+（挑战）实现一个简单链表后端 \texttt{vma\_list.c}，作为红黑树的替代。
+只需实现 \texttt{vma\_ops\_t} 中的所有函数，然后在 \texttt{kconfig.h} 中
+添加一个宏来切换。运行 \texttt{vma test} 验证功能等价。
+对比两个后端在 100 次 add/remove/find 操作下的性能差异
+（可用 PIT 定时器或 \texttt{rdtsc} 计数）。
+\end{exercise}
+
 \section{本章小结}
 
 VMA 让内核从"隐式管理内存"进化到"显式跟踪每个区域"。
-这是实现按需分页（demand paging）、进程地址空间、\texttt{mmap} 的基础。
-内存管理子系统至此基本完成，下一部分进入进程与用户态。
+这是实现按需分页、进程地址空间、用户态 \texttt{mmap} 的基础。
+
+至此，内存管理子系统的三层架构完整构建：
+\begin{enumerate}
+  \item \textbf{PMM}——物理页分配（bitmap / buddy）
+  \item \textbf{VMM}——虚拟→物理映射（页表 + TLB）
+  \item \textbf{VMA}——虚拟地址空间跟踪（红黑树）
+  \item \textbf{kmalloc}——字节级堆分配（first-fit / slab）
+\end{enumerate}
+
+全部采用 \texttt{ops\_t} 函数指针表 + dispatch 层的可插拔架构。
+下一部分进入进程与用户态——TSS、ELF 加载、系统调用、调度器。
