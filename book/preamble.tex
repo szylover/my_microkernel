@@ -32,6 +32,8 @@
   decorations.pathreplacing,  % 花括号标注
   fit,            % 包围框
   shapes.multipart,  % 多段节点（struct field 图）
+  shapes.geometric,  % 几何形状（三角形等）
+  patterns,       % 填充图案
 }
 
 % 内存块样式
@@ -67,10 +69,12 @@
   commentstyle=\color{gray}\itshape,
   stringstyle=\color{red!70!black},
   numbers=left,
-  numberstyle=\tiny\color{gray},
-  numbersep=8pt,
-  frame=single,
-  framesep=4pt,
+  numberstyle=\scriptsize\color{black!40},
+  numbersep=10pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
   breaklines=true,
   tabsize=4,
   showstringspaces=false,
@@ -84,10 +88,12 @@
   keywordstyle=\color{blue}\bfseries,
   commentstyle=\color{gray}\itshape,
   numbers=left,
-  numberstyle=\tiny\color{gray},
-  numbersep=8pt,
-  frame=single,
-  framesep=4pt,
+  numberstyle=\scriptsize\color{black!40},
+  numbersep=10pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
   breaklines=true,
   tabsize=4,
   showstringspaces=false,
@@ -100,8 +106,10 @@
   basicstyle=\ttfamily\small,
   keywordstyle=\color{blue},
   commentstyle=\color{gray}\itshape,
-  frame=single,
-  framesep=4pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
   breaklines=true,
   tabsize=4,
   showstringspaces=false,
@@ -139,6 +147,11 @@
 
 % 关键术语首次出现
 \newcommand{\term}[1]{\textbf{#1}}
+
+% 代码文件路径标注（放在 lstlisting 前面，显示文件位置）
+\newcommand{\codefile}[1]{%
+  \par\noindent{\small\ttfamily\color{blue!60!black}#1}\vspace{-0.5em}%
+}
 
 % Bitfield 描述环境
 \newenvironment{bitfield}

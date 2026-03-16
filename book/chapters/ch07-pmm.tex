@@ -49,6 +49,7 @@ BIOS 通过 Multiboot2 Memory Map Tag（type=6）报告物理内存区域。
 
 \subsection{Multiboot2 Memory Map Tag 格式}
 
+\codefile{src/kernel/mm/mmap.c}
 \begin{lstlisting}[style=cstyle]
 struct mb2_tag_mmap {
     uint32_t type;          // = 6 (MB2_TAG_TYPE_MMAP)
@@ -77,6 +78,7 @@ struct mb2_mmap_entry {
 
 \subsection{\texttt{pmm\_ops\_t}：后端操作表}
 
+\codefile{src/include/kernel/pmm.h}
 \begin{lstlisting}[style=cstyle]
 typedef struct pmm_ops {
     const char* name;                    // "bitmap" / "buddy"
@@ -119,6 +121,7 @@ typedef struct pmm_ops {
 
 \subsection{Dispatch 层：\texttt{pmm.c}}
 
+\codefile{src/kernel/mm/pmm.c}
 \begin{lstlisting}[style=cstyle]
 static const pmm_ops_t* g_pmm_ops = NULL;
 
@@ -160,6 +163,7 @@ void pmm_free_page(void* page) {
 
 \subsection{核心数据结构}
 
+\codefile{src/kernel/mm/pmm\_bitmap.c}
 \begin{lstlisting}[style=cstyle]
 struct pmm_region {
     uint32_t base;               // 区域起始物理地址
@@ -214,6 +218,7 @@ static uint32_t g_region_count = 0;
   \item bit = 0：页空闲（free）
 \end{itemize}
 
+\codefile{src/kernel/mm/pmm\_bitmap.c}
 \begin{lstlisting}[style=cstyle]
 // 测试第 bit 位是否为 1
 static int bitmap_test_r(const struct pmm_region* r, uint32_t bit) {
@@ -264,6 +269,7 @@ static void bitmap_clear_r(struct pmm_region* r, uint32_t bit) {
 
 \subsection{分配算法：Round-Robin + 线性扫描}
 
+\codefile{src/kernel/mm/pmm\_bitmap.c}
 \begin{lstlisting}[style=cstyle]
 void* pmm_bitmap_alloc_page(void) {
     // Round-robin: 从上次分配的 region 开始，避免总是扫描第一个 region
@@ -296,6 +302,7 @@ Round-robin 均衡了各 region 的使用率。
 
 \subsection{释放算法}
 
+\codefile{src/kernel/mm/pmm\_bitmap.c}
 \begin{lstlisting}[style=cstyle]
 void pmm_bitmap_free_page(void* page) {
     uint32_t addr = (uint32_t)(uintptr_t)page;
@@ -387,7 +394,8 @@ Buddy system 将物理内存分成 $2^k$ 大小的块（order $k = 0, 1, \ldots,
   \node[memcell, minimum width=2.8cm, fill=orange!20, minimum height=0.8cm, below left=1cm and -1.5cm of big] (left) {order 1 (2 页)};
   \node[memcell, minimum width=2.8cm, fill=green!20, minimum height=0.8cm, below right=1cm and -1.5cm of big] (right) {order 1 (2 页)};
 
-  \\draw[-{Stealth[length=4pt]}, thick] (big.south west) -- (left.north) node[midway, left, font=\\scriptsize] {返回给调用者};\n  \\draw[-{Stealth[length=4pt]}, thick] (big.south east) -- (right.north) node[midway, right, font=\\scriptsize] {放回 free\\_list[1]};", "oldString": "  \\draw[arr, -{Stealth}] (big.south west) -- (left.north) node[midway, left, font=\\scriptsize] {返回给调用者};\n  \\draw[arr, -{Stealth}] (big.south east) -- (right.north) node[midway, right, font=\\scriptsize] {放回 free\\_list[1]};
+  \draw[-{Stealth[length=4pt]}, thick] (big.south west) -- (left.north) node[midway, left, font=\scriptsize] {返回给调用者};
+  \draw[-{Stealth[length=4pt]}, thick] (big.south east) -- (right.north) node[midway, right, font=\scriptsize] {放回 free\_list[1]};
 \end{tikzpicture}
 \caption{Buddy 分裂：order 2 块拆成两个 order 1 块}
 \end{figure}
@@ -411,6 +419,7 @@ order $k$ 块的起始帧号必须是 $2^k$ 的整数倍，所以 $P \oplus 2^k$
 % ============================================================================
 \section{后端切换：\texttt{kconfig.h}}
 
+\codefile{src/kernel/core/kmain.c}
 \begin{lstlisting}[style=cstyle]
 // kconfig.h
 #define KCONFIG_PMM_BACKEND  0   // 0=bitmap, 1=buddy

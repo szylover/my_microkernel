@@ -8,21 +8,42 @@
 % ============================================================================
 \begin{document}
 
-% --- 封面 ---
+\raggedbottom   % 不强制页面底部对齐，避免代码块间距被拉大
+
+% --- 封面（O'Reilly 风格） ---
 \begin{titlepage}
+  \begin{tikzpicture}[remember picture, overlay]
+    % 顶部窄线
+    \fill[black!60] (current page.north west) rectangle
+      ([yshift=-0.6cm]current page.north east);
+    % 红色标题色带
+    \fill[red!75!black] ([yshift=-2.5cm]current page.north west) rectangle
+      ([yshift=-7.5cm]current page.north east);
+    % 底部窄线
+    \fill[black!60] ([yshift=1.8cm]current page.south west) rectangle
+      ([yshift=2.2cm]current page.south east);
+  \end{tikzpicture}
+
   \centering
-  \vspace*{3cm}
-  {\Huge\bfseries 自己动手写操作系统 \par}
+  \vspace*{2.2cm}
+
+  % 书名（红色带内，白字）
+  {\color{white}\fontsize{38}{46}\selectfont\bfseries 自己动手写操作系统\par}
   \vspace{0.5cm}
-  {\Large 从零构建 x86 微内核 \par}
-  \vspace{2cm}
-  {\large 基于 SZY-KERNEL 项目实战 \par}
-  \vspace{1cm}
-  {\large SZY \par}
-  \vspace{2cm}
-  {\large \today \par}
+  {\color{white!90}\LARGE 从零构建 x86 微内核\par}
+
+  \vspace{3cm}
+
+  % 副标题（留白区，斜体）
+  {\large\itshape 基于 SZY-KERNEL 的 OS 开发实战教程\par}
+
   \vfill
-  {\small 本书随项目代码同步演进，每完成一个 Stage 即补充对应章节。}
+
+  % 作者 & 日期（底部）
+  {\Large\bfseries SZY\par}
+  \vspace{0.3cm}
+  {\normalsize \today\par}
+  \vspace{2.5cm}
 \end{titlepage}
 
 % --- 目录 ---

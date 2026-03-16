@@ -95,6 +95,7 @@ $$\texttt{checksum} = \texttt{0x100000000} - (\texttt{magic} + \texttt{arch} + \
 
 对应的汇编实现：
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 section .multiboot_header
 align 8
@@ -124,6 +125,7 @@ Multiboot2 header 必须位于映像的前 32\,KiB 内，且 8 字节对齐。
 链接脚本控制 ELF 各段的虚拟地址（VMA）和物理地址（LMA）。
 对于高半区内核（high-half kernel），这两者不同：
 
+\codefile{src/boot/linker.ld}
 \begin{lstlisting}[style=cstyle, language={}]
 OUTPUT_FORMAT(elf32-i386)
 ENTRY(_start)
@@ -204,6 +206,7 @@ GRUB 会尝试把内核加载到物理地址 \hex{C01xxxxx} ≈ 3\,GiB——
 
 \subsection{保存 Multiboot2 信息}
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 _start:
     mov esi, eax            ; magic (0x36d76289)
@@ -215,6 +218,7 @@ GRUB 传入的 \reg{EAX}（magic）和 \reg{EBX}（info 指针）保存在 calle
 
 \subsection{PSE 页目录构造}
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 ; 清零页目录 (1024 x 4B = 4 KiB)
 push edi
@@ -334,6 +338,7 @@ PSE PDE 的位格式：
 
 \subsection{开启 PSE 和分页}
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 ; CR4.PSE = 1 (允许 4 MiB 页)
 mov eax, cr4
@@ -363,6 +368,7 @@ mov cr0, eax
 
 \subsection{跳转到高半区}
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 mov eax, _start_high    ; 链接地址 = 0xC01xxxxx
 jmp eax                 ; 跳到高半区虚拟地址
@@ -379,6 +385,7 @@ jmp eax                 ; 跳到高半区虚拟地址
 
 进入高半区后，第一件事是设置栈和调用 C 入口：
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle]
 section .text
 _start_high:
@@ -447,6 +454,7 @@ COM1 的基地址为 \hex{3F8}，各寄存器偏移如表~\ref{tab:uart-regs}：
 
 \subsection{\texttt{serial\_init()} 初始化步骤}
 
+\codefile{src/kernel/drivers/serial.c}
 \begin{lstlisting}[style=cstyle]
 void serial_init(void) {
     outb(COM1 + 1, 0x00);  // 1. 关闭所有中断
@@ -472,6 +480,7 @@ void serial_init(void) {
 
 \subsection{发送一个字符}
 
+\codefile{src/kernel/drivers/serial.c}
 \begin{lstlisting}[style=cstyle]
 void serial_putc(char c) {
     if (c == '\n') {
@@ -500,6 +509,7 @@ static int serial_transmit_empty(void) {
 
 \subsection{核心结构}
 
+\codefile{src/kernel/core/printk.c}
 \begin{lstlisting}[style=cstyle]
 void printk(const char* fmt, ...) {
     va_list args;
