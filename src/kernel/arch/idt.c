@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "gdt.h"
+#include "vma.h"
 #include "printk.h"
 
 /*
@@ -206,6 +207,43 @@ static void page_fault_handler(const regs_t* r) {
     }
 
     printk("EIP: 0x%08x\n", r->eip);
+
+    /*
+     * Stage 9 (VMA): 用 VMA 查找故障地址所属的虚拟内存区域
+     *
+     * [WHY] 通过 VMA 可以判断故障是否"合法"：
+     *   - 无 VMA 覆盖 → 访问了未分配的地址空间，一定是 bug
+     *   - 有 VMA 但权限不符 → 如写入只读区域，权限违规
+     *   - 有 VMA 且权限匹配但页不存在 → 将来可做按需分页 (demand paging)
+     *
+     * 当前阶段：只增强诊断信息，所有 #PF 仍然 panic。
+     * 将来 Stage 11/13 会在此处实现按需分页（检测到合法 VMA 后分配+映射物理页）。
+     */
+    if (vma_is_ready()) {
+        const vm_area_t* vma = vma_find(fault_addr);
+        if (vma) {
+            printk("VMA: [0x%08x, 0x%08x) '%s' flags=%c%c%c\n",
+                   vma->start, vma->end,
+                   vma->name ? vma->name : "?",
+                   (vma->flags & VMA_READ)  ? 'r' : '-',
+                   (vma->flags & VMA_WRITE) ? 'w' : '-',
+                   (vma->flags & VMA_EXEC)  ? 'x' : '-');
+
+            /* 检查权限匹配 */
+            if ((err & 0x02u) && !(vma->flags & VMA_WRITE)) {
+                printk("  -> WRITE to read-only VMA!\n");
+            }
+            if ((err & 0x10u) && !(vma->flags & VMA_EXEC)) {
+                printk("  -> EXEC in non-executable VMA!\n");
+            }
+            if (!(err & 0x01u)) {
+                printk("  -> Page not present in valid VMA (demand paging candidate)\n");
+            }
+        } else {
+            printk("VMA: no VMA covers 0x%08x (invalid access)\n", fault_addr);
+        }
+    }
+
     printk("============================\n");
 }
 

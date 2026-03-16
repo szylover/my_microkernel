@@ -1,4 +1,17 @@
 
+## 2026-03-16
+- 新增 `include/kernel/vma.h`：VMA 可插拔后端接口（`vma_ops_t` 函数指针表 + `vm_area_t` 描述结构 + 权限标志），和 pmm_ops_t/heap_ops_t 同一套模式。
+- 新增 `kernel/mm/vma.c`：VMA dispatch 层，通过 `g_vma_ops` 转发到注册的后端。
+- 新增 `kernel/cmds/cmd_vma.c`：`vma` shell 命令（`list`/`find`/`count`/`test` 子命令），含 selftest 验证 add/find/remove/overlap。
+- `vmm.h` 新增 `vmm_direct_map_end()` 声明，供 VMA 注册直接映射区边界。
+- `vmm.c`：新增 `g_direct_map_end` 跟踪直接映射区上界；`vmm_alloc_pages`/`vmm_free_pages` 集成 VMA 自动注册/移除。
+- `idt.c`：Page Fault handler 集成 VMA 查询，打印故障地址所属 VMA 及权限匹配诊断。
+- `kmain.c`：引导末尾初始化 VMA 子系统并注册 `direct-map` 和 `kheap` 两个启动区域。
+- `shell.c`：注册 `vma` 命令。
+- 更新 `roadmap.md`：Stage 9 状态标记为「接口」。
+- 更新 `memory-commands.md`：新增 `vma` 命令文档。
+- **注意**：本次提交只含公共接口 + dispatch + cmd，第一个具体后端（vma_rbtree.c）在下一个 commit。
+
 ## 2026-03-13
 - 新增 `include/kernel/kconfig.h`：内核编译期配置集中管理（PMM 后端 / 堆后端 / 初始堆大小），修改配置只需编辑此文件。
 - 新增 `src/kernel/mm/heap_slab.c`：slab 分配器堆后端（7 级 cache 32B~2048B，bitmap 管理空闲 slot，配合 buddy PMM）。

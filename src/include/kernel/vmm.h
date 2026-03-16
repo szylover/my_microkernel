@@ -3,7 +3,7 @@
 /*
  * vmm.h — Virtual Memory Manager (VMM / Paging)
  *
- * Stage-3 goal (see docs/agent.md): enable x86 32-bit paging so every memory
+ * Stage-3 goal: enable x86 32-bit paging so every memory
  * access goes through the MMU (Memory Management Unit).
  *
  * ============================================================================
@@ -262,6 +262,16 @@ void vmm_free_pages(void* vaddr, unsigned count);
 
 /* 返回 VMM 是否已初始化并开启分页 */
 int vmm_is_ready(void);
+
+/*
+ * vmm_direct_map_end — 返回内核直接映射区的结束虚拟地址
+ *
+ * @return  直接映射区的结束地址（不包含），例如 0xD0000000
+ *
+ * [WHY] VMA 子系统需要知道直接映射区的边界来注册 "direct-map" VMA。
+ *   这个值在 vmm_init() 中计算（KERNEL_VIRT_OFFSET + map_end）。
+ */
+uint32_t vmm_direct_map_end(void);
 
 #ifdef __cplusplus
 }

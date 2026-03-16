@@ -40,7 +40,7 @@
 |-------|------|------|------|
 | 7 | High-Half Kernel | 内核映射到 `0xC0000000+`，拆除低地址 identity mapping | ✅ |
 | 8 | 内核堆 (kmalloc) | `kmalloc(size)` / `kfree(ptr)`，空闲链表分配器（first-fit） | ✅ |
-| 9 | VMA（虚拟内存区域） | `vm_area_struct` 结构、红黑树管理 VMA、内核地址空间 VMA 跟踪、Page Fault 按 VMA 分发权限检查 | |
+| 9 | VMA（虚拟内存区域） | `vma_ops_t` 可插拔后端接口 + dispatch 层、内核地址空间 VMA 跟踪、Page Fault 按 VMA 分发权限检查、`vma` shell 命令 | 🚧 接口 |
 
 ### 里程碑 C.final：内存子系统优化
 

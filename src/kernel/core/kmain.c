@@ -12,6 +12,7 @@
 #include "pmm_backends.h"
 #include "vmm.h"
 #include "kmalloc.h"
+#include "vma.h"
 #include "kconfig.h"
 
 /* core: 内核基础设施 */
@@ -185,6 +186,32 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         kmalloc_register_backend(heap_slab_get_ops());
 #endif
         kmalloc_init();
+
+        /*
+         * Stage 9: VMA 子系统初始化 + 注册引导时建立的内核虚拟内存区域
+         *
+         * [WHY] 到这里为止，内核已经建立了以下虚拟内存映射：
+         *   1. 直接映射区 [0xC0000000, direct_map_end) — vmm_init 建立
+         *   2. 内核堆     [KHEAP_START, KHEAP_START + heap_size) — kmalloc_init 建立
+         *   将这些区域注册到 VMA 中，使 Page Fault handler 能判断
+         *   故障地址是否属于合法区域，并检查访问权限。
+         *
+         * [NOTE] 后端在 kconfig.h 中选择（当前仅声明接口，具体后端待下次提交）。
+         *   如果 vma_rbtree_get_ops 等后端可用，取消下方注释即可启用。
+         */
+        /* vma_register_backend(vma_rbtree_get_ops()); */
+        vma_init();
+
+        if (vma_is_ready()) {
+            /* 注册直接映射区: 内核代码 + 数据 + 直接映射的物理内存 */
+            vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
+                    VMA_READ | VMA_WRITE | VMA_EXEC, "direct-map");
+
+            /* 注册内核堆区 */
+            vma_add(KHEAP_START,
+                    KHEAP_START + KCONFIG_HEAP_INITIAL_PAGES * VMM_PAGE_SIZE,
+                    VMA_READ | VMA_WRITE, "kheap");
+        }
     }
 
     /* --- IRQ + keyboard + shell --- */
