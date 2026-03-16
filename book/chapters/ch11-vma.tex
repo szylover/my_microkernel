@@ -12,7 +12,8 @@
   \item 理解 \texttt{vm\_area\_t} 结构体中各字段的含义
   \item 掌握 VMA 权限标志（\texttt{VMA\_READ}/\texttt{WRITE}/\texttt{EXEC}）与 PTE 标志位的映射关系
   \item 理解 \texttt{vma.c} dispatch 层的转发逻辑
-  \item 了解红黑树后端的核心思想：5 条性质、旋转操作、$O(\log n)$ 保证
+  \item 实现排序数组后端：二分查找 $O(\log n)$ find + 有序插入/删除
+  \item 了解红黑树后端的核心思想：5 条性质、旋转操作、$O(\log n)$ 保证（未来升级方向）
   \item 理解静态节点池的必要性（打破 kmalloc 循环依赖）
   \item 掌握 Page Fault 集成：三种诊断结果
   \item 理解引导阶段区域注册与 \texttt{vmm\_alloc\_pages} 的 VMA 自动跟踪
@@ -166,14 +167,14 @@ typedef struct vma_ops {
     {\texttt{vma\_add()} / \texttt{vma\_find()}};
   \node[box, fill=orange!12](disp)   at (0, -2.6)
     {\texttt{vma.c} dispatch};
-  \node[box, fill=green!12] (rb)     at (-3.0,-4.0)
-    {\texttt{vma\_rbtree.c}};
-  \node[box, fill=green!12] (list)   at (3.0,-4.0)
-    {（你的后端）};
+  \node[box, fill=green!12] (sa)     at (-3.0,-4.0)
+    {\texttt{vma\_sorted\_array.c}\\（本章实现）};
+  \node[box, fill=green!8, dashed] (rb) at (3.0,-4.0)
+    {\texttt{vma\_rbtree.c}\\（未来升级）};
   \draw[arr] (caller)--(api);
   \draw[arr] (api)--(disp);
-  \draw[arr] (disp)--(rb);
-  \draw[arr] (disp)--(list);
+  \draw[arr] (disp)--(sa);
+  \draw[arr, dashed, gray] (disp)--(rb);
 \end{tikzpicture}
 \caption{\texttt{vma\_ops\_t} 可插拔后端调用链}
 \label{fig:vma-dispatch}
@@ -223,8 +224,305 @@ Dispatch 层看似"什么都没做"，但它带来三个好处：
 \end{designbox}
 
 % ============================================================================
-\section{红黑树后端概述}
+\section{早期实现：排序数组后端}
+\label{sec:vma-sorted-array}
+
+红黑树是 VMA 后端的终极方案，但它代码量大、调试困难，不适合内核开发的早期阶段。
+我们先实现一个\textbf{排序数组}（sorted array）后端——代码不到 150 行，
+却足以让 VMA 子系统完整运行，为后续所有章节提供基础。
+
+\begin{designbox}
+排序数组的核心权衡：
+
+\begin{itemize}
+  \item \textbf{优势}：实现极其简单，不依赖 \texttt{kmalloc}（静态数组），
+        \texttt{find} 用二分查找 $O(\log n)$，\texttt{dump} 天然按地址排序
+  \item \textbf{劣势}：\texttt{add}/\texttt{remove} 需要搬移数组元素 $O(n)$
+  \item \textbf{适用场景}：VMA 数量 $< 64$（内核启动到单进程阶段绰绰有余）
+  \item \textbf{升级路径}：Stage 13 引入 per-process VMA 后切换到红黑树后端，
+        接口完全兼容，调用者零改动
+\end{itemize}
+\end{designbox}
+
+\subsection{数据结构}
+
+排序数组直接复用公开的 \texttt{vm\_area\_t}，不需要额外的内部节点类型：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+#define VMA_MAX_AREAS 256
+
+static vm_area_t g_areas[VMA_MAX_AREAS];
+static unsigned  g_count = 0;
+\end{lstlisting}
+
+\begin{whybox}
+为什么是 256？
+
+每个 \texttt{vm\_area\_t} = 16 字节，$256 \times 16 = 4096$ 字节 = 恰好 1 页。
+256 个不重叠区间足以管理 4\,GiB 地址空间（平均每个区间 16\,MiB）。
+引导阶段只用 2 个（\texttt{direct-map} + \texttt{kheap}），
+VMM 动态分配约 20 个——远不会用完。
+\end{whybox}
+
+数组中 \texttt{g\_areas[0..g\_count)} 始终按 \texttt{start} 字段升序排列，
+\texttt{g\_count} 跟踪当前已注册的 VMA 数量。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, minimum width=1.8cm,
+               font=\ttfamily\small, anchor=west},
+  lbl/.style={font=\scriptsize\color{gray}, anchor=south},
+]
+  \node[cell, fill=green!12] (a0) at (0, 0) {area[0]};
+  \node[cell, fill=green!12] (a1) at (1.8, 0) {area[1]};
+  \node[cell, fill=green!12] (a2) at (3.6, 0) {area[2]};
+  \node[cell, fill=gray!8]   (a3) at (5.4, 0) {(空)};
+  \node[cell, fill=gray!8]   (a4) at (7.2, 0) {$\cdots$};
+
+  \node[lbl] at (0.9, 0.9) {start=\hex{C000}};
+  \node[lbl] at (2.7, 0.9) {start=\hex{D000}};
+  \node[lbl] at (4.5, 0.9) {start=\hex{E000}};
+
+  \draw[{Stealth[length=4pt]}-, thick, blue!60!black]
+    (5.4, -0.7) -- (5.4, -0.4);
+  \node[font=\scriptsize\color{blue!60!black}] at (5.4, -0.9) {\texttt{g\_count = 3}};
+\end{tikzpicture}
+\caption{排序数组示意——前 3 个槽位有效，按 \texttt{start} 升序}
+\label{fig:vma-sorted-array}
+\end{figure}
+
+与红黑树后端的静态节点池类似，排序数组也完全不依赖 \texttt{kmalloc}——
+它是一个编译期 \texttt{static} 数组。这避免了第~\ref{sec:vma-pool}~节讨论的循环依赖问题。
+
+\subsection{二分查找辅助函数}
+
+\texttt{sa\_add}、\texttt{sa\_remove}、\texttt{sa\_find} 都需要在有序数组上做二分查找，
+区别仅在于比较条件（\texttt{<} vs \texttt{<=}）。我们抽出两个辅助函数避免重复代码：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+/* lower_bound: 第一个 start >= target 的下标 */
+static unsigned sa_lower_bound(uint32_t target)
+{
+    unsigned left = 0, right = g_count;
+    while (left < right) {
+        unsigned mid = left + (right - left) / 2;
+        if (g_areas[mid].start < target)
+            left = mid + 1;
+        else
+            right = mid;
+    }
+    return left;
+}
+
+/* upper_bound: 第一个 start > target 的下标 */
+static unsigned sa_upper_bound(uint32_t target)
+{
+    unsigned left = 0, right = g_count;
+    while (left < right) {
+        unsigned mid = left + (right - left) / 2;
+        if (g_areas[mid].start <= target)
+            left = mid + 1;
+        else
+            right = mid;
+    }
+    return left;
+}
+\end{lstlisting}
+
+两者的唯一区别是比较时是否包含等号：
+\texttt{lower\_bound} 用 \texttt{<}（找 $\geq$），\texttt{upper\_bound} 用 \texttt{<=}（找 $>$）。
+\texttt{sa\_add}/\texttt{sa\_remove} 用 \texttt{lower\_bound} 找精确位置，
+\texttt{sa\_find} 用 \texttt{upper\_bound} 找"最后一个 $\leq$ addr"的候选。
+
+\subsection{插入：保持有序 + 重叠检测}
+
+\texttt{sa\_add} 的核心逻辑分四步：
+
+\begin{enumerate}
+  \item \textbf{参数校验}——容量上限、\texttt{start < end}、页对齐（低 12 位为零）
+  \item \textbf{重叠检查}——遍历数组，确认新 \texttt{[start, end)} 不与任何已有 VMA 重叠。
+        两个区间重叠的充要条件是 \texttt{a.start < b.end \&\& b.start < a.end}
+  \item \textbf{找插入位置}——因数组有序，找到第一个 \texttt{g\_areas[i].start > start} 的位置
+  \item \textbf{后移 + 写入}——从尾部往回搬，腾出插入位，写入新 VMA
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, minimum width=1.2cm,
+               font=\ttfamily\small, anchor=west},
+  highlight/.style={fill=yellow!30},
+  arr/.style={-{Stealth[length=4pt]}, thick, red!60!black},
+]
+  % 插入前
+  \node[font=\small\bfseries] at (-1.5, 0) {插入前:};
+  \node[cell, fill=green!12] at (0, 0) {A};
+  \node[cell, fill=green!12] at (1.2, 0) {B};
+  \node[cell, fill=green!12] at (2.4, 0) {D};
+  \node[cell, fill=green!12] at (3.6, 0) {E};
+  \node[cell, fill=gray!8]   at (4.8, 0) {\_};
+
+  % 后移
+  \node[font=\small\bfseries] at (-1.5, -1.2) {后移:};
+  \node[cell, fill=green!12] at (0, -1.2) {A};
+  \node[cell, fill=green!12] at (1.2, -1.2) {B};
+  \node[cell, highlight]     at (2.4, -1.2) {\_};
+  \node[cell, fill=green!12] at (3.6, -1.2) {D};
+  \node[cell, fill=green!12] at (4.8, -1.2) {E};
+  \draw[arr] (3.15, 0.35) -- (4.35, -0.85);
+  \draw[arr] (4.35, 0.35) -- (5.55, -0.85);
+
+  % 写入
+  \node[font=\small\bfseries] at (-1.5, -2.4) {写入:};
+  \node[cell, fill=green!12] at (0, -2.4) {A};
+  \node[cell, fill=green!12] at (1.2, -2.4) {B};
+  \node[cell, fill=red!15]   at (2.4, -2.4) {C};
+  \node[cell, fill=green!12] at (3.6, -2.4) {D};
+  \node[cell, fill=green!12] at (4.8, -2.4) {E};
+  \node[font=\scriptsize\color{red!60!black}] at (3.0, -3.1) {新插入};
+\end{tikzpicture}
+\caption{\texttt{sa\_add} 插入过程：后移元素 → 写入新 VMA}
+\label{fig:vma-sa-insert}
+\end{figure}
+
+\subsection{查找：二分搜索}
+
+\texttt{sa\_find(addr)} 调用 \texttt{sa\_upper\_bound} 找到第一个 \texttt{start > addr}
+的位置，减 1 即为候选者：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+static const vm_area_t* sa_find(uint32_t addr)
+{
+    if (g_count == 0)
+        return NULL;
+
+    unsigned idx = sa_upper_bound(addr);
+    if (idx == 0)
+        return NULL;
+
+    const vm_area_t* candidate = &g_areas[idx - 1];
+    return (addr < candidate->end) ? candidate : NULL;
+}
+\end{lstlisting}
+
+算法步骤：
+
+\begin{enumerate}
+  \item 初始化 \texttt{left = 0}, \texttt{right = g\_count}
+  \item 当 \texttt{left < right} 时，计算 \texttt{mid = left + (right - left) / 2}
+  \item 如果 \texttt{g\_areas[mid].start <= addr}，则 \texttt{left = mid + 1}
+        （\texttt{mid} 可能是答案，但看右边有没有更后面的候选者）
+  \item 否则 \texttt{right = mid}（\texttt{mid} 的 \texttt{start} 太大，答案在左边）
+  \item 循环结束后，\texttt{left - 1} 是最后一个 \texttt{start <= addr} 的下标
+  \item 检查 \texttt{addr < candidate->end}，是则命中，否则落在空洞中
+\end{enumerate}
+
+\begin{whybox}
+为什么用 upper\_bound 而不是 lower\_bound？
+
+我们要找的是"最后一个 \texttt{start <= addr} 的 VMA"。
+\texttt{upper\_bound} 找的是第一个 \texttt{start > addr} 的位置，
+减 1 就是我们要的答案。
+这是二分查找最常见的变体之一，值得牢记。
+
+如果 \texttt{left == 0}（所有 VMA 的 \texttt{start} 都大于 \texttt{addr}），
+直接返回 NULL——不存在包含该地址的 VMA。
+\end{whybox}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, minimum width=2.8cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  hit/.style={fill=green!20},
+  miss/.style={fill=red!10},
+]
+  \node[cell, fill=blue!8] (a0) at (0, 0) {[0x1000, 0x5000)};
+  \node[cell, fill=blue!8] (a1) at (2.8, 0) {[0x8000, 0xA000)};
+  \node[cell, fill=blue!8] (a2) at (5.6, 0) {[0xC000, 0xF000)};
+
+  % find(0x9000) → hit
+  \draw[-{Stealth[length=4pt]}, thick, green!50!black]
+    (4.2, 1.0) -- (4.2, 0.4);
+  \node[font=\scriptsize\color{green!50!black}] at (4.2, 1.2)
+    {find(0x9000) → area[1] ✓};
+
+  % find(0xB000) → miss (gap)
+  \draw[-{Stealth[length=4pt]}, thick, red!50!black]
+    (5.0, -1.0) -- (5.0, -0.4);
+  \node[font=\scriptsize\color{red!50!black}] at (5.0, -1.2)
+    {find(0xB000) → NULL (空洞)};
+\end{tikzpicture}
+\caption{二分查找示例：0x9000 命中 area[1]；0xB000 落在两个 VMA 之间的空洞}
+\label{fig:vma-sa-find}
+\end{figure}
+
+\subsection{删除：前移覆盖}
+
+\texttt{sa\_remove(start)} 用 \texttt{sa\_lower\_bound} 二分定位后，将后续元素前移一格覆盖：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, minimum width=1.2cm,
+               font=\ttfamily\small, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, thick, blue!60!black},
+]
+  \node[font=\small\bfseries] at (-1.5, 0) {删除前:};
+  \node[cell, fill=green!12] at (0, 0) {A};
+  \node[cell, fill=green!12] at (1.2, 0) {B};
+  \node[cell, fill=red!15]   at (2.4, 0) {C};
+  \node[cell, fill=green!12] at (3.6, 0) {D};
+  \node[cell, fill=green!12] at (4.8, 0) {E};
+
+  \node[font=\small\bfseries] at (-1.5, -1.2) {前移:};
+  \node[cell, fill=green!12] at (0, -1.2) {A};
+  \node[cell, fill=green!12] at (1.2, -1.2) {B};
+  \node[cell, fill=green!12] at (2.4, -1.2) {D};
+  \node[cell, fill=green!12] at (3.6, -1.2) {E};
+  \node[cell, fill=gray!8]   at (4.8, -1.2) {\_};
+  \draw[arr] (4.35, 0.35) -- (3.15, -0.85);
+  \draw[arr] (3.15, 0.35) -- (1.95, -0.85);
+
+  \node[font=\scriptsize\color{red!60!black}] at (3.0, 0.55) {删除 C};
+\end{tikzpicture}
+\caption{\texttt{sa\_remove} 删除过程：前移元素覆盖被删除位置}
+\label{fig:vma-sa-remove}
+\end{figure}
+
+\subsection{复杂度总结与适用阶段}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{操作} & \textbf{排序数组} & \textbf{适用场景} \\
+\midrule
+\texttt{find}   & $O(\log n)$ 二分    & 每次 \#PF 都要调用，必须快 \\
+\texttt{add}    & $O(n)$ 搬移        & 仅启动/分配时调用，频率低 \\
+\texttt{remove} & $O(n)$ 搬移        & 仅释放时调用，频率低 \\
+\texttt{dump}   & $O(n)$ 顺序遍历    & 仅调试命令，不影响性能 \\
+\bottomrule
+\end{tabular}
+\caption{排序数组后端复杂度——\texttt{find} 快，\texttt{add}/\texttt{remove} 可接受}
+\label{tab:vma-sa-complexity}
+\end{table}
+
+在内核启动到单进程阶段（Stage 9 -- Stage 12），VMA 数量 $n < 20$。
+此时 $O(n)$ 的插入/删除在绝对耗时上几乎无开销（搬移 20 个 16 字节的结构体 $\approx$ 几十个 \texttt{mov} 指令）。
+当多进程引入 per-process VMA 后再切换红黑树，是更合理的渐进式开发策略。
+
+% ============================================================================
+\section{红黑树后端概述（未来升级方向）}
 \label{sec:vma-rbtree}
+
+排序数组已经满足了早期内核的需求，但当进程管理引入后，VMA 数量会急剧增长。
+红黑树在所有单次操作上都保持 $O(\log n)$，是 Linux 内核历史上长期使用的方案
+（Linux 6.1 之后改用 maple tree，但红黑树仍是经典实现）。
 
 VMA 后端需要高效地支持三种操作：
 
@@ -495,7 +793,7 @@ void* vmm_alloc_pages(unsigned count) {
 
 \begin{tcblisting}{consolebox}
 «\tpk{>}» «\tin{vma list}»
-=== VMA list (rbtree, 2 entries) ===
+=== VMA list (sorted-array, 2 entries) ===
   [0xC0000000, 0xD0000000) rwx  direct-map      (256 MiB)
   [0xE0000000, 0xE0010000) rw-  kheap           (64 KiB)
 \end{tcblisting}
@@ -575,17 +873,17 @@ void* vmm_alloc_pages(unsigned count) {
 \section{思考与练习}
 
 \begin{exercise}
-\textbf{实现有序链表后端 \texttt{vma\_list.c}}
+\textbf{实现红黑树后端 \texttt{vma\_rbtree.c}}
 
-实现一个简单的有序单链表后端（满足 \texttt{vma\_ops\_t} 接口）：
+将排序数组后端升级为红黑树后端（满足 \texttt{vma\_ops\_t} 接口）：
 \begin{enumerate}
-  \item 使用静态数组 \texttt{node\_pool[128]}，每个节点包含 \texttt{vm\_area\_t} 和 \texttt{next} 指针
-  \item \texttt{add}：遍历链表找到正确位置（按 \texttt{start} 升序），插入前检查重叠
-  \item \texttt{find}：线性扫描，\texttt{start <= addr < end} 即命中
-  \item \texttt{remove}：找到 \texttt{start} 匹配的节点，从链表中摘除
+  \item 使用静态数组 \texttt{node\_pool[256]}，每个节点包含 \texttt{vm\_area\_t}、颜色位和三个指针（parent/left/right）
+  \item \texttt{add}：BST 插入 + 红黑修复（处理叔节点为红/黑、旋转）
+  \item \texttt{find}：$O(\log n)$ 查找，与排序数组的二分查找复杂度相同
+  \item \texttt{remove}：BST 删除 + 红黑修复（最复杂的部分，6 种情况）
 \end{enumerate}
-在 \texttt{kconfig.h} 中添加 \texttt{VMA\_BACKEND} 选项，\texttt{0}=list, \texttt{1}=rbtree。
-用 \texttt{vma test} 验证通过。
+在 \texttt{kconfig.h} 中添加 \texttt{VMA\_BACKEND} 选项，\texttt{0}=sorted-array, \texttt{1}=rbtree。
+用 \texttt{vma test} 验证通过，对比两种后端的代码量。
 \end{exercise}
 
 \begin{exercise}
