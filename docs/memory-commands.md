@@ -13,6 +13,7 @@
 | `pmm ...` | PMM 物理内存管理：状态/分配/释放/位图 |
 | `vmm ...` | VMM 虚拟内存管理：页表查询/映射/取消映射/故障测试 |
 | `heap ...` | 内核堆调试：kmalloc/kfree 状态/分配/释放/selftest |
+| `vma ...` | VMA 虚拟内存区域：列表/查找/计数/selftest |
 
 ---
 
@@ -284,6 +285,77 @@ szy-kernel > heap test
 | test 2 | 连续 4 次 alloc 不同大小，检查地址不重叠 | 拆分逻辑有问题，块互相覆盖 |
 | test 3 | 全部 free 后 alloc_count == 0 | free 没正确标记 is_free |
 | test 4 | free 后重新 alloc 同大小，验证空间复用 | 合并（coalescing）逻辑有 bug |
+
+---
+
+## `vma` — 虚拟内存区域管理
+
+VMA 跟踪内核所有已注册的虚拟内存区域，供 Page Fault handler 判断访问是否合法。
+
+### `vma list`
+
+按地址排序列出所有 VMA：
+
+```
+szy-kernel > vma list
+VMA regions (2):
+  [ 0] 0xC0000000 - 0xD0000000  256 MiB  rwx  direct-map
+  [ 1] 0xE0000000 - 0xE0010000   64 KiB  rw-  kheap
+```
+
+字段含义：
+- 地址范围：[start, end) 左闭右开
+- 大小：自动选择 B / KiB / MiB 单位
+- 权限：`r`=读 `w`=写 `x`=执行，`-`=无
+- 名称：区域用途
+
+### `vma find <addr>`
+
+查找包含指定地址的 VMA：
+
+```
+szy-kernel > vma find 0xC0100000
+0xC0100000 -> VMA [0xC0000000, 0xD0000000) 'direct-map'
+  size: 262144 KiB, offset: 0x100000, flags: rwx
+
+szy-kernel > vma find 0xDEAD0000
+0xDEAD0000 -> no VMA (unmapped / untracked)
+```
+
+### `vma count`
+
+显示后端信息和 VMA 数量：
+
+```
+szy-kernel > vma count
+VMA backend: rbtree
+VMA count:   2
+```
+
+### `vma test`
+
+自动化 selftest——4 个测试一条命令跑完：
+
+```
+szy-kernel > vma test
+[vma-test] === VMA selftest ===
+[vma-test] test 1: add + find
+[vma-test] PASS
+[vma-test] test 2: find outside
+[vma-test] PASS
+[vma-test] test 3: overlap detection
+[vma-test] PASS
+[vma-test] test 4: remove + find
+[vma-test] PASS
+[vma-test] === ALL PASS ===
+```
+
+| 测试 | 验证内容 |
+|------|----------|
+| test 1 | add 后 find 能命中 |
+| test 2 | find 范围外地址返回 NULL |
+| test 3 | 重叠区间被拒绝 |
+| test 4 | remove 后 find 不再命中 |
 
 ---
 

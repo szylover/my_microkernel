@@ -3,6 +3,7 @@
 
 #include "vmm.h"
 #include "pmm.h"
+#include "vma.h"
 #include "printk.h"
 
 /*
@@ -84,6 +85,14 @@ static int g_vmm_ready = 0;
  * 直接映射区上方（向上对齐到 4MiB 边界，留出安全间隔）。
  */
 static uint32_t g_next_vaddr = 0;
+
+/*
+ * g_direct_map_end — 直接映射区结束的虚拟地址
+ *
+ * [WHY] VMA 子系统注册 "direct-map" 区域时需要知道边界。
+ *   在 vmm_init() 末尾设置为 KERNEL_VIRT_OFFSET + map_end。
+ */
+static uint32_t g_direct_map_end = 0;
 
 /* ============================================================================
  * 内部辅助函数
@@ -412,6 +421,8 @@ void vmm_init(void) {
     uint32_t align_4m = 0x400000u;
     g_next_vaddr = (direct_map_top + align_4m - 1u) & ~(align_4m - 1u);
 
+    g_direct_map_end = direct_map_top;
+
     printk("[vmm] alloc area: 0x%08x - 0xFFFFFFFF\n", g_next_vaddr);
 }
 
@@ -459,6 +470,10 @@ void vmm_unmap_identity(void) {
 
 int vmm_is_ready(void) {
     return g_vmm_ready;
+}
+
+uint32_t vmm_direct_map_end(void) {
+    return g_direct_map_end;
 }
 
 int vmm_is_mapped(uint32_t virt) {
@@ -580,7 +595,12 @@ void* vmm_alloc_pages(unsigned count) {
         }
     }
 
-    /* 步骤 5: 成功，返回起始虚拟地址 */
+    /* 步骤 5: 注册 VMA（如果 VMA 子系统已就绪） */
+    if (vma_is_ready()) {
+        vma_add(start, start + total_bytes, VMA_READ | VMA_WRITE, "vmm-alloc");
+    }
+
+    /* 步骤 6: 成功，返回起始虚拟地址 */
     return (void*)(uintptr_t)start;
 
 rollback:
@@ -618,6 +638,11 @@ void vmm_free_pages(void* vaddr, unsigned count) {
     }
 
     uint32_t base = (uint32_t)(uintptr_t)vaddr;
+
+    /* 移除 VMA 记录（如果 VMA 子系统已就绪） */
+    if (vma_is_ready()) {
+        vma_remove(base);
+    }
 
     for (unsigned i = 0; i < count; i++) {
         uint32_t virt = base + i * VMM_PAGE_SIZE;

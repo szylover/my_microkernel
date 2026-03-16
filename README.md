@@ -23,4 +23,4 @@ make iso && make run
 | [docs/shell.md](docs/shell.md) | Shell 设计、命令列表、扩展方法 |
 | [docs/roadmap.md](docs/roadmap.md) | 项目愿景、阶段化路线图、已完成进度 |
 | [docs/changelog.md](docs/changelog.md) | 每日变更记录 |
-| [docs/agent.md](docs/agent.md) | AI 协作开发规范、目录结构 |
+| [docs/memory-commands.md](docs/memory-commands.md) | 内存调试命令速查 |
