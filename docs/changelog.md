@@ -1,4 +1,13 @@
 
+## 2026-03-16 (Stage 9 VMA sorted-array backend)
+- 新增 `kernel/mm/vma_sorted_array.c`：排序数组 VMA 后端（`vma_ops_t` 实现），静态数组 256 条目（恰好 1 页），二分查找 `find` $O(\log n)$，有序插入/删除 $O(n)$。
+- 抽取 `sa_lower_bound()` / `sa_upper_bound()` 二分查找辅助函数，`sa_add`/`sa_remove`/`sa_find` 共用。
+- `vma.h`：新增 `vma_sorted_array_get_ops()` 后端声明。
+- `kmain.c`：注册 sorted-array 为默认 VMA 后端（替换之前注释的 rbtree）。
+- `book/chapters/ch11-vma.tex`：新增「排序数组后端」完整章节（数据结构、插入/查找/删除图解、二分查找辅助函数代码、复杂度分析），更新 dispatch 图和练习题。
+- `book/preamble.tex`：consolebox 终端样式修复——默认输出文字色调亮（`#B0BEC5`），显式重置 keyword/comment/string/identifier 样式为亮灰，深色背景上不再有黑色不可见文字。
+- Stage 9 VMA 状态从「🚧 接口」更新为 ✅。
+
 ## 2026-03-16 (book fix + README)
 - 修复 `book/chapters/ch07-pmm.tex` 第 390 行损坏内容（上次编辑残留 JSON 元数据和双反斜杠）。
 - 修复 `book/chapters/ch08-vmm.tex`：TikZ 样式名 `step` 与内置关键字冲突，改为 `flowstep`；TikZ 节点多行文本添加 `align=center`。

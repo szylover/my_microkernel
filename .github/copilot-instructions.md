@@ -93,5 +93,5 @@ my_microkernel/
         ├── cmds/                  #   Shell 命令模块
         ├── core/                  #   内核入口和基础设施 (kmain/shell/printk/console)
         ├── drivers/               #   设备驱动实现
-        └── mm/                    #   内存管理 (pmm/pmm_bitmap/pmm_buddy/vmm/vma/kmalloc/heap_first_fit/heap_slab/mmap)
+        └── mm/                    #   内存管理 (pmm/pmm_bitmap/pmm_buddy/vmm/vma/vma_sorted_array/kmalloc/heap_first_fit/heap_slab/mmap)
 ```
