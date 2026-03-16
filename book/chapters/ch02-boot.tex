@@ -7,63 +7,375 @@
 \section{本章目标}
 
 \begin{itemize}
-  \item 编写 Multiboot2 兼容的引导头，让 GRUB 识别并加载我们的内核
-  \item 从汇编跳转到 C 入口 \texttt{kmain}
-  \item 通过 COM1 串口输出第一条调试信息
-  \item 解析 Multiboot2 info 结构，打印 tag 列表
+  \item 编写符合 Multiboot2 规范的引导头，让 GRUB 识别并加载我们的内核
+  \item 在汇编中建立临时 PSE 页表，开启分页，跳转到高半区执行
+  \item 从汇编入口 \texttt{\_start} 跳转到 C 入口 \texttt{kmain}
+  \item 初始化 COM1 串口，通过 \texttt{printk} 输出第一条调试信息
+  \item 解析 Multiboot2 info 结构体，打印所有 tag
 \end{itemize}
 
+% ============================================================================
 \section{背景知识：x86 启动流程}
 
-% TODO: BIOS → GRUB → Multiboot2 协议 → 内核入口
+当你按下电源键，到内核的 \texttt{kmain} 函数开始执行，中间经历了多个阶段：
+
+\begin{enumerate}
+  \item \textbf{BIOS/UEFI 自检}：硬件初始化、内存检测
+  \item \textbf{Bootloader（GRUB）}：从磁盘读取内核 ELF，切换到 32 位保护模式
+  \item \textbf{内核入口 \texttt{\_start}}：我们的代码接管控制
+\end{enumerate}
+
+\begin{whybox}
+我们不需要自己写 bootloader——GRUB 已经帮我们完成了从实模式到保护模式的切换、
+A20 线开启等繁琐工作。我们只需要在内核镜像开头放一个 Multiboot2 Header，
+GRUB 就能识别并加载它。
+\end{whybox}
 
 \subsection{Multiboot2 协议}
 
-% TODO: header 格式（magic / architecture / header_length / checksum / end tag）
-% 引用 Multiboot2 规范
+Multiboot2 是 GRUB 定义的引导规范。内核镜像的前 32KiB 必须包含一个
+\term{Multiboot2 Header}，格式如下：
 
-\subsection{实模式 → 保护模式}
+\begin{lstlisting}[style=nasmstyle]
+; Multiboot2 Header (必须 8 字节对齐)
+header_start:
+    dd 0xe85250d6                    ; magic number (固定值)
+    dd 0                             ; architecture: 0 = i386
+    dd header_end - header_start     ; header length
+    dd 0x100000000 - (0xe85250d6 + 0 + (header_end - header_start))
+                                     ; checksum: 所有字段之和 = 0
 
-% TODO: 简要说明 GRUB 已经帮我们切到了 32-bit 保护模式
+    ; end tag (type=0, flags=0, size=8)
+    dw 0
+    dw 0
+    dd 8
+header_end:
+\end{lstlisting}
 
+\begin{bitfield}
+  \bit{magic}{固定值 \hex{E85250D6}，GRUB 扫描这个标记来定位 header}
+  \bit{architecture}{0 = i386 保护模式（32 位）}
+  \bit{header\_length}{header 的总字节数}
+  \bit{checksum}{magic + arch + length + checksum 必须等于 0（mod $2^{32}$）}
+\end{bitfield}
+
+\subsection{GRUB 交接时的 CPU 状态}
+
+当 GRUB 把控制权交给 \texttt{\_start} 时：
+
+\begin{cpustate}
+\begin{itemize}
+  \item \reg{EAX} = \hex{36d76289}（Multiboot2 magic，用于验证）
+  \item \reg{EBX} = Multiboot2 info 结构体的\textbf{物理地址}
+  \item \reg{CR0}.PE = 1（已在保护模式）
+  \item \reg{CR0}.PG = 0（分页\textbf{未开启}）
+  \item \reg{EIP} 位于物理地址约 \hex{00100000}（1MiB 处）
+  \item 中断已禁用（IF = 0）
+  \item 没有可用栈（\reg{ESP} 未定义）
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
 \section{链接脚本 \texttt{linker.ld}}
 
-% TODO: 详解 .multiboot_header 的放置位置、1MiB 加载地址、KEEP 语义
+链接脚本决定了内核各段在内存中的布局。这是最容易出错也最关键的文件之一。
+
+\subsection{物理加载地址}
+
+\begin{lstlisting}[style=shellstyle]
+. = 1M;
+\end{lstlisting}
 
 \begin{whybox}
-为什么内核要加载到 1MiB？低于 1MiB 的地址空间被 BIOS、VGA 显存、
-ROM 等占据，不可靠。1MiB 是约定俗成的安全起点。
+为什么内核要加载到 1MiB？低于 1MiB 的物理地址空间被 BIOS 数据区（\hex{00000}--\hex{003FF}）、
+VGA 显存（\hex{B8000}）、ROM（\hex{F0000}--\hex{FFFFF}）等占据。
+1MiB 是约定俗成的安全起点。
 \end{whybox}
 
+\subsection{Boot 段：物理地址执行}
+
+\begin{lstlisting}[style=shellstyle]
+.boot ALIGN(4096) :
+{
+    KEEP(*(.multiboot_header))    /* Multiboot2 header 必须在最前 */
+    *(.boot .boot.*)              /* 早期引导代码 */
+}
+\end{lstlisting}
+
+\texttt{KEEP} 确保链接器不会因"未引用"而丢弃 Multiboot2 header。
+\texttt{.boot} 段在物理地址执行——此时分页还没开启。
+
+\subsection{High-Half 切换}
+
+\begin{lstlisting}[style=shellstyle]
+. += KERNEL_VIRT_BASE;   /* 0xC0000000 */
+\end{lstlisting}
+
+从这行开始，所有段的\textbf{虚拟链接地址}跳到 \hex{C0000000}+，
+但\textbf{物理加载地址}（通过 \texttt{AT()} 指定）仍然紧随 \texttt{.boot} 之后。
+
+\begin{lstlisting}[style=shellstyle]
+.text ALIGN(4096) : AT(ADDR(.text) - KERNEL_VIRT_BASE)
+{
+    *(.text .text.*)
+}
+\end{lstlisting}
+
+这意味着：代码被 GRUB 加载到物理地址 \hex{00100000}+ 处，
+但所有符号（函数地址、全局变量）都按 \hex{C0100000}+ 解析。
+开启分页后，高半区映射会把 \hex{C0100000} 翻译到 \hex{00100000}。
+
+% ============================================================================
 \section{引导汇编 \texttt{boot.asm}}
 
-% TODO: 逐段讲解
-% - Multiboot2 header
-% - .bss 段的内核栈（16KiB）
-% - _start: 设置栈 → push mb2_info, mb2_magic → call kmain → hlt
+这是整个内核的第一段执行代码。它完成三件事：
+\begin{enumerate}
+  \item 建立临时页表（PSE 4MiB 大页）
+  \item 开启分页
+  \item 跳转到高半区的 C 入口
+\end{enumerate}
 
-\section{C 入口 \texttt{kmain}}
+\subsection{保存 Multiboot2 参数}
 
-% TODO: serial_init → 串口输出 → mb2_dump_tags
+\begin{lstlisting}[style=nasmstyle]
+_start:
+    mov esi, eax    ; esi = Multiboot2 magic
+    mov edi, ebx    ; edi = Multiboot2 info 指针（物理地址）
+\end{lstlisting}
 
+GRUB 把参数放在 \reg{EAX} 和 \reg{EBX}。我们立刻保存到 callee-saved 寄存器，
+因为后续操作会覆盖 \reg{EAX}。
+
+\subsection{建立 PSE 页表}
+
+\begin{lstlisting}[style=nasmstyle]
+; 构建 256 个 4MiB PSE 页（共 1GiB），同时建立两套映射：
+;   PD[i]       -> identity:  virt 0x00000000+ -> phys 0x00000000+
+;   PD[768+i]   -> high-half: virt 0xC0000000+ -> phys 0x00000000+
+xor ecx, ecx
+.fill_pse:
+    mov eax, ecx
+    shl eax, 22             ; eax = ecx * 4MiB
+    or  eax, 0x83           ; PS(bit7) | RW(bit1) | Present(bit0)
+    mov [boot_pd + ecx*4],       eax   ; PD[i]
+    mov [boot_pd + 768*4 + ecx*4], eax ; PD[768+i]
+    inc ecx
+    cmp ecx, 256
+    jb  .fill_pse
+\end{lstlisting}
+
+\begin{designbox}
+为什么用 4MiB 大页（PSE）而不是 4KiB 页表？
+
+\begin{itemize}
+  \item 4MiB 大页只需要页目录，不需要分配页表——在引导阶段没有内存分配器
+  \item boot.asm 只需要临时映射来完成跳转，\texttt{vmm\_init()} 会用正式的 4KiB 页表替换
+  \item 映射 1GiB 只需 256 个 PDE（循环 256 次），代码非常简短
+\end{itemize}
+\end{designbox}
+
+PDE 的 \hex{83} 标志含义：
+
+\begin{bitfield}
+  \bit{0}{Present (P) = 1：此 PDE 有效}
+  \bit{1}{Read/Write (R/W) = 1：可读写}
+  \bit{7}{Page Size (PS) = 1：这是 4MiB 大页，不指向页表}
+\end{bitfield}
+
+\subsection{开启分页}
+
+\begin{lstlisting}[style=nasmstyle]
+; 开启 PSE（允许 4MiB 页）
+mov eax, cr4
+or  eax, 0x00000010     ; CR4.PSE = 1
+mov cr4, eax
+
+; 加载页目录
+mov eax, boot_pd
+mov cr3, eax
+
+; 开启分页
+mov eax, cr0
+or  eax, 0x80000000     ; CR0.PG = 1
+mov cr0, eax
+\end{lstlisting}
+
+\begin{cpustate}
+执行 \texttt{mov cr0, eax}（\reg{CR0}.PG = 1）之后：
+
+\begin{itemize}
+  \item 所有内存访问开始经过 MMU 翻译
+  \item 下一条指令的 \reg{EIP} 仍是物理地址（约 \hex{00100xxx}）
+  \item Identity mapping \texttt{PD[0..255]} 保证这个物理地址能被翻译
+  \item \textbf{如果 identity mapping 有误} → CPU 取不到下一条指令 → Page Fault → Double Fault → Triple Fault → 重启
+\end{itemize}
+\end{cpustate}
+
+\begin{warnbox}
+开启分页是内核中最危险的操作之一。如果页表有任何错误（如 Present 位忘记设置，
+或地址没 4KiB 对齐），CPU 会立即 Triple Fault 并重启。
+调试时可以用 QEMU 的 \texttt{-no-reboot -d int} 选项查看异常日志。
+\end{warnbox}
+
+\subsection{跳转到高半区}
+
+\begin{lstlisting}[style=nasmstyle]
+; 跳到高半区虚拟地址执行
+mov eax, _start_high    ; 链接器解析为 0xC01xxxxx
+jmp eax
+\end{lstlisting}
+
+\texttt{\_start\_high} 在 \texttt{.text} 段中，虚拟地址 \hex{C01xxxxx}。
+高半区映射 \texttt{PD[768..]} 把它翻译到物理地址 \hex{001xxxxx}。
+
+\subsection{设置栈并调用 \texttt{kmain}}
+
+\begin{lstlisting}[style=nasmstyle]
+_start_high:
+    mov esp, stack_top      ; 16KiB 内核栈
+    and esp, 0xFFFFFFF0     ; 16 字节对齐（System V ABI 要求）
+
+    push edi                ; 参数 2: mb2_info 指针
+    push esi                ; 参数 1: mb2_magic
+    call kmain
+\end{lstlisting}
+
+栈在 \texttt{.bss} 段中预留了 16KiB（\texttt{resb 16384}）。
+\texttt{stack\_top} 是栈的高端（栈向低地址增长）。
+
+% ============================================================================
 \section{串口驱动 \texttt{serial.c}}
 
-% TODO: COM1 端口 0x3F8、波特率设置、DLAB、serial_putc
+串口（UART 16550）是内核早期最可靠的输出通道。QEMU 的 \texttt{-serial stdio}
+会把 COM1 重定向到宿主终端。
 
-\section{printk：内核的 printf}
+\subsection{UART 16550 寄存器}
 
-% TODO: 可变参数、格式化、%d %x %s %p %u
+COM1 的基址是 \hex{3F8}，各寄存器偏移：
 
+\begin{longtable}{cll}
+  \toprule
+  \textbf{偏移} & \textbf{寄存器} & \textbf{用途} \\
+  \midrule
+  +0 & DATA / DLL & 数据寄存器 / DLAB=1 时为除数低字节 \\
+  +1 & IER / DLM  & 中断使能 / DLAB=1 时为除数高字节 \\
+  +2 & IIR / FCR  & 中断识别 / FIFO 控制 \\
+  +3 & LCR        & 线路控制（bit 7 = DLAB） \\
+  +4 & MCR        & Modem 控制 \\
+  +5 & LSR        & 线路状态（bit 5 = 发送缓冲区空） \\
+  \bottomrule
+\end{longtable}
+
+\subsection{初始化流程}
+
+\begin{lstlisting}[style=cstyle]
+void serial_init(void) {
+    outb(COM1 + 1, 0x00); // 关闭中断
+    outb(COM1 + 3, 0x80); // DLAB=1，准备设置波特率
+    outb(COM1 + 0, 0x03); // 除数低字节 (115200/3 = 38400 baud)
+    outb(COM1 + 1, 0x00); // 除数高字节
+    outb(COM1 + 3, 0x03); // 8 数据位, 无校验, 1 停止位 (8N1)
+    outb(COM1 + 2, 0xC7); // 开启 FIFO, 清空, 14 字节阈值
+    outb(COM1 + 4, 0x0B); // RTS/DSR 置位
+}
+\end{lstlisting}
+
+\subsection{发送字符}
+
+\begin{lstlisting}[style=cstyle]
+void serial_putc(char c) {
+    if (c == '\n') {
+        while (!serial_transmit_empty()) {}  // 等待 LSR bit5 = 1
+        outb(COM1, '\r');                    // 先发 CR
+    }
+    while (!serial_transmit_empty()) {}
+    outb(COM1, (uint8_t)c);
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么 \texttt{'\textbackslash n'} 要先发 \texttt{'\textbackslash r'}？
+串口终端遵循 CRLF 约定。如果只发 LF，光标会下移但不回到行首，导致输出错位。
+\end{whybox}
+
+% ============================================================================
+\section{\texttt{printk}：内核的 printf}
+
+\texttt{printk} 是内核中使用最频繁的函数。它解析格式化字符串，通过串口输出。
+
+支持的格式说明符：
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{说明符} & \textbf{含义} \\
+  \midrule
+  \texttt{\%d}  & 有符号十进制整数 \\
+  \texttt{\%u}  & 无符号十进制整数 \\
+  \texttt{\%x}  & 无符号十六进制 \\
+  \texttt{\%p}  & 指针（输出 \texttt{0x} + 8 位十六进制） \\
+  \texttt{\%s}  & 字符串（NULL 安全，输出 \texttt{(null)}） \\
+  \texttt{\%c}  & 单个字符 \\
+  \texttt{\%\%} & 输出字面 \texttt{\%} \\
+  \bottomrule
+\end{longtable}
+
+支持对齐和填充：\texttt{\%-12s}（左对齐宽度 12）、\texttt{\%08x}（零填充宽度 8）。
+
+实现原理：\texttt{printk} → \texttt{vprintk}（解析格式串）→ \texttt{serial\_putc}（逐字符输出）。
+使用 C 标准的 \texttt{va\_list} 变长参数。
+
+% ============================================================================
+\section{C 入口 \texttt{kmain}}
+
+\begin{lstlisting}[style=cstyle]
+void kmain(uint32_t mb2_magic, const void* mb2_info) {
+    serial_init();
+    printk("[mb2] magic=%08x\n", mb2_magic);
+
+    if (mb2_magic != 0x36d76289u) {
+        printk("[mb2] bad magic\n");
+    } else {
+        mb2_dump_tags(mb2_info);
+    }
+    // ... 后续初始化 ...
+}
+\end{lstlisting}
+
+\texttt{mb2\_dump\_tags} 遍历 Multiboot2 info 结构体中的 tag 链表，打印每个 tag 的
+type 和 size。tag 按 8 字节对齐排列，type=0 / size=8 的 end tag 标志结束。
+
+% ============================================================================
 \section{验证}
 
 \begin{lstlisting}[style=shellstyle]
-make iso && make run
-# 预期：终端（-serial stdio）看到
+cd src && make iso && make run
+# 预期串口输出：
 # [mb2] magic=36d76289
-# [mb2] tag type=... size=...
+# [mb2] info @ 0x..., total_size=...
+# [mb2] tag type=1, size=...
+# [mb2] tag type=6, size=...
+# ...
+# [mb2] end tag
 \end{lstlisting}
 
+如果看到 \texttt{bad magic}，说明 GRUB 没有正确识别 Multiboot2 header——
+检查 header 的 magic/checksum 和 linker.ld 中 \texttt{.multiboot\_header} 的位置。
+
+如果 QEMU 窗口空白然后重启，多半是分页设置有误——用 \texttt{-no-reboot -d int}
+看 Triple Fault 的原因。
+
+% ============================================================================
 \section{本章小结}
 
-我们有了一个能被 GRUB 加载、跳转到 C 代码、并通过串口输出信息的最小内核。
-下一章我们设置 GDT，为后续的中断和内存管理做准备。
+我们完成了从零到一的突破：
+
+\begin{enumerate}
+  \item Multiboot2 header 让 GRUB 识别我们的内核
+  \item 链接脚本安排了 boot 段（物理地址）和 kernel 段（高半区虚拟地址）
+  \item boot.asm 建立临时 PSE 页表 → 开启分页 → 跳转到高半区
+  \item serial.c 初始化串口，printk 提供格式化输出
+  \item kmain 验证 Multiboot2 magic 并解析 tag
+\end{enumerate}
+
+内核现在能说话了。下一章我们设置 GDT（全局描述符表），
+为后续的中断处理和内存保护做准备。
