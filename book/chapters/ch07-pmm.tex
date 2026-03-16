@@ -244,11 +244,14 @@ static void bitmap_clear_r(struct pmm_region* r, uint32_t bit) {
   \node[font=\small\ttfamily, left=0.5cm of b0] {bitmap[k]:};
 
   % 对应的物理页
-  \foreach \i/\st in {0/used, 1/used, 2/free, 3/free, 4/used, 5/free, 6/free, 7/free} {
-    \node[memcell, minimum width=0.9cm, minimum height=0.5cm,
-          fill=\ifnum\i<2 red!15\else\ifnum\i=4 red!15\else green!15\fi\fi,
-          font=\tiny] (p\i) at (\i*1.0, -1.2) {\st};
-  }
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=red!15, font=\tiny] (p0) at (0, -1.2) {used};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=red!15, font=\tiny] (p1) at (1.0, -1.2) {used};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=green!15, font=\tiny] (p2) at (2.0, -1.2) {free};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=green!15, font=\tiny] (p3) at (3.0, -1.2) {free};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=red!15, font=\tiny] (p4) at (4.0, -1.2) {used};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=green!15, font=\tiny] (p5) at (5.0, -1.2) {free};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=green!15, font=\tiny] (p6) at (6.0, -1.2) {free};
+  \node[memcell, minimum width=0.9cm, minimum height=0.5cm, fill=green!15, font=\tiny] (p7) at (7.0, -1.2) {free};
   \node[font=\small, left=0.5cm of p0] {物理页:};
 
   % 箭头
@@ -384,8 +387,7 @@ Buddy system 将物理内存分成 $2^k$ 大小的块（order $k = 0, 1, \ldots,
   \node[memcell, minimum width=2.8cm, fill=orange!20, minimum height=0.8cm, below left=1cm and -1.5cm of big] (left) {order 1 (2 页)};
   \node[memcell, minimum width=2.8cm, fill=green!20, minimum height=0.8cm, below right=1cm and -1.5cm of big] (right) {order 1 (2 页)};
 
-  \draw[arr, -{Stealth}] (big.south west) -- (left.north) node[midway, left, font=\scriptsize] {返回给调用者};
-  \draw[arr, -{Stealth}] (big.south east) -- (right.north) node[midway, right, font=\scriptsize] {放回 free\_list[1]};
+  \\draw[-{Stealth[length=4pt]}, thick] (big.south west) -- (left.north) node[midway, left, font=\\scriptsize] {返回给调用者};\n  \\draw[-{Stealth[length=4pt]}, thick] (big.south east) -- (right.north) node[midway, right, font=\\scriptsize] {放回 free\\_list[1]};", "oldString": "  \\draw[arr, -{Stealth}] (big.south west) -- (left.north) node[midway, left, font=\\scriptsize] {返回给调用者};\n  \\draw[arr, -{Stealth}] (big.south east) -- (right.north) node[midway, right, font=\\scriptsize] {放回 free\\_list[1]};
 \end{tikzpicture}
 \caption{Buddy 分裂：order 2 块拆成两个 order 1 块}
 \end{figure}

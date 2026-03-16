@@ -170,7 +170,7 @@ static const cmd_t* g_cmds[] = {
 \centering
 \begin{tikzpicture}[node distance=0cm]
   % g_cmds array
-  \foreach \i/\name in {0/cmd\_cls, 1/cmd\_shutdown, 2/cmd\_cmds, 3/cmd\_mmap, 4/...} {
+  \foreach \i/\name in {0/cmd\_cls, 1/cmd\_shutdown, 2/cmd\_cmds, 3/cmd\_mmap, 4/{\ldots}} {
     \node[memcell, minimum width=3cm, minimum height=0.5cm] (g\i) at (0, -\i*0.55) {};
     \node[font=\tiny\ttfamily] at (g\i) {\name};
     \node[memaddr, left=0.1cm of g\i, font=\tiny\ttfamily] {[\i]};
@@ -178,8 +178,8 @@ static const cmd_t* g_cmds[] = {
   \node[font=\small\ttfamily, above=0.2cm of g0] {g\_cmds[]};
 
   % cmd_t structures on the right
-  \node[draw, minimum width=2.5cm, fill=blue!10, right=2.5cm of g0, font=\tiny\ttfamily] (cls) {name="cls", fn=...};
-  \node[draw, minimum width=2.5cm, fill=orange!10, right=2.5cm of g1, font=\tiny\ttfamily] (shut) {name="shutdown", fn=...};
+  \node[draw, minimum width=2.5cm, fill=blue!10, right=2.5cm of g0, font=\tiny\ttfamily] (cls) {name="cls", fn={\ldots}};
+  \node[draw, minimum width=2.5cm, fill=orange!10, right=2.5cm of g1, font=\tiny\ttfamily] (shut) {name="shutdown", fn={\ldots}};
 
   \draw[pointer] (g0.east) -- (cls.west);
   \draw[pointer] (g1.east) -- (shut.west);

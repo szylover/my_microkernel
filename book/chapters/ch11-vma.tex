@@ -1,50 +1,148 @@
+% Stage 9 — VMA：虚拟内存区域管理
 % ============================================================================
 \chapter{VMA：虚拟内存区域管理}
 \label{ch:vma}
-% Stage 9 — 对应 2026-03-16 changelog
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 理解 VMA 的作用：显式跟踪每个虚拟内存区域的地址范围和权限
-  \item 设计可插拔 VMA 后端接口（\texttt{vma\_ops\_t}）
-  \item 实现第一个后端：红黑树（经典 Linux 风格）
-  \item 集成 VMA 权限检查到 Page Fault handler
-  \item Shell 命令：\texttt{vma list}、\texttt{vma find}、\texttt{vma test}
+  \item 理解 VMA 的核心价值——让 Page Fault handler 区分"合法的按需分页"与"非法访问"
+  \item 掌握 \texttt{vma\_ops\_t} 可插拔后端接口（与 \texttt{pmm\_ops\_t}/\texttt{heap\_ops\_t} 同一模式）
+  \item 理解 \texttt{vm\_area\_t} 结构体中各字段的含义
+  \item 掌握 VMA 权限标志（\texttt{VMA\_READ}/\texttt{WRITE}/\texttt{EXEC}）与 PTE 标志位的映射关系
+  \item 理解 \texttt{vma.c} dispatch 层的转发逻辑
+  \item 了解红黑树后端的核心思想：5 条性质、旋转操作、$O(\log n)$ 保证
+  \item 理解静态节点池的必要性（打破 kmalloc 循环依赖）
+  \item 掌握 Page Fault 集成：三种诊断结果
+  \item 理解引导阶段区域注册与 \texttt{vmm\_alloc\_pages} 的 VMA 自动跟踪
 \end{itemize}
 
-\section{背景知识：为什么需要 VMA}
+% ============================================================================
+\section{背景知识：为什么需要 VMA？}
 
-在之前的实现中，内核"知道"有哪些映射（直接映射区、堆、vmm\_alloc\_pages），
-但这些信息散落在各处代码中。当 Page Fault 发生时，handler 无法判断：
-\begin{itemize}
-  \item 是\textbf{合法的按需分页}——页面应该存在但还没映射？
-  \item 还是\textbf{真正的非法访问}——写入只读区、访问未分配区域？
-\end{itemize}
+在第~\ref{ch:vmm}~章我们实现了二级页表：CPU 通过 PDE → PTE → 物理页完成地址翻译。
+当 PTE 的 Present 位为 0 时，CPU 触发 Page Fault（\#PF, ISR 14），
+但 \emph{页表本身不记录这个虚拟地址"本来应不应该"被映射}。
 
-VMA 将每个虚拟内存区域显式注册，记录地址范围 $[\text{start}, \text{end})$ 和权限。
+考虑以下两种引发 \#PF 的场景：
 
-\begin{thinkbox}
-Linux 中 \texttt{/proc/self/maps} 显示的就是当前进程的 VMA 列表。
-在你的 Linux 终端执行 \texttt{cat /proc/self/maps}，观察每行的地址范围和权限标志
-（r/w/x/p）。想想这些 VMA 是哪个子系统创建的（ELF loader? mmap? stack?）。
-\end{thinkbox}
+\begin{enumerate}
+  \item \textbf{合法的按需分页}——程序声明了一段堆区域，但尚未分配物理页。
+        缺页时内核应分配物理页并建立映射，让程序继续运行。
+  \item \textbf{非法访问}——野指针写到 \hex{00000000}，或跳转到一段
+        没有任何映射的地址。内核应杀死进程或触发 panic。
+\end{enumerate}
 
-\section{可插拔后端：\texttt{vma\_ops\_t}}
+\begin{whybox}
+为什么不在 Page Fault handler 里扫描页表来区分？
+
+页表只有两种状态：映射了（Present=1）或没映射（Present=0）。
+"没映射"既可能是"还没来得及映射"，也可能是"根本不该映射"。
+VMA 显式注册每个合法的虚拟地址区间及其权限，
+使 \#PF handler 有了第二层判据——\emph{该地址属不属于某个已注册的 VMA？}
+\end{whybox}
+
+VMA（Virtual Memory Area）的职责就是**维护一张虚拟地址区间注册表**。
+每个区间记录 \texttt{[start, end)}、权限标志和可读名称。
+Page Fault handler 查 VMA 表，即可做出三种判断（详见第~\ref{sec:vma-pf}~节）。
+
+% ============================================================================
+\section{\texttt{vm\_area\_t} 结构体}
+
+VMA 系统中最基本的数据结构是 \texttt{vm\_area\_t}——描述一段虚拟内存区域：
 
 \begin{lstlisting}[style=cstyle]
 typedef struct vm_area {
-    uint32_t    start;   // 起始虚拟地址（包含，页对齐）
-    uint32_t    end;     // 结束虚拟地址（不包含，页对齐）
-    uint32_t    flags;   // VMA_READ | VMA_WRITE | VMA_EXEC
-    const char* name;    // 人类可读名称
+    uint32_t    start;      /* 起始虚拟地址（包含，页对齐） */
+    uint32_t    end;        /* 结束虚拟地址（不包含，页对齐） */
+    uint32_t    flags;      /* VMA_READ | VMA_WRITE | VMA_EXEC */
+    const char* name;       /* 人类可读名称, 如 "direct-map", "kheap" */
 } vm_area_t;
+\end{lstlisting}
 
+约定与 Linux 一致：\texttt{[start, end)} 左闭右开，\texttt{start} 和 \texttt{end} 都必须页对齐，
+不同 VMA 之间不允许地址重叠。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west},
+]
+  \node[font=\scriptsize, anchor=south, text=blue!60!black] at (0.2, 0.9)
+    {\texttt{vm\_area\_t*}};
+  \draw[-{Stealth[length=4pt]}, thick, blue!60!black] (0.2, 0.9) -- (0.2, 0.7);
+  \node[cell, minimum width=2.4cm, fill=orange!12]  at (0, 0)   {\small start};
+  \node[cell, minimum width=2.4cm, fill=orange!12]  at (2.4, 0) {\small end};
+  \node[cell, minimum width=2.4cm, fill=yellow!15]  at (4.8, 0) {\small flags};
+  \node[cell, minimum width=2.4cm, fill=green!12]   at (7.2, 0) {\small name};
+  \draw[{|}-{|}, thick] (0, -0.6) -- (2.4, -0.6);
+  \node[font=\scriptsize, below] at (1.2, -0.6) {4\,B};
+  \draw[{|}-{|}, thick] (2.4, -0.6) -- (4.8, -0.6);
+  \node[font=\scriptsize, below] at (3.6, -0.6) {4\,B};
+  \draw[{|}-{|}, thick] (4.8, -0.6) -- (7.2, -0.6);
+  \node[font=\scriptsize, below] at (6.0, -0.6) {4\,B};
+  \draw[{|}-{|}, thick] (7.2, -0.6) -- (9.6, -0.6);
+  \node[font=\scriptsize, below] at (8.4, -0.6) {4\,B};
+  \draw[{|}-{|}, thick] (0, 0.9) -- (9.6, 0.9);
+  \node[font=\scriptsize, above] at (4.8, 0.9) {sizeof = 16\,B};
+\end{tikzpicture}
+\caption{\texttt{vm\_area\_t} 内存布局（32 位平台）}
+\label{fig:vm-area-layout}
+\end{figure}
+
+注意：\texttt{vm\_area\_t} 是\emph{公开的只读视图}，不包含后端内部管理字段（如红黑树颜色、
+父/子指针等）。这保持了接口与实现的解耦——调用者只读 \texttt{vm\_area\_t}，
+后端的内部节点可以包含任意附加字段。
+
+% ============================================================================
+\section{VMA 权限标志与 PTE 标志的关系}
+\label{sec:vma-flags}
+
+\begin{lstlisting}[style=cstyle]
+#define VMA_READ    0x01u   /* 可读 */
+#define VMA_WRITE   0x02u   /* 可写 */
+#define VMA_EXEC    0x04u   /* 可执行（配合 NX 位使用） */
+\end{lstlisting}
+
+VMA 标志描述的是\emph{语义层级}的权限意图；PTE 标志是\emph{硬件层级}的访问控制。
+它们之间的映射关系如表~\ref{tab:vma-pte-flags}~所示。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{VMA 标志} & \textbf{对应 PTE 操作} & \textbf{说明} \\
+\midrule
+\texttt{VMA\_READ}  & \texttt{PTE\_PRESENT}   & 页面存在即可读 \\
+\texttt{VMA\_WRITE} & \texttt{PTE\_WRITABLE}  & 设置 R/W 位 \\
+\texttt{VMA\_EXEC}  & 清除 NX 位（PAE/64-bit） & 32 位无 NX，留作扩展 \\
+\bottomrule
+\end{tabular}
+\caption{VMA 权限标志到 PTE 标志的映射}
+\label{tab:vma-pte-flags}
+\end{table}
+
+\begin{thinkbox}
+在 32 位非 PAE 模式下，x86 没有 NX（No-Execute）位——所有可读页面都可以执行。
+这意味着 \texttt{VMA\_EXEC} 在当前实现中其实不会产生硬件层面的约束。
+那为什么还要定义它？
+
+提示：考虑将来迁移到 PAE 或 64 位模式、以及软件层面的审计需求。
+\end{thinkbox}
+
+% ============================================================================
+\section{可插拔后端：\texttt{vma\_ops\_t} 接口}
+
+与 PMM（第~\ref{ch:pmm}~章）和 kmalloc（第~\ref{ch:kmalloc}~章）完全相同的
+"dispatch + 后端"模式：
+
+\begin{lstlisting}[style=cstyle]
 typedef struct vma_ops {
     const char* name;
     void (*init)(void);
-    int  (*add)(uint32_t start, uint32_t end, uint32_t flags, const char* name);
+    int  (*add)(uint32_t start, uint32_t end,
+                uint32_t flags, const char* name);
     int  (*remove)(uint32_t start);
     const vm_area_t* (*find)(uint32_t addr);
     void (*dump)(void);
@@ -52,148 +150,478 @@ typedef struct vma_ops {
 } vma_ops_t;
 \end{lstlisting}
 
-和 PMM/kmalloc 完全同构的三层架构：\texttt{vma.h}（接口）→ \texttt{vma.c}（dispatch）→ 后端实现。
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=3.5cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[box, fill=blue!8]   (caller) at (0, 0)
+    {调用者 (kmain / vmm / shell)};
+  \node[box, fill=yellow!12](api)    at (0, -1.3)
+    {\texttt{vma\_add()} / \texttt{vma\_find()}};
+  \node[box, fill=orange!12](disp)   at (0, -2.6)
+    {\texttt{vma.c} dispatch};
+  \node[box, fill=green!12] (rb)     at (-3.0,-4.0)
+    {\texttt{vma\_rbtree.c}};
+  \node[box, fill=green!12] (list)   at (3.0,-4.0)
+    {（你的后端）};
+  \draw[arr] (caller)--(api);
+  \draw[arr] (api)--(disp);
+  \draw[arr] (disp)--(rb);
+  \draw[arr] (disp)--(list);
+\end{tikzpicture}
+\caption{\texttt{vma\_ops\_t} 可插拔后端调用链}
+\label{fig:vma-dispatch}
+\end{figure}
 
-\begin{designbox}
-\texttt{vm\_area\_t} 不包含红黑树节点等内部字段——它是面向调用者的公开结构。
-后端内部可以在自己的结构体中嵌入 \texttt{vm\_area\_t}，但对外只暴露这个轻量接口。
-这保持了接口和实现的完全解耦。
-\end{designbox}
+% ============================================================================
+\section{Dispatch 层：\texttt{vma.c} 实现}
 
-\section{VMA 权限标志}
-
-\begin{lstlisting}[style=cstyle]
-#define VMA_READ    0x01u   // 可读
-#define VMA_WRITE   0x02u   // 可写
-#define VMA_EXEC    0x04u   // 可执行
-\end{lstlisting}
-
-与 PTE flags 的对应关系：
-\begin{itemize}
-  \item \texttt{VMA\_WRITE} → \texttt{PTE\_WRITABLE}
-  \item \texttt{VMA\_EXEC} → 将来配合 NX 位使用
-  \item VMA flags 是"软件层面"的权限，PTE flags 是"硬件层面"
-\end{itemize}
-
-\section{红黑树后端}
-
-\begin{whybox}
-为什么用红黑树？VMA 按起始地址排序，查找（给定地址找到包含它的 VMA）是
-$O(\log n)$。虽然内核 VMA 数量不大（几十个），链表的 $O(n)$ 也能接受，
-但红黑树是 Linux 内核的经典实现（6.1 前），学习价值更高。
-\end{whybox}
-
-红黑树的五条性质：
-\begin{enumerate}
-  \item 每个节点是红色或黑色
-  \item 根节点是黑色
-  \item NULL 叶子视为黑色
-  \item 红节点的子节点必须是黑色（不允许连续红节点）
-  \item 从任意节点到所有叶子路径上的黑色节点数量相同
-\end{enumerate}
-
-这保证了最长路径 $\le 2 \times$ 最短路径 → $O(\log n)$ 操作。
-
-\begin{thinkbox}
-为什么用静态节点池（\texttt{g\_pool[64]}）分配红黑树节点，而非 \texttt{kmalloc}？
-想想两个方向的循环依赖：VMA 需要节点内存 → 用 kmalloc → kmalloc 的堆区需要 VMA 跟踪。
-\end{thinkbox}
-
-\section{Page Fault 集成}
+\texttt{vma.c} 的职责非常简单——校验后端是否已注册，然后转发：
 
 \begin{lstlisting}[style=cstyle]
-// idt.c 的 page_fault_handler 中
-if (vma_is_ready()) {
-    const vm_area_t* vma = vma_find(fault_addr);
-    if (vma) {
-        printk("VMA: [0x%08x, 0x%08x) '%s' flags=%c%c%c\n", ...);
-        if ((err & 0x02) && !(vma->flags & VMA_WRITE))
-            printk("  -> WRITE to read-only VMA!\n");
-    } else {
-        printk("VMA: no VMA covers 0x%08x (invalid access)\n", fault_addr);
+static const vma_ops_t* g_vma_ops = NULL;
+static int g_vma_ready = 0;
+
+void vma_register_backend(const vma_ops_t* ops) {
+    g_vma_ops = ops;
+}
+
+void vma_init(void) {
+    if (!g_vma_ops) {
+        printk("[vma] no backend registered\n");
+        return;
     }
+    g_vma_ops->init();
+    g_vma_ready = 1;
+    printk("[vma] backend: %s, init ok\n", g_vma_ops->name);
+}
+
+int vma_add(uint32_t start, uint32_t end,
+            uint32_t flags, const char* name) {
+    if (!g_vma_ops || !g_vma_ready) return -1;
+    return g_vma_ops->add(start, end, flags, name);
 }
 \end{lstlisting}
 
-三种诊断结果：
+其余 \texttt{vma\_remove}/\texttt{vma\_find}/\texttt{vma\_dump}/\texttt{vma\_count}
+格式完全一致—— \texttt{if (!ready) return fallback; return g\_vma\_ops->xxx(...);}。
+
+\begin{designbox}
+Dispatch 层看似"什么都没做"，但它带来三个好处：
 \begin{enumerate}
-  \item 无 VMA 覆盖 → 访问了未分配的地址空间（一定是 bug）
-  \item 有 VMA 但权限不符 → 如写入只读区域（权限违规）
-  \item 有 VMA 且权限匹配但页不存在 → \term{demand paging} 候选（将来实现）
+  \item \textbf{编译期解耦}——调用者只 \texttt{\#include "vma.h"}，不需要知道后端头文件；
+  \item \textbf{运行时切换}——\texttt{vma\_register\_backend} 在 init 前随时可换后端；
+  \item \textbf{安全守卫}——未初始化时所有 API 返回安全默认值，不会空指针崩溃。
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+\section{红黑树后端概述}
+\label{sec:vma-rbtree}
+
+VMA 后端需要高效地支持三种操作：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{操作} & \textbf{链表} & \textbf{排序数组} & \textbf{红黑树} \\
+\midrule
+\texttt{find}(addr)   & $O(n)$      & $O(\log n)$  & $O(\log n)$ \\
+\texttt{add}          & $O(n)$      & $O(n)$       & $O(\log n)$ \\
+\texttt{remove}       & $O(n)$      & $O(n)$       & $O(\log n)$ \\
+\texttt{dump}（遍历） & $O(n)$      & $O(n)$       & $O(n)$      \\
+\bottomrule
+\end{tabular}
+\caption{不同数据结构的 VMA 操作复杂度对比}
+\label{tab:vma-complexity}
+\end{table}
+
+内核随进程增多，VMA 数量会快速增长（Linux 进程平均 65+ VMAs）。
+红黑树在所有单次操作上都保持 $O(\log n)$，是最优选择。
+
+\subsection{红黑树的 5 条性质}
+
+红黑树是一种自平衡二叉搜索树，每个节点带一个颜色位（红/黑），
+且满足以下 5 条性质：
+
+\begin{enumerate}
+  \item 每个节点要么是红色，要么是黑色。
+  \item 根节点是黑色。
+  \item 所有叶子节点（NIL 哨兵）是黑色。
+  \item 红色节点的两个子节点必须是黑色（\emph{不能有连续的红节点}）。
+  \item 从任意节点到其所有后代叶子节点的路径上，黑色节点数相同（\emph{黑高相等}）。
 \end{enumerate}
 
-\section{Boot 区域注册}
+性质 4 + 5 共同保证了树的高度不超过 $2\log_2(n+1)$，
+从而使查找、插入、删除都是 $O(\log n)$。
+
+\subsection{旋转操作}
+
+当插入或删除破坏了红黑性质时，需要通过\term{旋转}（rotation）恢复平衡。
+旋转分为左旋和右旋，它们互为镜像操作：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=1cm and 1.2cm,
+  every node/.style={draw, circle, minimum size=0.7cm, font=\small},
+  tri/.style={draw, isosceles triangle, shape border rotate=90,
+              minimum height=0.5cm, minimum width=0.6cm, inner sep=0pt,
+              font=\scriptsize},
+  arr/.style={-{Stealth[length=5pt]}, very thick, blue!60!black},
+]
+  % 左旋
+  \node[fill=red!20] (x) at (0, 0) {$x$};
+  \node[tri] (a) at (-1, -1.2) {$\alpha$};
+  \node[fill=red!20] (y) at (1, -1.2) {$y$};
+  \node[tri] (b) at (0.3, -2.4) {$\beta$};
+  \node[tri] (c) at (1.7, -2.4) {$\gamma$};
+  \draw (x) -- (a);
+  \draw (x) -- (y);
+  \draw (y) -- (b);
+  \draw (y) -- (c);
+
+  \node[draw=none, font=\Large\bfseries] at (3.5, -1) {$\Rightarrow$};
+  \node[draw=none, font=\small] at (3.5, -1.8) {左旋 $x$};
+
+  \node[fill=red!20] (y2) at (6.5, 0) {$y$};
+  \node[fill=red!20] (x2) at (5.5, -1.2) {$x$};
+  \node[tri] (c2) at (7.5, -1.2) {$\gamma$};
+  \node[tri] (a2) at (4.8, -2.4) {$\alpha$};
+  \node[tri] (b2) at (6.2, -2.4) {$\beta$};
+  \draw (y2) -- (x2);
+  \draw (y2) -- (c2);
+  \draw (x2) -- (a2);
+  \draw (x2) -- (b2);
+\end{tikzpicture}
+\caption{红黑树左旋示意图（右旋为其镜像）}
+\label{fig:rbtree-rotate}
+\end{figure}
+
+旋转只改变指针指向，不改变 BST 的中序遍历顺序——
+因此旋转前后所有 VMA 的地址排序仍然正确。
+
+\begin{thinkbox}
+如果 VMA 后端改用简单的有序链表（插入时遍历找位置），
+在 VMA 数量为 $n=200$ 时，\texttt{find} 的最坏情况要遍历多少个节点？
+红黑树呢？（提示：$\lceil \log_2 201 \rceil = 8$）
+
+在什么场景下链表反而比红黑树更合适？
+（提示：VMA 数量极少且变化频繁——旋转的常数开销）
+\end{thinkbox}
+
+% ============================================================================
+\section{静态节点池：打破循环依赖}
+\label{sec:vma-pool}
+
+回顾初始化顺序（第~\ref{ch:kmalloc}~章）：
 
 \begin{lstlisting}[style=cstyle]
-// kmain.c
-vma_register_backend(vma_rbtree_get_ops());
-vma_init();
-vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
-        VMA_READ | VMA_WRITE | VMA_EXEC, "direct-map");
-vma_add(KHEAP_START, KHEAP_START + 64*1024,
-        VMA_READ | VMA_WRITE, "kheap");
+pmm_init();        /* 1. 物理内存 */
+vmm_init();        /* 2. 页表 */
+kmalloc_init();    /* 3. 内核堆 */
+vma_init();        /* 4. VMA — 依赖 kmalloc */
 \end{lstlisting}
 
-\texttt{vmm\_alloc\_pages} 和 \texttt{vmm\_free\_pages} 也自动注册/移除 VMA。
+VMA 初始化在 \texttt{kmalloc\_init()} \emph{之后}——所以后端\emph{可以}用 \texttt{kmalloc}
+分配内部节点。但存在一个微妙问题：
 
-\section{验证}
+\begin{whybox}
+如果 \texttt{kmalloc} 的堆增长（\texttt{heap\_grow}）需要调 \texttt{vmm\_alloc\_pages}，
+而 \texttt{vmm\_alloc\_pages} 内部想注册 VMA（跟踪新分配的虚拟地址区间），
+VMA 的 \texttt{add} 又要 \texttt{kmalloc} 分配红黑树节点——
+循环依赖！
 
-\begin{lstlisting}[style=shellstyle]
-szy-kernel > vma list
-VMA regions (2):
-  [ 0] 0xC0000000 - 0xD0000000  256 MiB  rwx  direct-map
-  [ 1] 0xE0000000 - 0xE0010000   64 KiB  rw-  kheap
+解决方案：红黑树后端使用\textbf{静态节点池}（编译期 \texttt{static} 数组），
+预分配固定数量的节点（如 256 个），完全绕开 \texttt{kmalloc}。
+代价是 VMA 上限固定，但内核启动阶段区域数量很少，256 足够。
+\end{whybox}
 
-szy-kernel > vma find 0xDEAD0000
-0xDEAD0000 -> no VMA (unmapped / untracked)
+静态节点池的设计非常简单：
 
-szy-kernel > vma test
+\begin{lstlisting}[style=cstyle]
+#define VMA_MAX_NODES  256
+
+typedef struct rb_node {
+    vm_area_t  area;    /* 公开视图 */
+    int        color;   /* 0=BLACK, 1=RED */
+    struct rb_node* parent;
+    struct rb_node* left;
+    struct rb_node* right;
+} rb_node_t;
+
+/* 静态数组——不依赖 kmalloc */
+static rb_node_t node_pool[VMA_MAX_NODES];
+static unsigned  pool_used = 0;
+\end{lstlisting}
+
+分配节点：\texttt{pool\_used < VMA\_MAX\_NODES ? \&node\_pool[pool\_used++] : NULL}。
+释放节点：标记为已回收（简单实现可放入 freelist；最简实现不回收）。
+
+% ============================================================================
+\section{Page Fault 集成}
+\label{sec:vma-pf}
+
+\#PF handler（ISR 14）收到故障地址 \texttt{cr2} 和错误码 \texttt{err\_code} 后，
+调用 \texttt{vma\_find(cr2)} 可以产生三种诊断结果：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=4.5cm, font=\small, align=center},
+  decision/.style={draw, diamond, aspect=2.5, font=\small,
+                   inner sep=2pt, fill=yellow!10},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[decision] (find) at (0, 0) {\texttt{vma\_find(cr2)}};
+
+  \node[box, fill=red!12]    (no)   at (-4.5, -2) {Case 1: 返回 NULL\\非法访问 → panic / kill};
+  \node[decision]             (perm) at (2, -2) {权限匹配？};
+  \node[box, fill=orange!12] (deny) at (0, -4) {Case 2: 权限不匹配\\如写只读区 → SIGSEGV};
+  \node[box, fill=green!12]  (ok)   at (5, -4) {Case 3: 合法缺页\\demand-paging → 分配物理页};
+
+  \draw[arr] (find) -- node[left, font=\scriptsize] {NULL} (no);
+  \draw[arr] (find) -- node[right, font=\scriptsize] {非 NULL} (perm);
+  \draw[arr] (perm) -- node[left, font=\scriptsize] {否} (deny);
+  \draw[arr] (perm) -- node[right, font=\scriptsize] {是} (ok);
+\end{tikzpicture}
+\caption{\#PF handler 中的 VMA 三种诊断}
+\label{fig:pf-vma-diag}
+\end{figure}
+
+\begin{enumerate}
+  \item \textbf{Case 1: 无 VMA}（\texttt{vma\_find} 返回 NULL）——
+        该地址不属于任何已注册区域，是真正的非法访问。
+        内核态触发则 panic；用户态触发则杀死进程。
+
+  \item \textbf{Case 2: 权限不匹配}——地址属于某个 VMA，但操作违反权限。
+        例如写入一个仅 \texttt{VMA\_READ} 的区域。
+        对应 Linux 的 \texttt{SIGSEGV}。
+
+  \item \textbf{Case 3: 合法缺页（demand paging candidate）}——
+        地址属于 VMA 且权限匹配，只是物理页尚未分配。
+        分配物理页 → 建立映射 → 返回，程序继续运行。
+\end{enumerate}
+
+当前实现中我们尚未启用 demand paging，所有映射在 \texttt{vmm\_alloc\_pages} 时
+一步到位。但 VMA 框架为将来的按需分页奠定了基础。
+
+% ============================================================================
+\section{引导阶段区域注册}
+\label{sec:vma-boot}
+
+在 \texttt{kmain.c} 中，VMA 初始化后立即注册两个引导时建立的内核区域：
+
+\begin{lstlisting}[style=cstyle]
+vma_init();
+
+if (vma_is_ready()) {
+    /* 1. 直接映射区: 内核代码/数据 + 直接映射的物理内存 */
+    vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
+            VMA_READ | VMA_WRITE | VMA_EXEC, "direct-map");
+
+    /* 2. 内核堆区 */
+    vma_add(KHEAP_START,
+            KHEAP_START + KCONFIG_HEAP_INITIAL_PAGES * VMM_PAGE_SIZE,
+            VMA_READ | VMA_WRITE, "kheap");
+}
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{direct-map}：覆盖 \hex{C0000000} 到 \texttt{vmm\_direct\_map\_end()}，
+        包含内核代码（需要 EXEC）、只读数据和读写数据。权限给足 \texttt{rwx}，
+        更细粒度的分段保护留给将来的 \texttt{.text}/\texttt{.rodata} 拆分。
+
+  \item \texttt{kheap}：覆盖 \hex{E0000000} 开始的初始堆区域。
+        堆只做数据 \texttt{rw}，无需 \texttt{x}。
+        堆增长时应同步调用 \texttt{vma\_add} 或更新 end 来跟踪新区域。
+\end{itemize}
+
+\begin{designbox}
+注册 VMA 的时机是"谁建立映射，谁负责注册"：
+\begin{itemize}
+  \item \texttt{vmm\_init()} 建立直接映射 → \texttt{kmain} 注册 \texttt{direct-map}
+  \item \texttt{kmalloc\_init()} 建立堆映射 → \texttt{kmain} 注册 \texttt{kheap}
+  \item \texttt{vmm\_alloc\_pages()} 将来可在内部自动调用 \texttt{vma\_add}
+\end{itemize}
+这比集中在一处注册更不容易遗漏——映射与注册在同一上下文中完成。
+\end{designbox}
+
+% ============================================================================
+\section{\texttt{vmm\_alloc\_pages}/\texttt{free\_pages} 的 VMA 自动跟踪}
+
+当前 \texttt{vmm\_alloc\_pages} 只做 PMM 分配 + 页表映射，不通知 VMA。
+理想的流程是在分配/释放时自动跟踪：
+
+\begin{lstlisting}[style=cstyle]
+void* vmm_alloc_pages(unsigned count) {
+    uint32_t vaddr = bump_next();                 /* 选虚拟地址 */
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t phys = pmm_alloc_page();
+        vmm_map_page(vaddr + i * PAGE_SIZE, phys,
+                     PTE_PRESENT | PTE_WRITABLE);
+    }
+    /* 自动注册 VMA */
+    if (vma_is_ready()) {
+        vma_add(vaddr, vaddr + count * PAGE_SIZE,
+                VMA_READ | VMA_WRITE, "vmm-alloc");
+    }
+    return (void*)vaddr;
+}
+\end{lstlisting}
+
+\texttt{vmm\_free\_pages} 的逆操作则调用 \texttt{vma\_remove(vaddr)}。
+这样 Page Fault handler 对所有动态映射都有完整的 VMA 覆盖，
+不会误判合法区域为非法访问。
+
+% ============================================================================
+\section{验证：Shell 命令}
+\label{sec:vma-verify}
+
+\subsection{\texttt{vma list}——列出所有 VMA}
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+> vma list
+=== VMA list (rbtree, 2 entries) ===
+  [0xC0000000, 0xD0000000) rwx  direct-map      (256 MiB)
+  [0xE0000000, 0xE0010000) rw-  kheap           (64 KiB)
+\end{lstlisting}
+
+初始状态有两个 VMA：直接映射区和内核堆。地址按升序排列（红黑树中序遍历），
+权限用 \texttt{rwx} 紧凑表示。
+
+\subsection{\texttt{vma find <addr>}——查找指定地址}
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+> vma find 0xC1000000
+0xC1000000 -> VMA [0xC0000000, 0xD0000000) 'direct-map'
+  size: 262144 KiB, offset: 0x1000000, flags: rwx
+
+> vma find 0xA0000000
+0xA0000000 -> no VMA (unmapped / untracked)
+\end{lstlisting}
+
+\subsection{\texttt{vma test}——自测试}
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+> vma test
 [vma-test] === VMA selftest ===
-[vma-test] test 1: add + find ... PASS
-[vma-test] test 2: find outside ... PASS
-[vma-test] test 3: overlap detection ... PASS
-[vma-test] test 4: remove + find ... PASS
+[vma-test] test 1: add + find
+[vma-test] PASS
+[vma-test] test 2: find outside
+[vma-test] PASS
+[vma-test] test 3: overlap detection
+[vma-test] PASS
+[vma-test] test 4: remove + find
+[vma-test] PASS
 [vma-test] === ALL PASS ===
 \end{lstlisting}
 
+测试使用 \hex{F1000000}--\hex{F1010000}（64\,KiB）作为临时区域，
+验证 add/find/overlap/remove 四个基本操作的正确性。
+
+% ============================================================================
+\section{内核虚拟地址空间全景与 VMA 覆盖}
+
+将第~\ref{ch:kmalloc}~章的地址空间图补充 VMA 信息后：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=7cm, font=\small, anchor=south west},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+  vma/.style={font=\scriptsize\itshape\color{blue!60!black}, anchor=west},
+]
+  \node[block, minimum height=1.6cm, fill=red!10] (dm) at (0, 0)
+    {\parbox{6.5cm}{\centering\textbf{直接映射区}\\
+     \texttt{virt = phys + 0xC0000000}}};
+  \node[block, minimum height=1.0cm, fill=yellow!15] (alloc) at (0, 1.6)
+    {\parbox{6.5cm}{\centering\textbf{VMM 动态分配区}\\
+     \texttt{vmm\_alloc\_pages} bump}};
+  \node[block, minimum height=1.6cm, fill=green!15] (heap) at (0, 2.6)
+    {\parbox{6.5cm}{\centering\textbf{内核堆}\\
+     \texttt{kmalloc}/\texttt{kfree}}};
+  \node[block, minimum height=0.8cm, fill=gray!10] (unmapped) at (0, 4.2)
+    {\parbox{6.5cm}{\centering 未映射 / 保留}};
+
+  \node[addr] at (-0.2, 0)    {\hex{C0000000}};
+  \node[addr] at (-0.2, 1.6)  {\hex{D0000000}};
+  \node[addr] at (-0.2, 2.6)  {\hex{E0000000}};
+  \node[addr] at (-0.2, 4.2)  {\hex{F0000000}};
+  \node[addr] at (-0.2, 5.0)  {\hex{FFFFFFFF}};
+
+  \node[vma] at (7.3, 0.8) {VMA: \texttt{direct-map} (rwx)};
+  \node[vma] at (7.3, 2.1) {VMA: 各 \texttt{vmm-alloc} (rw)};
+  \node[vma] at (7.3, 3.4) {VMA: \texttt{kheap} (rw)};
+\end{tikzpicture}
+\caption{内核虚拟地址空间与 VMA 覆盖关系}
+\label{fig:vma-vaddr-space}
+\end{figure}
+
+% ============================================================================
 \section{思考与练习}
 
 \begin{exercise}
-运行 \texttt{vmm fault} 触发 Page Fault，观察输出中是否有 VMA 诊断信息。
-\hex{DEAD0000} 有 VMA 覆盖吗？错误码中 bit 0 (P) 的值说明了什么？
-\end{exercise}
+\textbf{实现有序链表后端 \texttt{vma\_list.c}}
 
-\begin{exercise}
-用 \texttt{vma find 0xC0100000}（内核代码区）和 \texttt{vma find 0xE0000010}（堆区）
-查看它们分别属于哪个 VMA、权限标志是什么。
-思考：为什么 direct-map 有 \texttt{x}（可执行）标志而 kheap 没有？
-\end{exercise}
-
-\begin{exercise}
-运行 \texttt{vma test} 后再运行 \texttt{vma count}，确认测试清理后 VMA 数量
-恢复到初始值（2）。如果 count 不对，说明 remove 有 bug。
-\end{exercise}
-
-\begin{exercise}
-（挑战）实现一个简单链表后端 \texttt{vma\_list.c}，作为红黑树的替代。
-只需实现 \texttt{vma\_ops\_t} 中的所有函数，然后在 \texttt{kconfig.h} 中
-添加一个宏来切换。运行 \texttt{vma test} 验证功能等价。
-对比两个后端在 100 次 add/remove/find 操作下的性能差异
-（可用 PIT 定时器或 \texttt{rdtsc} 计数）。
-\end{exercise}
-
-\section{本章小结}
-
-VMA 让内核从"隐式管理内存"进化到"显式跟踪每个区域"。
-这是实现按需分页、进程地址空间、用户态 \texttt{mmap} 的基础。
-
-至此，内存管理子系统的三层架构完整构建：
+实现一个简单的有序单链表后端（满足 \texttt{vma\_ops\_t} 接口）：
 \begin{enumerate}
-  \item \textbf{PMM}——物理页分配（bitmap / buddy）
-  \item \textbf{VMM}——虚拟→物理映射（页表 + TLB）
-  \item \textbf{VMA}——虚拟地址空间跟踪（红黑树）
-  \item \textbf{kmalloc}——字节级堆分配（first-fit / slab）
+  \item 使用静态数组 \texttt{node\_pool[128]}，每个节点包含 \texttt{vm\_area\_t} 和 \texttt{next} 指针
+  \item \texttt{add}：遍历链表找到正确位置（按 \texttt{start} 升序），插入前检查重叠
+  \item \texttt{find}：线性扫描，\texttt{start <= addr < end} 即命中
+  \item \texttt{remove}：找到 \texttt{start} 匹配的节点，从链表中摘除
 \end{enumerate}
+在 \texttt{kconfig.h} 中添加 \texttt{VMA\_BACKEND} 选项，\texttt{0}=list, \texttt{1}=rbtree。
+用 \texttt{vma test} 验证通过。
+\end{exercise}
 
-全部采用 \texttt{ops\_t} 函数指针表 + dispatch 层的可插拔架构。
-下一部分进入进程与用户态——TSS、ELF 加载、系统调用、调度器。
+\begin{exercise}
+\textbf{\#PF handler 中集成 VMA 检查}
+
+修改 \texttt{irq.c} 中的 Page Fault handler：
+\begin{enumerate}
+  \item 读取 \texttt{CR2}（故障地址）
+  \item 调用 \texttt{vma\_find(cr2)} 获取 VMA
+  \item 如果返回 NULL：打印 ``\texttt{SEGFAULT: addr=0x... not in any VMA}'' 并 panic
+  \item 如果返回非 NULL 但权限不匹配：打印 ``\texttt{PERMISSION DENIED}'' 并 panic
+  \item 如果权限匹配：打印 ``\texttt{demand-page candidate}''（暂不实现实际分页）
+\end{enumerate}
+测试：将 \hex{A0000000} 解引用，确认触发 Case 1 的 panic 输出。
+\end{exercise}
+
+\begin{exercise}
+\textbf{VMA 区域合并}
+
+当新增 VMA 与相邻 VMA 满足以下条件时自动合并：
+\begin{itemize}
+  \item 新 VMA 的 \texttt{start} == 已有 VMA 的 \texttt{end}（或反之）
+  \item 两者的 \texttt{flags} 完全相同
+\end{itemize}
+合并后更新 \texttt{end}（或 \texttt{start}）并移除多余节点。
+这减少了 VMA 总数，使红黑树更扁平、查找更快。
+
+思考：合并可能影响 \texttt{vma\_remove(start)} 的语义——
+如果用户按原始 \texttt{start} 移除，但该区域已被合并到更大的 VMA 中，
+应该怎么处理？
+\end{exercise}
+
+\begin{exercise}
+\textbf{VMA 统计与碎片分析}
+
+给 \texttt{vma\_ops\_t} 新增 \texttt{stats} 函数指针，收集以下信息：
+\begin{enumerate}
+  \item 已注册 VMA 总数
+  \item 已覆盖的虚拟地址总量（KiB）
+  \item VMA 之间最大空洞的大小——即相邻 VMA 之间最大的 \texttt{gap}
+  \item 节点池利用率（\texttt{pool\_used / VMA\_MAX\_NODES}）
+\end{enumerate}
+在 \texttt{vma count} 命令中显示这些统计信息。
+地址空间碎片化可定义为：
+$$\text{fragmentation} = 1 - \frac{\max(\text{gap})}
+  {\text{total unmapped space}} $$
+\end{exercise}
