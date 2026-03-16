@@ -1,49 +1,90 @@
 % ============================================================================
 \chapter{交互式 Shell}
 \label{ch:shell}
-% Stage 4 — 对应 2026-03-10 changelog（Shell + Console + Commands）
+% Stage 4 — 对应 2026-03-10 changelog
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
   \item 实现 Console 输入聚合层（统一键盘 IRQ1 和串口轮询）
-  \item 实现行编辑（回显、退格、回车）
-  \item 实现命令注册表和分发机制
+  \item 实现行编辑（回显、退格、回车）和命令解析（空格分词）
+  \item 实现可扩展的命令注册表机制
   \item 第一批命令：\texttt{cls}、\texttt{shutdown}、\texttt{cmds}
 \end{itemize}
 
+% ============================================================================
 \section{架构设计}
 
-% TODO: 五层架构图
-% 输入层(console.c) → 行编辑(shell.c) → 命令解析 → 命令分发 → 命令实现(cmds/*.c)
+Shell 分五层，每层职责清晰：
 
-\begin{designbox}
-为什么抽象 Console 层？内核可能有多种输入源（键盘、串口、将来的网络终端）。
-Console 层统一提供 \texttt{console\_getc()}，Shell 不关心输入从哪来。
-\end{designbox}
+\begin{lstlisting}[style=shellstyle]
+输入层 (console.c)     keyboard IRQ1 + serial 轮询 → console_getc()
+        |
+行编辑层 (shell.c)     回显 / Backspace / Enter → line[128]
+        |
+命令解析 (shell.c)     空格分词 → argv[0]=cmd, argv[1..]=args
+        |
+命令分发 (shell.c)     遍历 g_cmds[] → 匹配 name → 调用 fn()
+        |
+命令实现 (cmds/*.c)    每个命令一个 .c 文件，导出 const cmd_t
+\end{lstlisting}
 
-\section{Console 输入层：\texttt{console.c}}
+\begin{thinkbox}
+为什么要抽象 Console 层，而不让 Shell 直接调用 \texttt{keyboard\_getc()}？
+思考：如果以后要支持串口输入（远程调试）或网络终端，需要改动几处代码？
+\end{thinkbox}
 
-% TODO: console_try_getc 优先查键盘缓冲，再查串口轮询
+\section{Console 输入层}
 
-\section{Shell 主循环：\texttt{shell.c}}
-
-% TODO: shell_run → prompt → readline → tokenize → dispatch
+\begin{lstlisting}[style=cstyle]
+char console_getc(void) {
+    for (;;) {
+        // 优先查键盘 IRQ 缓冲区（无等待）
+        char c;
+        if (keyboard_try_getc(&c)) return c;
+        // 其次查串口（轮询）
+        if (serial_try_getc(&c))   return c;
+        __asm__ volatile("hlt");  // 等下一个中断
+    }
+}
+\end{lstlisting}
 
 \section{命令接口：\texttt{cmd.h}}
 
-% TODO: cmd_t 结构体 + cmd_fn_t 签名
-% 每个命令一个 .c 文件，导出 const cmd_t
-% shell.c 维护 g_cmds[] 数组
+\begin{lstlisting}[style=cstyle]
+typedef int (*cmd_fn_t)(int argc, char** argv);
 
-\section{命令实现示例：\texttt{cmd\_cls.c}}
+typedef struct {
+    const char* name;   // 命令名
+    const char* help;   // 帮助文本
+    cmd_fn_t fn;        // 处理函数
+} cmd_t;
+\end{lstlisting}
 
-% TODO: ANSI 清屏序列 \x1b[2J\x1b[H
+每个命令做成独立编译单元，导出 \texttt{const cmd\_t cmd\_xxx}：
 
-\section{如何添加新命令}
+\begin{lstlisting}[style=cstyle]
+// cmd_cls.c
+static int cmd_cls_fn(int argc, char** argv) {
+    printk("\x1b[2J\x1b[H");  // ANSI 清屏
+    return 0;
+}
+const cmd_t cmd_cls = { .name = "cls", .help = "Clear screen", .fn = cmd_cls_fn };
+\end{lstlisting}
 
-% TODO: 4 步骤（创建.c → 导出cmd_t → shell.c extern + 加入数组 → Makefile自动发现）
+Shell 维护注册表并按 name 分发：
+
+\begin{lstlisting}[style=cstyle]
+static const cmd_t* g_cmds[] = { &cmd_cls, &cmd_shutdown, &cmd_cmds, ... };
+\end{lstlisting}
+
+\begin{designbox}
+为什么用静态数组而非链表？
+
+内核态命令数量有限（十几个），静态数组避免了 kmalloc 依赖（此时堆还没初始化）。
+添加新命令只需：写 .c → extern → 加入数组。Makefile 自动发现 \texttt{cmds/*.c}。
+\end{designbox}
 
 \section{验证}
 
@@ -53,9 +94,30 @@ Commands (3):
 cls   shutdown  cmds
 szy-kernel > cls
 # 屏幕清空
+szy-kernel > shutdown
+# QEMU 关闭或 halt
 \end{lstlisting}
+
+\section{思考与练习}
+
+\begin{exercise}
+添加一个 \texttt{echo} 命令，将 \texttt{argv[1..]} 的所有参数用空格连接后打印。
+例如 \texttt{echo hello world} 输出 \texttt{hello world}。
+\end{exercise}
+
+\begin{exercise}
+修改 Shell，支持上方向键回显上一条命令（命令历史）。
+提示：维护一个历史缓冲区 \texttt{history[8][128]}，用环形索引。
+键盘的上箭头 scancode 是一个多字节序列（\hex{E0} \hex{48}）。
+\end{exercise}
+
+\begin{exercise}
+当用户输入不存在的命令时，Shell 当前只是静默忽略。修改为打印
+\texttt{unknown command: xxx}。思考：在什么阶段检查？dispatch 函数还是 tokenize 之后？
+\end{exercise}
 
 \section{本章小结}
 
-Shell 是内核开发阶段最重要的调试工具。有了可扩展的命令框架，
-后续每实现一个子系统（内存、进程等）都可以立即加入调试命令验证。
+Shell 是内核开发阶段最重要的调试工具。有了可扩展命令框架，
+后续每实现一个子系统都可立即加入调试命令验证。
+下一章进入内存管理——实现物理内存分配器（PMM）。
