@@ -1,0 +1,39 @@
+\section{背景知识：物理内存布局}
+
+BIOS 通过 Multiboot2 Memory Map Tag（type=6）报告物理内存区域。
+一台典型的 256MiB QEMU 虚拟机的内存映射如下：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig01-256mib-qemu-vm}
+  \caption{典型物理内存布局（256MiB QEMU VM）}
+\end{figure}
+
+\subsection{Multiboot2 Memory Map Tag 格式}
+
+\codefile{src/kernel/mm/mmap.c}
+\begin{lstlisting}[style=cstyle]
+struct mb2_tag_mmap {
+    uint32_t type;          // = 6 (MB2_TAG_TYPE_MMAP)
+    uint32_t size;          // tag 总字节数
+    uint32_t entry_size;    // 每个 entry 的字节数（通常 24）
+    uint32_t entry_version; // = 0
+    // 后面紧跟 N 个 mb2_mmap_entry
+};
+
+struct mb2_mmap_entry {
+    uint64_t addr;          // 区域起始物理地址
+    uint64_t len;           // 区域长度（字节）
+    uint32_t type;          // 1=Available, 2=Reserved, 3=ACPI, ...
+    uint32_t reserved;
+};
+\end{lstlisting}
+
+\begin{thinkbox}
+\texttt{addr} 和 \texttt{len} 是 64 位的。在 32 位内核中，我们只能访问低 4GiB
+的物理内存。如何处理报告了 4GiB 以上 RAM 的机器？
+（答：截断到 \hex{FFFFFFFF}——安全忽略高于 4GiB 的区域。）
+\end{thinkbox}
+
+% ============================================================================
+

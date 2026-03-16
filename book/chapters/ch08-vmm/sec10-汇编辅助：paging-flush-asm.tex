@@ -1,0 +1,40 @@
+\section{汇编辅助：\texttt{paging\_flush.asm}}
+
+\codefile{src/kernel/arch/paging\_flush.asm}
+\begin{lstlisting}[style=nasmstyle]
+; void vmm_load_page_directory(uint32_t pd_phys_addr);
+;   [CPU STATE] CR3 <- pd_phys_addr
+;   副作用：刷新整个 TLB（除 Global 页）
+vmm_load_page_directory:
+    mov eax, [esp + 4]      ; eax = pd_phys_addr
+    mov cr3, eax             ; CR3 <- 页目录物理地址
+    ret
+
+; void vmm_enable_paging(void);
+;   [CPU STATE] CR0.PG <- 1，之后所有内存访问经过 MMU
+vmm_enable_paging:
+    mov eax, cr0             ; 读出当前 CR0
+    or  eax, 0x80000000      ; 设置 bit 31 (PG)
+    mov cr0, eax             ; 写回 -> 分页立即生效
+    ret
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{vmm\_load\_page\_directory(pd\_phys)} 执行后：
+\begin{itemize}
+  \item \reg{CR3} = \texttt{pd\_phys}（页目录物理地址）
+  \item 整个 TLB 被刷新（非 Global 条目全部失效）
+  \item 下一条指令的取指已经使用新页目录翻译
+\end{itemize}
+
+\texttt{vmm\_enable\_paging()} 执行后：
+\begin{itemize}
+  \item \reg{CR0} 的 bit\,31 (PG) 从 0 变为 1
+  \item 从 \texttt{mov cr0, eax} 的下一条指令 (\texttt{ret}) 起，
+        每次内存访问都经过 MMU 翻译
+  \item 如果当前 EIP 所在物理地址没有被 identity map → \textbf{Triple Fault}
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
+

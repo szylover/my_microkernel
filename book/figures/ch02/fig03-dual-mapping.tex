@@ -1,0 +1,27 @@
+% figures/ch02/fig03-dual-mapping.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=4.5cm, minimum height=0.7cm,
+                font=\small, anchor=west},
+  arr/.style={-{Stealth[length=5pt]}, thick, blue!60!black},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  % 虚拟地址空间
+  \node[font=\bfseries\small] at (1.5, 3) {虚拟地址空间};
+  \node[block, fill=green!15] (id) at (0, 2) {identity: 0--1\,GiB};
+  \node[block, fill=gray!10]  (gap) at (0, 1.3) {未映射};
+  \node[block, fill=red!15]   (hh) at (0, 0.6) {high-half: 0xC0000000--};
+  \node[addr] at (-0.2, 2) {\hex{00000000}};
+  \node[addr] at (-0.2, 1.3) {\hex{40000000}};
+  \node[addr] at (-0.2, 0.6) {\hex{C0000000}};
+
+  % 物理地址空间
+  \node[font=\bfseries\small] at (9, 3) {物理内存};
+  \node[block, fill=blue!12, minimum height=1.4cm] (phys) at (7, 1.3)
+    {RAM: 0--1\,GiB};
+  \node[addr] at (6.8, 2) {\hex{00000000}};
+
+  % 箭头
+  \draw[arr] (4.5, 2.0) -- (7, 2.0) node[midway, above, font=\scriptsize] {1:1};
+  \draw[arr] (4.5, 0.6) -- (7, 1.0) node[midway, below, font=\scriptsize]
+    {-\,\hex{C0000000}};
+\end{tikzpicture}

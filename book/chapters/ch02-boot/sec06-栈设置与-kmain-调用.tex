@@ -1,0 +1,40 @@
+\section{栈设置与 \texttt{kmain} 调用}
+
+进入高半区后，第一件事是设置栈和调用 C 入口：
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+section .text
+_start_high:
+    mov esp, stack_top      ; 栈顶（高半区虚拟地址）
+    and esp, 0xFFFFFFF0     ; 16 字节对齐（SSE 要求）
+
+    ; cdecl 调用约定：参数从右向左压栈
+    push edi                ; mb2_info (物理地址)
+    push esi                ; mb2_magic
+    call kmain
+    add esp, 8              ; 清理参数（不会执行到这里）
+
+.hlt:
+    hlt
+    jmp .hlt
+
+section .bss
+align 4096
+stack_bottom:
+    resb 16384              ; 16 KiB 内核栈
+stack_top:
+\end{lstlisting}
+
+\begin{itemize}
+  \item 栈在 \texttt{.bss} 段中分配 16\,KiB（\texttt{resb 16384}），
+        \texttt{stack\_top} 是栈的高地址端（x86 栈向下增长）。
+  \item \texttt{and esp, 0xFFFFFFF0} 确保 16 字节对齐——System V ABI 要求
+        调用函数前 \reg{ESP} 必须 16 字节对齐。
+  \item \texttt{push edi; push esi; call kmain}——\texttt{cdecl} 约定，
+        参数从右向左压栈，\texttt{kmain(uint32\_t magic, void* mb2\_info)}。
+  \item \texttt{kmain} 正常不会返回；如果返回则 \texttt{hlt} 停住 CPU。
+\end{itemize}
+
+% ============================================================================
+

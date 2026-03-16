@@ -1,0 +1,37 @@
+\section{kmain 中的初始化顺序}
+
+我们来看 \texttt{kmain.c} 中与本章相关的关键代码片段：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle, caption={kmain.c：high-half 切换的完整流程}]
+/* Stage 2: 物理内存管理器 */
+pmm_init();
+
+/* Stage 3: 虚拟内存管理器 (identity + high-half 双重映射) */
+vmm_init();
+
+/*
+ * [CRITICAL] 转换阶段
+ * PMM init 已结束，将 g_mb2_info 从物理地址转换为虚拟地址。
+ * 之后 shell 命令通过 high-half 地址访问 Multiboot2 info。
+ */
+g_mb2_info = (const void*)PHYS_TO_VIRT(
+    (uint32_t)(uintptr_t)g_mb2_info);
+
+/* 拆除 identity mapping，低地址空间留给将来的用户态 */
+vmm_unmap_identity();
+
+/* Stage 4: 内核堆初始化 (kmalloc) */
+kmalloc_init();
+\end{lstlisting}
+
+注意这段代码的三个关键步骤形成了一个"安全窗口"：
+
+\begin{enumerate}
+  \item \texttt{vmm\_init()} 建立双重映射 — 此后 high-half 和 identity 都可用
+  \item 指针转换 — 所有低地址指针切换到 high-half 地址
+  \item \texttt{vmm\_unmap\_identity()} — 关闭窗口，低地址不再可用
+\end{enumerate}
+
+% ============================================================================
+

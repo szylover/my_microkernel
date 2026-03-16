@@ -1,0 +1,27 @@
+% figures/ch11/fig09-maple-split.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.6cm, minimum width=0.6cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, very thick, red!60!black},
+]
+  % Before split
+  \node[font=\small\bfseries] at (-1.5, 0) {分裂前:};
+  \foreach \i/\c in {0/K0,1/K1,2/K2,3/K3,4/K4,5/K5,6/K6,7/K7,8/K8,9/K9} {
+    \node[cell, fill=green!12] at (\i*0.7, 0) {\c};
+  }
+  \node[font=\scriptsize\color{red}] at (8.2, 0) {满！};
+
+  % After split
+  \node[font=\small\bfseries] at (-1.5, -1.5) {分裂后:};
+  \foreach \i/\c in {0/K0,1/K1,2/K2,3/K3,4/K4} {
+    \node[cell, fill=green!12] at (\i*0.7, -1.5) {\c};
+  }
+  \foreach \i/\c in {0/K5,1/K6,2/K7,3/K8,4/K9} {
+    \node[cell, fill=blue!12] at (5.0+\i*0.7, -1.5) {\c};
+  }
+
+  \node[cell, fill=orange!20] (up) at (3.5, -2.8) {K5};
+  \node[font=\scriptsize] at (4.5, -2.8) {$\uparrow$ 上提到父节点};
+
+  \draw[arr] (3.5, -1.1) -- (3.5, -2.5);
+\end{tikzpicture}

@@ -1,0 +1,16 @@
+% figures/ch08/fig05-map-page-flow.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  flowstep/.style={draw, rounded corners, minimum width=5cm, minimum height=0.7cm, font=\small},
+  arr/.style={-{Stealth[length=3pt]}, thick},
+]
+  \node[flowstep, fill=gray!10]   (s1) at (0, 4)   {1. 对齐检查 virt \& phys};
+  \node[flowstep, fill=red!10]    (s2) at (0, 3)   {2. pd\_index / pt\_index};
+  \node[flowstep, fill=orange!10] (s3) at (0, 2)   {3. vmm\_ensure\_page\_table};
+  \node[flowstep, fill=green!10]  (s4) at (0, 1)   {4. 写 PTE = phys | flags};
+  \node[flowstep, fill=blue!10]   (s5) at (0, 0)   {5. invlpg（如果 paging 已开启）};
+
+  \draw[arr] (s1) -- (s2);
+  \draw[arr] (s2) -- (s3);
+  \draw[arr] (s3) -- (s4);
+  \draw[arr] (s4) -- (s5);
+\end{tikzpicture}

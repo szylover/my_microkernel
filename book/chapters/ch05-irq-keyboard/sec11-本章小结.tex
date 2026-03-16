@@ -1,0 +1,13 @@
+\section{本章小结}
+
+本章完成了硬件中断的完整链路：
+
+\begin{enumerate}
+  \item \textbf{PIC 初始化}：ICW1-4 序列完成 remap（IRQ → 向量 0x20+），默认 mask 全关
+  \item \textbf{IRQ 分发}：函数指针数组 + 统一 EOI
+  \item \textbf{键盘驱动}：scancode → Shift 状态机 → ASCII → 环形缓冲区
+  \item \textbf{生产者-消费者}：IRQ handler 写 head，主循环读 tail，\texttt{volatile} 保证可见性
+\end{enumerate}
+
+内核现在能接收用户输入了。下一章我们用这个能力构建交互式 Shell。
+

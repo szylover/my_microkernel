@@ -1,0 +1,201 @@
+\section{早期实现：排序数组后端}
+\label{sec:vma-sorted-array}
+
+红黑树是 VMA 后端的终极方案，但它代码量大、调试困难，不适合内核开发的早期阶段。
+我们先实现一个\textbf{排序数组}（sorted array）后端——代码不到 150 行，
+却足以让 VMA 子系统完整运行，为后续所有章节提供基础。
+
+\begin{designbox}
+排序数组的核心权衡：
+
+\begin{itemize}
+  \item \textbf{优势}：实现极其简单，不依赖 \texttt{kmalloc}（静态数组），
+        \texttt{find} 用二分查找 $O(\log n)$，\texttt{dump} 天然按地址排序
+  \item \textbf{劣势}：\texttt{add}/\texttt{remove} 需要搬移数组元素 $O(n)$
+  \item \textbf{适用场景}：VMA 数量 $< 64$（内核启动到单进程阶段绰绰有余）
+  \item \textbf{升级路径}：Stage 13 引入 per-process VMA 后切换到红黑树后端，
+        接口完全兼容，调用者零改动
+\end{itemize}
+\end{designbox}
+
+\subsection{数据结构}
+
+排序数组直接复用公开的 \texttt{vm\_area\_t}，不需要额外的内部节点类型：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+#define VMA_MAX_AREAS 256
+
+static vm_area_t g_areas[VMA_MAX_AREAS];
+static unsigned  g_count = 0;
+\end{lstlisting}
+
+\begin{whybox}
+为什么是 256？
+
+每个 \texttt{vm\_area\_t} = 16 字节，$256 \times 16 = 4096$ 字节 = 恰好 1 页。
+256 个不重叠区间足以管理 4\,GiB 地址空间（平均每个区间 16\,MiB）。
+引导阶段只用 2 个（\texttt{direct-map} + \texttt{kheap}），
+VMM 动态分配约 20 个——远不会用完。
+\end{whybox}
+
+数组中 \texttt{g\_areas[0..g\_count)} 始终按 \texttt{start} 字段升序排列，
+\texttt{g\_count} 跟踪当前已注册的 VMA 数量。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig03-vma-sorted-array}
+  \caption{排序数组示意——前 3 个槽位有效，按 \texttt{start} 升序}
+  \label{fig:vma-sorted-array}
+\end{figure}
+
+与红黑树后端的静态节点池类似，排序数组也完全不依赖 \texttt{kmalloc}——
+它是一个编译期 \texttt{static} 数组。这避免了第~\ref{sec:vma-pool}~节讨论的循环依赖问题。
+
+\subsection{二分查找辅助函数}
+
+\texttt{sa\_add}、\texttt{sa\_remove}、\texttt{sa\_find} 都需要在有序数组上做二分查找，
+区别仅在于比较条件（\texttt{<} vs \texttt{<=}）。我们抽出两个辅助函数避免重复代码：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+/* lower_bound: 第一个 start >= target 的下标 */
+static unsigned sa_lower_bound(uint32_t target)
+{
+    unsigned left = 0, right = g_count;
+    while (left < right) {
+        unsigned mid = left + (right - left) / 2;
+        if (g_areas[mid].start < target)
+            left = mid + 1;
+        else
+            right = mid;
+    }
+    return left;
+}
+
+/* upper_bound: 第一个 start > target 的下标 */
+static unsigned sa_upper_bound(uint32_t target)
+{
+    unsigned left = 0, right = g_count;
+    while (left < right) {
+        unsigned mid = left + (right - left) / 2;
+        if (g_areas[mid].start <= target)
+            left = mid + 1;
+        else
+            right = mid;
+    }
+    return left;
+}
+\end{lstlisting}
+
+两者的唯一区别是比较时是否包含等号：
+\texttt{lower\_bound} 用 \texttt{<}（找 $\geq$），\texttt{upper\_bound} 用 \texttt{<=}（找 $>$）。
+\texttt{sa\_add}/\texttt{sa\_remove} 用 \texttt{lower\_bound} 找精确位置，
+\texttt{sa\_find} 用 \texttt{upper\_bound} 找"最后一个 $\leq$ addr"的候选。
+
+\subsection{插入：保持有序 + 重叠检测}
+
+\texttt{sa\_add} 的核心逻辑分四步：
+
+\begin{enumerate}
+  \item \textbf{参数校验}——容量上限、\texttt{start < end}、页对齐（低 12 位为零）
+  \item \textbf{重叠检查}——遍历数组，确认新 \texttt{[start, end)} 不与任何已有 VMA 重叠。
+        两个区间重叠的充要条件是 \texttt{a.start < b.end \&\& b.start < a.end}
+  \item \textbf{找插入位置}——因数组有序，找到第一个 \texttt{g\_areas[i].start > start} 的位置
+  \item \textbf{后移 + 写入}——从尾部往回搬，腾出插入位，写入新 VMA
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig04-vma-sa-insert}
+  \caption{\texttt{sa\_add} 插入过程：后移元素 → 写入新 VMA}
+  \label{fig:vma-sa-insert}
+\end{figure}
+
+\subsection{查找：二分搜索}
+
+\texttt{sa\_find(addr)} 调用 \texttt{sa\_upper\_bound} 找到第一个 \texttt{start > addr}
+的位置，减 1 即为候选者：
+
+\codefile{src/kernel/mm/vma\_sorted\_array.c}
+\begin{lstlisting}[style=cstyle]
+static const vm_area_t* sa_find(uint32_t addr)
+{
+    if (g_count == 0)
+        return NULL;
+
+    unsigned idx = sa_upper_bound(addr);
+    if (idx == 0)
+        return NULL;
+
+    const vm_area_t* candidate = &g_areas[idx - 1];
+    return (addr < candidate->end) ? candidate : NULL;
+}
+\end{lstlisting}
+
+算法步骤：
+
+\begin{enumerate}
+  \item 初始化 \texttt{left = 0}, \texttt{right = g\_count}
+  \item 当 \texttt{left < right} 时，计算 \texttt{mid = left + (right - left) / 2}
+  \item 如果 \texttt{g\_areas[mid].start <= addr}，则 \texttt{left = mid + 1}
+        （\texttt{mid} 可能是答案，但看右边有没有更后面的候选者）
+  \item 否则 \texttt{right = mid}（\texttt{mid} 的 \texttt{start} 太大，答案在左边）
+  \item 循环结束后，\texttt{left - 1} 是最后一个 \texttt{start <= addr} 的下标
+  \item 检查 \texttt{addr < candidate->end}，是则命中，否则落在空洞中
+\end{enumerate}
+
+\begin{whybox}
+为什么用 upper\_bound 而不是 lower\_bound？
+
+我们要找的是"最后一个 \texttt{start <= addr} 的 VMA"。
+\texttt{upper\_bound} 找的是第一个 \texttt{start > addr} 的位置，
+减 1 就是我们要的答案。
+这是二分查找最常见的变体之一，值得牢记。
+
+如果 \texttt{left == 0}（所有 VMA 的 \texttt{start} 都大于 \texttt{addr}），
+直接返回 NULL——不存在包含该地址的 VMA。
+\end{whybox}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig05-vma-sa-find}
+  \caption{二分查找示例：0x9000 命中 area[1]；0xB000 落在两个 VMA 之间的空洞}
+  \label{fig:vma-sa-find}
+\end{figure}
+
+\subsection{删除：前移覆盖}
+
+\texttt{sa\_remove(start)} 用 \texttt{sa\_lower\_bound} 二分定位后，将后续元素前移一格覆盖：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig06-vma-sa-remove}
+  \caption{\texttt{sa\_remove} 删除过程：前移元素覆盖被删除位置}
+  \label{fig:vma-sa-remove}
+\end{figure}
+
+\subsection{复杂度总结与适用阶段}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{操作} & \textbf{排序数组} & \textbf{适用场景} \\
+\midrule
+\texttt{find}   & $O(\log n)$ 二分    & 每次 \#PF 都要调用，必须快 \\
+\texttt{add}    & $O(n)$ 搬移        & 仅启动/分配时调用，频率低 \\
+\texttt{remove} & $O(n)$ 搬移        & 仅释放时调用，频率低 \\
+\texttt{dump}   & $O(n)$ 顺序遍历    & 仅调试命令，不影响性能 \\
+\bottomrule
+\end{tabular}
+\caption{排序数组后端复杂度——\texttt{find} 快，\texttt{add}/\texttt{remove} 可接受}
+\label{tab:vma-sa-complexity}
+\end{table}
+
+在内核启动到单进程阶段（Stage 9 -- Stage 12），VMA 数量 $n < 20$。
+此时 $O(n)$ 的插入/删除在绝对耗时上几乎无开销（搬移 20 个 16 字节的结构体 $\approx$ 几十个 \texttt{mov} 指令）。
+当多进程引入 per-process VMA 后再切换红黑树，是更合理的渐进式开发策略。
+
+% ============================================================================
+

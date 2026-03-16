@@ -1,0 +1,40 @@
+\section{背景知识：x86 两级页表}
+
+当 \reg{CR0} 的 PG 位（bit 31）被置 1 后，CPU 的每一次内存访问都会经过
+\term{MMU}（Memory Management Unit）进行虚拟→物理地址翻译。
+x86 32 位模式使用\term{两级页表}结构：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch08/fig01-vaddr-split}
+  \caption{32 位虚拟地址的三段划分}
+  \label{fig:vaddr-split}
+\end{figure}
+
+翻译流程如下：
+
+\begin{enumerate}
+  \item CPU 从 \reg{CR3} 取得 \term{Page Directory} 的物理基地址。
+  \item 用虚拟地址的高 10 位（PD index）索引 Page Directory，得到一个 PDE。
+  \item PDE 的高 20 位指向一个 \term{Page Table} 的物理地址。
+  \item 用虚拟地址的中 10 位（PT index）索引 Page Table，得到一个 PTE。
+  \item PTE 的高 20 位是目标\term{物理页帧}地址，拼上低 12 位 Offset，即为最终物理地址。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch08/fig02-two-level-walk}
+  \caption{两级页表翻译流程：CR3 → PDE → PTE → 物理页}
+  \label{fig:two-level-walk}
+\end{figure}
+
+\begin{whybox}
+为什么用两级而不是一级平坦页表？
+
+一级页表需要 $2^{20}$ 个 PTE = 4\,MiB 连续内存，即使地址空间大部分为空也要全部分配。
+两级结构只需 1 个 Page Directory（4\,KiB），空闲区域的 PDE 标记为"不存在"，
+对应的 Page Table 根本不需要分配。大多数进程只用几十个 Page Table，远小于 4\,MiB。
+\end{whybox}
+
+% ============================================================================
+

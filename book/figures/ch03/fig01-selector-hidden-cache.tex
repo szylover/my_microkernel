@@ -1,0 +1,16 @@
+% figures/ch03/fig01-selector-hidden-cache.tex — auto-extracted from chapter source
+\begin{tikzpicture}
+  % 可见部分
+  \node[memcell, minimum width=3cm, fill=blue!10] (vis) {selector (16 bit)};
+  \node[above=0.1cm of vis, font=\small\bfseries] {可见部分（程序可读写）};
+
+  % Hidden part
+  \node[memcell, minimum width=8cm, fill=orange!10, right=0.5cm of vis] (hid) {
+    base (32) \quad limit (20) \quad access \quad flags
+  };
+  \node[above=0.1cm of hid, font=\small\bfseries] {不可见部分（hidden cache，CPU 内部）};
+
+  % 箭头
+  \draw[pointer, dashed] (vis.east) -- (hid.west)
+    node[midway, above, font=\scriptsize] {lgdt / mov ds 时同步更新};
+\end{tikzpicture}

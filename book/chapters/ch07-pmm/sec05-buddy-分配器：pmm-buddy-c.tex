@@ -1,0 +1,41 @@
+\section{Buddy 分配器：\texttt{pmm\_buddy.c}}
+
+\subsection{核心思想}
+
+Buddy system 将物理内存分成 $2^k$ 大小的块（order $k = 0, 1, \ldots, 10$）。
+每个 order 维护一个\term{空闲链表}：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig05-buddy-allocator-free_list-orde}
+  \caption{Buddy allocator 的 free\_list 数组（每个 order 一个链表）}
+\end{figure}
+
+\subsection{分配：分裂（Split）}
+
+如果请求 order $k$ 但 \texttt{free\_list[$k$]} 为空，就从更高 order 取一个块并\textbf{分裂}：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig06-buddy-order-2-order-1}
+  \caption{Buddy 分裂：order 2 块拆成两个 order 1 块}
+\end{figure}
+
+\subsection{释放：合并（Coalesce）}
+
+释放一个 order $k$ 块后，检查它的\term{buddy}是否也空闲。如果是，合并为 order $k+1$：
+
+\begin{lstlisting}[style=cstyle]
+// 给定页帧号 P 和 order k，buddy 的帧号：
+uint32_t buddy = page_frame ^ (1u << k);
+\end{lstlisting}
+
+\begin{thinkbox}
+为什么 XOR 能找到 buddy？假设 order 1（2 页），页帧号 4 和 5 是一对，6 和 7 是一对。
+$4 \oplus 2 = 6$（不是 buddy！）。实际上 buddy 是以\textbf{对齐的块}为单位的：
+order $k$ 块的起始帧号必须是 $2^k$ 的整数倍，所以 $P \oplus 2^k$ 恰好切换到同级的另一半。
+例如帧 4 的 order-1 buddy = $4 \oplus 2 = 6$，帧 6 的 buddy = $6 \oplus 2 = 4$。
+\end{thinkbox}
+
+% ============================================================================
+

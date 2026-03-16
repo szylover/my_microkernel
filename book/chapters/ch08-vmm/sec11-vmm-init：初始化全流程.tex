@@ -1,0 +1,93 @@
+\section{\texttt{vmm\_init}：初始化全流程}
+
+\texttt{vmm\_init()} 负责用正式的 4\,KiB 页表替换 \texttt{boot.asm} 的临时 4\,MiB PSE 映射。
+
+\subsection{进入时的 CPU 状态}
+
+\begin{cpustate}
+\begin{itemize}
+  \item \reg{CR0}.PG = 1（\texttt{boot.asm} 已开启分页，使用 4\,MiB PSE 大页）
+  \item \reg{CR3} 指向 \texttt{boot\_pd}（临时页目录）
+  \item EIP 在虚拟地址 \hex{C01xxxxx}（high-half）
+  \item PMM 已初始化完毕，可以调用 \texttt{pmm\_alloc\_page()}
+\end{itemize}
+\end{cpustate}
+
+\subsection{核心步骤}
+
+\begin{enumerate}
+  \item \textbf{清零页目录}：\texttt{memzero\_page(\&g\_kernel\_pd)} \\
+        所有 1024 个 PDE 初始化为 0（Present=0）。
+
+  \item \textbf{计算映射范围}：
+        取内核物理结束地址、PMM 管理范围上限，至少 16\,MiB，上限 1\,GiB。
+
+  \item \textbf{建立双重映射}：对 $[0, \text{map\_end})$ 的每个 4\,KiB 页：
+    \begin{itemize}
+      \item Identity mapping: \texttt{vmm\_map\_page(addr, addr, ...)}
+      \item High-half mapping: \texttt{vmm\_map\_page(addr + \hex{C0000000}, addr, ...)}
+    \end{itemize}
+
+  \item \textbf{切换 CR3}：
+        \texttt{vmm\_load\_page\_directory(VIRT\_TO\_PHYS(\&g\_kernel\_pd))} \\
+        从 boot 临时页目录切换到 \texttt{g\_kernel\_pd}。
+
+  \item \textbf{标记就绪}：\texttt{g\_vmm\_ready = 1}
+
+  \item \textbf{初始化 bump allocator}：
+        设置 \texttt{g\_next\_vaddr} 为直接映射区上方（对齐到 4\,MiB）。
+\end{enumerate}
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+void vmm_init(void) {
+    printk("[vmm] init: replacing boot PSE with 4KiB page tables...\n");
+    memzero_page(&g_kernel_pd);
+
+    // 计算映射范围
+    uint32_t kernel_end = (uint32_t)(uintptr_t)__kernel_phys_end;
+    uint32_t map_end = kernel_end;
+    uint32_t min_map = 16u * 1024u * 1024u;
+    if (map_end < min_map) map_end = min_map;
+    uint32_t pmm_end = pmm_managed_base()
+                      + pmm_total_pages() * VMM_PAGE_SIZE;
+    if (pmm_end > map_end) map_end = pmm_end;
+    if (map_end > 0x40000000u) map_end = 0x40000000u;
+
+    // 逐页建立双重映射
+    for (uint32_t addr = 0; addr < map_end; addr += VMM_PAGE_SIZE) {
+        vmm_map_page(addr, addr, PTE_PRESENT | PTE_WRITABLE);
+        vmm_map_page(addr + KERNEL_VIRT_OFFSET, addr,
+                     PTE_PRESENT | PTE_WRITABLE);
+    }
+
+    // 切换到新页目录
+    uint32_t pd_phys = VIRT_TO_PHYS(
+        (uint32_t)(uintptr_t)&g_kernel_pd);
+    vmm_load_page_directory(pd_phys);
+    g_vmm_ready = 1;
+
+    // 初始化 bump allocator 水位线
+    uint32_t direct_map_top = KERNEL_VIRT_OFFSET + map_end;
+    uint32_t align_4m = 0x400000u;
+    g_next_vaddr = (direct_map_top + align_4m - 1u)
+                 & ~(align_4m - 1u);
+}
+\end{lstlisting}
+
+\begin{designbox}
+\textbf{为什么保留 identity mapping？}
+
+\texttt{vmm\_init} 运行时，内核已经在 high-half（\hex{C0000000}+），按说不需要
+低地址映射。但多处仍依赖 identity mapping：
+\begin{itemize}
+  \item VGA text buffer 在物理 \hex{B8000}，identity map 下可直接写 \texttt{(char*)0xB8000}
+  \item Multiboot2 info 指针是物理地址
+  \item PMM 内部 bitmap 的物理地址直接当指针用
+\end{itemize}
+将来 \texttt{vmm\_unmap\_identity()} 会在所有指针转换完成后拆除低地址映射，
+把 \texttt{[0, \hex{BFFFFFFF}]} 留给用户态进程。
+\end{designbox}
+
+% ============================================================================
+

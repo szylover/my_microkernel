@@ -1,0 +1,138 @@
+\section{\texttt{boot.asm} 详解：从物理地址到高半区}
+
+\texttt{boot.asm} 是内核的入口点 \texttt{\_start}。
+它的核心任务是：在没有分页的情况下构建临时页目录，开启分页后跳转到高半区。
+
+\subsection{保存 Multiboot2 信息}
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+_start:
+    mov esi, eax            ; magic (0x36d76289)
+    mov edi, ebx            ; mb2 info pointer (physical address)
+\end{lstlisting}
+
+GRUB 传入的 \reg{EAX}（magic）和 \reg{EBX}（info 指针）保存在 callee-saved
+寄存器 \reg{ESI}/\reg{EDI} 中，以便后续传给 \texttt{kmain}。
+
+\subsection{PSE 页目录构造}
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+; 清零页目录 (1024 x 4B = 4 KiB)
+push edi
+mov ecx, 1024
+xor eax, eax
+mov edi, boot_pd
+rep stosd
+pop edi
+
+; 填充 PSE 映射: 256 x 4 MiB = 1 GiB
+xor ecx, ecx
+.fill_pse:
+    mov eax, ecx
+    shl eax, 22             ; eax = ecx * 4 MiB
+    or  eax, 0x83           ; PS(bit7) | RW(bit1) | Present(bit0)
+    mov [boot_pd + ecx*4], eax          ; identity: PD[i]
+    mov [boot_pd + 768*4 + ecx*4], eax  ; high-half: PD[768+i]
+    inc ecx
+    cmp ecx, 256
+    jb  .fill_pse
+\end{lstlisting}
+
+\begin{whybox}
+为什么用 PSE（4\,MiB 大页）而不是标准 4\,KiB 页？
+
+4\,KiB 页需要分配 page table（每个 PDE 指向一个 4\,KiB 页表），
+但此时 PMM 还没初始化——我们甚至不知道哪些物理内存可用。
+PSE 模式下 PDE 自身就包含 4\,MiB 页的物理基地址，不需要页表。
+只需一个页目录（4\,KiB）就能映射整个地址空间。
+
+\texttt{vmm\_init()} 之后会用 4\,KiB 页表替换这些 PSE 条目，
+实现更细粒度的权限控制。
+\end{whybox}
+
+PSE PDE 的位格式：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch02/fig02-pse-pde-bits}
+  \caption{PSE 模式 PDE 位域（\texttt{0x83} 标志）}
+  \label{fig:pse-pde-bits}
+\end{figure}
+
+\subsection{双重映射：Identity + High-Half}
+\label{sec:dual-mapping}
+
+循环将同一物理地址同时写入两个 PD 位置：
+
+\begin{itemize}
+  \item \texttt{PD[i]}（$i = 0..255$）——Identity 映射：虚拟 $i \times 4\text{MiB}$ → 物理 $i \times 4\text{MiB}$
+  \item \texttt{PD[768+i]}——High-half 映射：虚拟 $\hex{C0000000} + i \times 4\text{MiB}$ → 物理 $i \times 4\text{MiB}$
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch02/fig03-dual-mapping}
+  \caption{引导期双重映射：identity 和 high-half 指向同一物理内存}
+  \label{fig:dual-mapping}
+\end{figure}
+
+\begin{warnbox}
+如果只建 high-half 映射而不建 identity 映射会发生什么？
+
+开启分页后，CPU 的下一条指令在物理地址 $\sim$\hex{001xxxxx}。
+没有 identity 映射，MMU 无法翻译当前 EIP → \textbf{Page Fault} →
+此时 IDT 还没设置 → \textbf{Double Fault} →
+没有 DF handler → \textbf{Triple Fault} → CPU 重启。
+
+整个"死亡连锁"发生在一条指令之内，QEMU 会直接 reboot，
+串口什么输出都看不到——这也是引导调试最令人头疼的问题之一。
+\end{warnbox}
+
+\subsection{开启 PSE 和分页}
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+; CR4.PSE = 1 (允许 4 MiB 页)
+mov eax, cr4
+or  eax, 0x00000010     ; bit 4 = PSE
+mov cr4, eax
+
+; CR3 <- boot_pd (物理地址)
+mov eax, boot_pd
+mov cr3, eax
+
+; CR0.PG = 1 (开启分页)
+mov eax, cr0
+or  eax, 0x80000000     ; bit 31 = PG
+mov cr0, eax
+\end{lstlisting}
+
+\begin{cpustate}
+三步 CR 操作后 CPU 状态的逐步变化：
+\begin{enumerate}
+  \item \texttt{CR4.PSE = 1}——CPU 现在\emph{允许} 4\,MiB 页，但还没开启分页。
+  \item \texttt{CR3 = boot\_pd}——告诉 CPU 页目录在哪，但分页仍关闭。
+  \item \texttt{CR0.PG = 1}——分页\textbf{立即生效}！
+        从下一条指令开始，所有内存访问经过 MMU 翻译。
+        Identity 映射保证当前 EIP 仍然有效。
+\end{enumerate}
+\end{cpustate}
+
+\subsection{跳转到高半区}
+
+\codefile{src/boot/boot.asm}
+\begin{lstlisting}[style=nasmstyle]
+mov eax, _start_high    ; 链接地址 = 0xC01xxxxx
+jmp eax                 ; 跳到高半区虚拟地址
+\end{lstlisting}
+
+\texttt{\_start\_high} 在 \texttt{.text} 段中，链接在 \hex{C01xxxxx}。
+\texttt{mov eax, \_start\_high} 把这个高虚拟地址加载到 \reg{EAX}，
+\texttt{jmp eax} 跳转——MMU 通过 PD[768] 将 \hex{C01xxxxx} 翻译回物理 \hex{001xxxxx}。
+
+从此内核运行在高半区虚拟地址空间。
+
+% ============================================================================
+

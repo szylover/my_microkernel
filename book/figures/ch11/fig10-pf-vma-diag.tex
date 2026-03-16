@@ -1,0 +1,20 @@
+% figures/ch11/fig10-pf-vma-diag.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=4.5cm, font=\small, align=center},
+  decision/.style={draw, diamond, aspect=2.5, font=\small,
+                   inner sep=2pt, fill=yellow!10},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[decision] (find) at (0, 0) {\texttt{vma\_find(cr2)}};
+
+  \node[box, fill=red!12]    (no)   at (-4.5, -2) {Case 1: 返回 NULL\\非法访问 → panic / kill};
+  \node[decision]             (perm) at (2, -2) {权限匹配？};
+  \node[box, fill=orange!12] (deny) at (0, -4) {Case 2: 权限不匹配\\如写只读区 → SIGSEGV};
+  \node[box, fill=green!12]  (ok)   at (5, -4) {Case 3: 合法缺页\\demand-paging → 分配物理页};
+
+  \draw[arr] (find) -- node[left, font=\scriptsize] {NULL} (no);
+  \draw[arr] (find) -- node[right, font=\scriptsize] {非 NULL} (perm);
+  \draw[arr] (perm) -- node[left, font=\scriptsize] {否} (deny);
+  \draw[arr] (perm) -- node[right, font=\scriptsize] {是} (ok);
+\end{tikzpicture}

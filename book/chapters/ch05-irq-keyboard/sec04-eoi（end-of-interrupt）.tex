@@ -1,0 +1,33 @@
+\section{EOI（End of Interrupt）}
+
+IRQ handler 执行完后\textbf{必须}向 PIC 发送 EOI，否则 PIC 认为当前中断
+还在处理中，不会发送同级或更低优先级的后续中断。
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+void pic_send_eoi(uint8_t irq) {
+    if (irq >= 8) {
+        outb(PIC2_CMD, 0x20);  // 先通知 slave
+    }
+    outb(PIC1_CMD, 0x20);      // 再通知 master（所有 IRQ 都要）
+}
+\end{lstlisting}
+
+\begin{warnbox}
+忘记发 EOI 是最常见的硬件中断 bug。表现为：第一次按键有反应，之后键盘完全死掉。
+因为 PIC 还在等待上一次 IRQ1 的 EOI，拒绝发送新的中断。
+\end{warnbox}
+
+\begin{thinkbox}
+为什么 slave IRQ（8--15）需要向\textbf{两片} PIC 都发 EOI？
+
+因为 slave 是挂在 master 的 IRQ2 上的。一次 slave IRQ 同时占用了：
+\begin{enumerate}
+  \item slave PIC 的一个 IRQ 槽位
+  \item master PIC 的 IRQ2 槽位
+\end{enumerate}
+两边都要通知释放。
+\end{thinkbox}
+
+% ============================================================================
+

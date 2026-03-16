@@ -1,0 +1,13 @@
+\section{完整栈布局图（ISR 入口到 C handler）}
+
+这张图展示了从异常发生到进入 C handler 时，栈上所有数据的排列：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig05-isr-stack}
+  \caption{ISR 入口到 \texttt{push esp}（传给 C handler）时的完整栈布局}
+  \label{fig:isr-stack}
+\end{figure}
+
+% ============================================================================
+

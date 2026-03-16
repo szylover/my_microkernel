@@ -1,0 +1,13 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 解析 Multiboot2 Memory Map Tag，获取物理内存布局
+  \item 设计可插拔 PMM 后端接口（\texttt{pmm\_ops\_t} 函数指针表）
+  \item 实现 \texttt{pmm.c} dispatch 层
+  \item 实现 bitmap 分配器后端：多 region、位图放置算法、round-robin 分配
+  \item 实现 buddy 分配器后端：order 0--10 分裂/合并
+  \item Shell 命令：\texttt{free}、\texttt{mmap}、\texttt{pmm}
+\end{itemize}
+
+% ============================================================================
+

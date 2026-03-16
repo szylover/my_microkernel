@@ -1,0 +1,19 @@
+\section{High-Half 地址转换宏}
+
+\codefile{src/include/kernel/vmm.h}
+\begin{lstlisting}[style=cstyle]
+#define KERNEL_VIRT_OFFSET  0xC0000000u
+
+#define PHYS_TO_VIRT(paddr) ((void*)((uint32_t)(paddr) + KERNEL_VIRT_OFFSET))
+#define VIRT_TO_PHYS(vaddr) ((uint32_t)(vaddr) - KERNEL_VIRT_OFFSET)
+\end{lstlisting}
+
+\begin{warnbox}
+这两个宏\textbf{仅适用于内核直接映射区域}——即 \texttt{vmm\_init} 中建立的
+\texttt{virt = phys + \hex{C0000000}} 映射。对于动态分配的虚拟地址
+（如 \texttt{vmm\_alloc\_pages} 返回的地址），不能使用这两个宏，
+必须查页表才能得到物理地址。
+\end{warnbox}
+
+% ============================================================================
+

@@ -1,0 +1,37 @@
+\section{Console 输入层：\texttt{console.c}}
+
+\codefile{src/kernel/core/console.c}
+\begin{lstlisting}[style=cstyle]
+int console_try_getc(char* out) {
+    // 优先查键盘 IRQ 缓冲区（非阻塞）
+    if (keyboard_try_getc(out)) return 1;
+
+    // 其次查串口（轮询，非阻塞）
+    if (serial_try_getc(out)) {
+        if (*out == '\r') *out = '\n';  // 串口终端发 CR，归一化为 LF
+        return 1;
+    }
+    return 0;  // 无输入
+}
+
+char console_getc(void) {
+    for (;;) {
+        char c;
+        if (console_try_getc(&c)) return c;
+        __asm__ volatile("pause");  // 让出 CPU 一个周期
+    }
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么 \texttt{console\_getc} 用 \texttt{pause} 而非 \texttt{hlt}？
+
+\texttt{hlt} 会让 CPU 完全停止直到下一个中断。但 \texttt{serial\_try\_getc} 是
+轮询模式（不依赖中断），\texttt{hlt} 后如果没有键盘中断就永远不会被唤醒。
+\texttt{pause} 只是一个短暂提示（用于 spin-wait），CPU 仍然继续执行循环。
+
+更好的方案是在每次 \texttt{hlt} 前 check 一次串口，但当前简单实现已够用。
+\end{whybox}
+
+% ============================================================================
+

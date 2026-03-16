@@ -1,0 +1,32 @@
+% figures/ch11/fig07-rbtree-rotate.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  node distance=1cm and 1.2cm,
+  every node/.style={draw, circle, minimum size=0.7cm, font=\small},
+  tri/.style={draw, isosceles triangle, shape border rotate=90,
+              minimum height=0.5cm, minimum width=0.6cm, inner sep=0pt,
+              font=\scriptsize},
+  arr/.style={-{Stealth[length=5pt]}, very thick, blue!60!black},
+]
+  \node[fill=red!20] (x) at (0, 0) {$x$};
+  \node[tri] (a) at (-1, -1.2) {$\alpha$};
+  \node[fill=red!20] (y) at (1, -1.2) {$y$};
+  \node[tri] (b) at (0.3, -2.4) {$\beta$};
+  \node[tri] (c) at (1.7, -2.4) {$\gamma$};
+  \draw (x) -- (a);
+  \draw (x) -- (y);
+  \draw (y) -- (b);
+  \draw (y) -- (c);
+
+  \node[draw=none, font=\Large\bfseries] at (3.5, -1) {$\Rightarrow$};
+  \node[draw=none, font=\small] at (3.5, -1.8) {左旋 $x$};
+
+  \node[fill=red!20] (y2) at (6.5, 0) {$y$};
+  \node[fill=red!20] (x2) at (5.5, -1.2) {$x$};
+  \node[tri] (c2) at (7.5, -1.2) {$\gamma$};
+  \node[tri] (a2) at (4.8, -2.4) {$\alpha$};
+  \node[tri] (b2) at (6.2, -2.4) {$\beta$};
+  \draw (y2) -- (x2);
+  \draw (y2) -- (c2);
+  \draw (x2) -- (a2);
+  \draw (x2) -- (b2);
+\end{tikzpicture}

@@ -1,0 +1,18 @@
+\section{后端切换：\texttt{kconfig.h}}
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+// kconfig.h
+#define KCONFIG_PMM_BACKEND  0   // 0=bitmap, 1=buddy
+
+// kmain.c
+#if KCONFIG_PMM_BACKEND == 0
+    pmm_register_backend(pmm_bitmap_get_ops());
+#elif KCONFIG_PMM_BACKEND == 1
+    pmm_register_backend(pmm_buddy_get_ops());
+#endif
+pmm_init();
+\end{lstlisting}
+
+% ============================================================================
+

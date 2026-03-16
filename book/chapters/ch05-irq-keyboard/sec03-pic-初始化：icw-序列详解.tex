@@ -1,0 +1,118 @@
+\section{PIC 初始化：ICW 序列详解}
+
+PIC 通过 4 个 ICW（Initialization Command Word）完成初始化。
+每个 ICW 有精确的格式和发送顺序：
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+void pic_init(void) {
+    // 保存当前 mask（可选，我们会覆盖）
+    uint8_t a1 = inb(PIC1_DATA);
+    uint8_t a2 = inb(PIC2_DATA);
+\end{lstlisting}
+
+\subsection{ICW1：开始初始化}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_CMD, 0x11);  // ICW1: INIT + ICW4_NEEDED
+    io_wait();
+    outb(PIC2_CMD, 0x11);
+    io_wait();
+\end{lstlisting}
+
+\hex{11} = ICW1\_INIT (bit 4=1) | ICW1\_ICW4 (bit 0=1)。
+
+向命令端口写入 ICW1 告诉 PIC："开始初始化序列，后面会有 ICW4"。
+
+\begin{whybox}
+\texttt{io\_wait()} 是什么？ISA 总线的某些旧设备需要在连续 I/O 操作间
+插入一个短延迟。常见实现是向端口 \hex{80}（POST 诊断端口）写一个字节：
+
+\codefile{src/include/arch/io.h}
+\begin{lstlisting}[style=cstyle]
+static inline void io_wait(void) {
+    outb(0x80, 0);  // 约 1 微秒延迟
+}
+\end{lstlisting}
+\end{whybox}
+
+\subsection{ICW2：向量偏移}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x20);  // master: IRQ0 → 向量 0x20
+    io_wait();
+    outb(PIC2_DATA, 0x28);  // slave:  IRQ8 → 向量 0x28
+    io_wait();
+\end{lstlisting}
+
+这就是\textbf{remap 的核心}：告诉每片 PIC 它管理的 IRQ 对应的起始向量号。
+
+Remap 后的映射：
+
+\begin{longtable}{ccl}
+  \toprule
+  \textbf{IRQ} & \textbf{向量} & \textbf{设备} \\
+  \midrule
+  0  & \hex{20} (32) & PIT Timer \\
+  1  & \hex{21} (33) & PS/2 Keyboard \\
+  2  & \hex{22} (34) & Cascade（slave PIC） \\
+  8  & \hex{28} (40) & CMOS RTC \\
+  14 & \hex{2E} (46) & Primary ATA \\
+  \bottomrule
+\end{longtable}
+
+\subsection{ICW3：级联关系}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x04);  // master: slave 挂在 IRQ2 (bit 2 = 1)
+    io_wait();
+    outb(PIC2_DATA, 0x02);  // slave: cascade identity = 2
+    io_wait();
+\end{lstlisting}
+
+Master 的 ICW3 是一个 bitmask：bit $N$ = 1 表示 IRQ$N$ 上挂了一个 slave PIC。
+\hex{04} = bit 2 = IRQ2 上有 slave。
+
+Slave 的 ICW3 是自身的 cascade identity：2 表示"我挂在 master 的 IRQ2 上"。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch05/fig02-master-pic-icw3-04-irq2-1}
+  \caption{Master PIC 的 ICW3 = \hex{04}：IRQ2 位置为 1}
+\end{figure}
+
+\subsection{ICW4：模式设置}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x01);  // 8086/88 模式
+    io_wait();
+    outb(PIC2_DATA, 0x01);
+    io_wait();
+\end{lstlisting}
+
+\hex{01} = ICW4\_8086：告诉 PIC 工作在 8086 模式（相对于 8085 模式）。
+现代 x86 都用这个。
+
+\subsection{初始 Mask：全部关闭}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0xFF);  // mask 所有 master IRQ
+    outb(PIC2_DATA, 0xFF);  // mask 所有 slave IRQ
+}
+\end{lstlisting}
+
+\begin{designbox}
+初始化后先把所有 IRQ mask 掉。原因：
+\begin{enumerate}
+  \item 此时大部分 IRQ 还没安装 handler。如果中断进来但 IDT 中没有有效的 gate，CPU 会触发 \#GP。
+  \item 每个驱动在 init 时自己调用 \texttt{pic\_clear\_mask(irq)} 打开需要的 IRQ — "谁用谁开"原则。
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+

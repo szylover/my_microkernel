@@ -1,0 +1,23 @@
+\section{验证}
+
+编译并启动后，串口应出现类似如下输出：
+
+\begin{tcblisting}{consolebox}
+[serial] init ok (COM1, 38400 baud)
+[mmap] Multiboot2 Memory Map:
+  [0x0 - 0x9FC00] type=1 (available)   ~639 KiB
+  [0x100000 - 0x7FE0000] type=1 (available)  ~126 MiB
+  ...
+[pmm] backend: bitmap
+[pmm] init ok: 32495 free pages (126 MiB)
+\end{tcblisting}
+
+\begin{itemize}
+  \item 如果启动后什么都看不到——检查 QEMU 是否加了 \texttt{-serial stdio}。
+  \item 如果看到 VGA 上有 ``\texttt{HH}'' 但串口无输出——
+        \texttt{serial\_init()} 可能有问题，检查端口号和波特率除数。
+  \item 如果 QEMU 反复重启——Triple Fault。检查 Multiboot2 header 和页目录构造。
+\end{itemize}
+
+% ============================================================================
+

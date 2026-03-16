@@ -1,0 +1,13 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 8259 PIC 的硬件架构：主从级联、ICW 初始化序列、IRQ mask、EOI
+  \item 理解为什么必须 remap PIC（避免与 CPU 异常冲突）
+  \item 实现 IRQ 分发框架：函数指针数组 + 统一 EOI
+  \item 理解 IRQ 汇编 stub 与 ISR stub 的关系
+  \item 实现 PS/2 键盘驱动：scancode 解码、Shift 状态机、环形缓冲区
+  \item 掌握中断上下文与主循环之间的生产者-消费者模式
+\end{itemize}
+
+% ============================================================================
+

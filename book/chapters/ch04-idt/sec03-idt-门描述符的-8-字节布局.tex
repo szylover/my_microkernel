@@ -1,0 +1,117 @@
+\section{IDT 门描述符的 8 字节布局}
+
+每个 IDT 条目（gate descriptor）是 8 字节（64 位），格式和 GDT 描述符一样"碎片化"：
+
+\subsection{内存布局}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig01-idt-gate-layout}
+  \caption{IDT 门描述符的 8 字节内存布局}
+  \label{fig:idt-gate-layout}
+\end{figure}
+
+\subsection{C 结构体}
+
+\codefile{src/include/arch/idt.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct __attribute__((packed)) {
+    uint16_t offset_low;    // handler 地址低 16 位 [0:15]
+    uint16_t selector;      // 代码段选择子（0x08 = 内核代码段）
+    uint8_t  zero;          // 保留字段，必须为 0
+    uint8_t  type_attr;     // P(1) | DPL(2) | 0(1) | Type(4)
+    uint16_t offset_high;   // handler 地址高 16 位 [16:31]
+} idt_entry_t;
+\end{lstlisting}
+
+\begin{thinkbox}
+handler 地址为什么也被拆成 low 和 high 两段？和 GDT 描述符一样，
+这是 286→386 向后兼容的历史包袱。286 的 IDT 门只有 16 位 offset。
+\end{thinkbox}
+
+\subsection{\texttt{type\_attr} 字节逐 bit 详解}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch04/fig02-type_attr-8-bit}
+  \caption{type\_attr 字节的 8 个 bit}
+\end{figure}
+
+\begin{bitfield}
+  \bit{7}{P (Present) = 1：此门有效。P=0 时触发该向量会引发 \#NP。}
+  \bit{5--6}{DPL (Descriptor Privilege Level)：
+    允许通过 \texttt{int N} 软件触发此门的最低特权级。
+    DPL=0：只有 Ring 0 能用 \texttt{int N} 触发。
+    DPL=3：Ring 3（用户态）也能触发（如 \texttt{int 0x80} 系统调用）。
+    \textbf{注意}：硬件异常不受 DPL 限制。CPU 除零时无论 DPL 都会进入 handler。}
+  \bit{4}{固定为 0（区分系统段描述符和门描述符）。}
+  \bit{0--3}{Type：
+    \begin{itemize}
+      \item \texttt{1110b} = \hex{E} = 32-bit Interrupt Gate：进入时\textbf{自动清 IF}（关中断）
+      \item \texttt{1111b} = \hex{F} = 32-bit Trap Gate：进入时\textbf{不清 IF}
+    \end{itemize}}
+\end{bitfield}
+
+我们使用 \hex{8E}：
+
+$$\hex{8E} = 1\underbrace{00}_{DPL=0}\underbrace{0}_{固定}\underbrace{1110}_{Interrupt Gate}$$
+
+\begin{designbox}
+Interrupt Gate vs Trap Gate——唯一区别是进入 handler 时是否自动清 \reg{EFLAGS}.IF。
+
+\textbf{Interrupt Gate}（\hex{8E}）：自动关中断。适合异常处理——
+处理 \#PF 时我们不希望被键盘中断打断，否则嵌套的中断可能在异常尚未修复时
+访问出错的页面。
+
+\textbf{Trap Gate}（\hex{8F}）：不关中断。将来 syscall gate（\texttt{int 0x80}）
+可以考虑用 Trap Gate，让系统调用期间仍能响应硬件中断。
+\end{designbox}
+
+\subsection{\texttt{idt\_set\_gate}：填充一个门描述符}
+
+\codefile{src/kernel/arch/idt.c}
+\begin{lstlisting}[style=cstyle]
+static void idt_set_gate(uint8_t vector, void (*handler)(void),
+                         uint16_t selector, uint8_t type_attr) {
+    uint32_t addr = (uint32_t)(uintptr_t)handler;
+
+    idt[vector].offset_low  = (uint16_t)(addr & 0xFFFF);
+    //   addr = 0xC0101234
+    //   addr & 0xFFFF = 0x1234 → offset_low
+
+    idt[vector].selector    = selector;
+    //   0x08 (内核代码段)
+
+    idt[vector].zero        = 0;
+    //   保留字段，必须为 0
+
+    idt[vector].type_attr   = type_attr;
+    //   0x8E = Interrupt Gate, DPL=0, Present
+
+    idt[vector].offset_high = (uint16_t)((addr >> 16) & 0xFFFF);
+    //   (addr >> 16) & 0xFFFF = 0xC010 → offset_high
+}
+\end{lstlisting}
+
+CPU 触发向量 $N$ 时，从 IDT[$N$] 拼出 handler 地址：
+
+$$\text{handler} = (\text{offset\_high} \ll 16) \;|\; \text{offset\_low}$$
+
+然后用 selector（\hex{08}）去 GDT 查代码段描述符，切换到内核代码段执行 handler。
+
+\subsection{IDTR 结构体}
+
+和 GDTR 格式完全相同：6 字节，limit + base。
+
+\codefile{src/include/arch/idt.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct __attribute__((packed)) {
+    uint16_t limit;  // IDT 总字节数 - 1
+    uint32_t base;   // IDT 数组的线性地址
+} idtr_t;
+\end{lstlisting}
+
+256 个门 $\times$ 8 字节 = 2048 字节，所以 \texttt{limit = 2047}。
+
+% ============================================================================
+

@@ -1,0 +1,30 @@
+\section{背景知识：地址空间布局}
+
+在 32 位 x86 系统中，虚拟地址空间共 4\,GiB（\hex{00000000}--\hex{FFFFFFFF}）。
+High-Half Kernel 的经典划分方式是：
+
+\begin{itemize}
+  \item \textbf{低 3\,GiB}（\hex{00000000}--\hex{BFFFFFFF}）：用户态进程
+  \item \textbf{高 1\,GiB}（\hex{C0000000}--\hex{FFFFFFFF}）：内核
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch09/fig01-high-half-layout}
+  \caption{High-Half Kernel 地址空间布局（32 位 x86）}
+  \label{fig:high-half-layout}
+\end{figure}
+
+\begin{whybox}
+为什么内核占高 1\,GiB 而不是低 1\,GiB？
+
+将内核放在高地址有几个好处：
+\begin{enumerate}
+  \item 用户进程总是从 \hex{00000000} 附近加载（ELF 默认基址 \hex{08048000}），不用跳过内核区域
+  \item 内核切换进程时只需替换低 3\,GiB 的页表（PD[0..767]），高 1\,GiB（PD[768..1023]）在所有进程中共享，切换代价小
+  \item Linux 2.x/3.x、Windows NT 均采用此方案，是业界惯例
+\end{enumerate}
+\end{whybox}
+
+% ============================================================================
+

@@ -1,0 +1,40 @@
+\section{数据结构}
+
+\subsection{\texttt{page\_directory\_t} 与 \texttt{page\_table\_t}}
+
+\codefile{src/include/kernel/vmm.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct {
+    uint32_t entries[1024];  /* 1024 个 PDE，每个 4 字节 */
+} __attribute__((aligned(4096))) page_directory_t;
+
+typedef struct {
+    uint32_t entries[1024];  /* 1024 个 PTE，每个 4 字节 */
+} __attribute__((aligned(4096))) page_table_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch08/fig04-pd-layout}
+  \caption{\texttt{page\_directory\_t} 内存布局——PDE[768] 对应 \hex{C0000000}}
+  \label{fig:pd-layout}
+\end{figure}
+
+\begin{whybox}
+为什么 \texttt{page\_directory\_t} 用 \texttt{\_\_attribute\_\_((aligned(4096)))}？
+
+\reg{CR3} 要求页目录物理地址必须 4\,KiB 对齐（低 12 位为 0）。
+用 \texttt{aligned} 属性声明的静态变量由链接器保证对齐。
+静态变量放在 BSS 段，启动时自动清零——所有 PDE 初始 Present=0，安全。
+\end{whybox}
+
+\begin{thinkbox}
+每个 PDE 覆盖 $1024 \times 4\,\text{KiB} = 4\,\text{MiB}$ 的虚拟空间。
+PDE[768] 对应虚拟地址 $768 \times 4\,\text{MiB} = \hex{C0000000}$
+——正好是 High-Half Kernel 的起始地址。这是巧合吗？
+（答：不是。\hex{C0000000} 被选为内核基地址，正因为它恰好对齐到 PDE 边界，
+简化了地址空间划分。）
+\end{thinkbox}
+
+% ============================================================================
+

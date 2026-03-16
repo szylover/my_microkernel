@@ -1,0 +1,30 @@
+\section{背景知识：为什么需要 VMA？}
+
+在第~\ref{ch:vmm}~章我们实现了二级页表：CPU 通过 PDE → PTE → 物理页完成地址翻译。
+当 PTE 的 Present 位为 0 时，CPU 触发 Page Fault（\#PF, ISR 14），
+但 \emph{页表本身不记录这个虚拟地址"本来应不应该"被映射}。
+
+考虑以下两种引发 \#PF 的场景：
+
+\begin{enumerate}
+  \item \textbf{合法的按需分页}——程序声明了一段堆区域，但尚未分配物理页。
+        缺页时内核应分配物理页并建立映射，让程序继续运行。
+  \item \textbf{非法访问}——野指针写到 \hex{00000000}，或跳转到一段
+        没有任何映射的地址。内核应杀死进程或触发 panic。
+\end{enumerate}
+
+\begin{whybox}
+为什么不在 Page Fault handler 里扫描页表来区分？
+
+页表只有两种状态：映射了（Present=1）或没映射（Present=0）。
+"没映射"既可能是"还没来得及映射"，也可能是"根本不该映射"。
+VMA 显式注册每个合法的虚拟地址区间及其权限，
+使 \#PF handler 有了第二层判据——\emph{该地址属不属于某个已注册的 VMA？}
+\end{whybox}
+
+VMA（Virtual Memory Area）的职责就是**维护一张虚拟地址区间注册表**。
+每个区间记录 \texttt{[start, end)}、权限标志和可读名称。
+Page Fault handler 查 VMA 表，即可做出三种判断（详见第~\ref{sec:vma-pf}~节）。
+
+% ============================================================================
+

@@ -1,0 +1,38 @@
+\section{堆的初始化与增长}
+
+\subsection{\texttt{kmalloc\_init}：映射初始物理页}
+
+\texttt{kmalloc\_init()} 在内核启动时调用：
+逐页从 PMM 分配物理页 $\to$ VMM 映射到 \hex{E0000000} $\to$ 调后端 \texttt{init}。
+
+\codefile{src/include/kernel/kmalloc.h}
+\begin{lstlisting}[style=cstyle]
+void kmalloc_init(void) {
+    size_t initial_size = KHEAP_INITIAL_PAGES * VMM_PAGE_SIZE;
+    for (unsigned i = 0; i < KHEAP_INITIAL_PAGES; i++) {
+        uint32_t virt = KHEAP_START + i * VMM_PAGE_SIZE;
+        uint32_t phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+        vmm_map_page(virt, phys, PTE_PRESENT | PTE_WRITABLE);
+    }
+    g_heap_ops->init((void*)(uintptr_t)KHEAP_START, initial_size);
+}
+\end{lstlisting}
+
+初始页数由 \texttt{kconfig.h} 配置：\texttt{KCONFIG\_HEAP\_INITIAL\_PAGES = 16}（64\,KiB）。
+
+\subsection{\texttt{heap\_brk}：按需增长}
+
+First-Fit 后端用 \texttt{heap\_brk} 跟踪已提交上界：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig06-heap-brk}
+  \caption{\texttt{heap\_brk}：已提交区域上界}
+  \label{fig:heap-brk}
+\end{figure}
+
+分配找不到合适块时调 \texttt{heap\_grow(min\_bytes)}——从 PMM 拿页、VMM 映射、
+推进 \texttt{heap\_brk}，语义类似用户态 \texttt{sbrk()}。
+
+% ============================================================================
+

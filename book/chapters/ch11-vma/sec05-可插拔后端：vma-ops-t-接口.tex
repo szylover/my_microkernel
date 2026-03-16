@@ -1,0 +1,28 @@
+\section{可插拔后端：\texttt{vma\_ops\_t} 接口}
+
+与 PMM（第~\ref{ch:pmm}~章）和 kmalloc（第~\ref{ch:kmalloc}~章）完全相同的
+"dispatch + 后端"模式：
+
+\codefile{src/include/kernel/vma.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct vma_ops {
+    const char* name;
+    void (*init)(void);
+    int  (*add)(uint32_t start, uint32_t end,
+                uint32_t flags, const char* name);
+    int  (*remove)(uint32_t start);
+    const vm_area_t* (*find)(uint32_t addr);
+    void (*dump)(void);
+    unsigned (*count)(void);
+} vma_ops_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig02-vma-dispatch}
+  \caption{\texttt{vma\_ops\_t} 可插拔后端调用链——三种后端通过 \texttt{kconfig.h} 选择}
+  \label{fig:vma-dispatch}
+\end{figure}
+
+% ============================================================================
+

@@ -1,0 +1,16 @@
+\section{添加新命令的完整流程}
+
+\begin{enumerate}
+  \item 创建 \texttt{src/kernel/cmds/cmd\_xxx.c}
+  \item 实现 handler 函数并导出：
+\begin{lstlisting}[style=cstyle]
+const cmd_t cmd_xxx = {
+    .name = "xxx", .help = "...", .fn = cmd_xxx_fn
+};
+\end{lstlisting}
+  \item 在 \texttt{shell.c} 中添加 \texttt{extern const cmd\_t cmd\_xxx;} 并加入 \texttt{g\_cmds[]}
+  \item 无需修改 Makefile——\texttt{kernel/cmds/*.c} 被自动发现编译
+\end{enumerate}
+
+% ============================================================================
+

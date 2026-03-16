@@ -1,0 +1,62 @@
+\section{\texttt{gdt\_init()}：填充三个描述符}
+
+\codefile{src/kernel/arch/gdt.c}
+\begin{lstlisting}[style=cstyle]
+void gdt_init(void) {
+    // 描述符 0：Null 描述符（x86 硬性要求）
+    //   所有字段都是 0。
+    //   如果任何段寄存器的 selector = 0x00，CPU 知道它是"空的"。
+    //   在某些场景（如加载 LDT 寄存器）CPU 会检查是否为 null selector。
+    gdt_set_entry(0, 0, 0, 0, 0);
+
+    // 描述符 1：内核代码段（selector = 0x08）
+    gdt_set_entry(1,
+        0x00000000,   // base  = 0（平坦模型）
+        0x000FFFFF,   // limit = 0xFFFFF（配合 G=1 → 4GiB）
+        0x9A,         // access: P=1, DPL=0, S=1, Ex=1, DC=0, RW=1, Ac=0
+        0xC0          // flags:  G=1, D/B=1, L=0, AVL=0
+    );
+
+    // 描述符 2：内核数据段（selector = 0x10）
+    gdt_set_entry(2,
+        0x00000000,   // base  = 0（平坦模型）
+        0x000FFFFF,   // limit = 0xFFFFF
+        0x92,         // access: P=1, DPL=0, S=1, Ex=0, DC=0, RW=1, Ac=0
+        0xC0          // flags:  G=1, D/B=1, L=0, AVL=0
+    );
+
+    gdtr.limit = (uint16_t)(sizeof(gdt) - 1);  // 23
+    gdtr.base  = (uint32_t)(uintptr_t)&gdt[0];
+
+    gdt_flush(&gdtr);
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig08-gdt-3-24}
+  \caption{GDT 初始化后的内存布局（3 个描述符 = 24 字节）}
+\end{figure}
+
+\begin{designbox}
+为什么 GDT 第 0 项必须是空描述符？
+
+Intel 规范规定 selector=0 是 null selector。作用有二：
+\begin{enumerate}
+  \item \textbf{防御性检查}：如果代码不小心用了未初始化的段寄存器（值为 0），
+    CPU 在访问内存时会检测到 null selector 并触发 \#GP，而非悄悄使用错误的段。
+  \item \textbf{LDT 相关}：加载 LDT 寄存器时，null selector 表示"不使用 LDT"。
+\end{enumerate}
+\end{designbox}
+
+\begin{thinkbox}
+将来做用户态（Ring 3）时，我们需要添加 2 个新描述符：
+\begin{itemize}
+  \item 用户代码段（DPL=3，access=\hex{FA}）
+  \item 用户数据段（DPL=3，access=\hex{F2}）
+\end{itemize}
+它们的 selector 分别是多少？（提示：index 3 和 4，各乘以 8。）
+\end{thinkbox}
+
+% ============================================================================
+

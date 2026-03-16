@@ -1,0 +1,31 @@
+\section{验证：查看映射状态}
+
+拆除 identity mapping 后，可以用 shell 命令验证效果。
+通过 \texttt{vmm\_is\_mapped()} 查询特定虚拟地址的映射状态：
+
+\begin{tcblisting}{consolebox, title={验证 identity mapping 已拆除}}
+«\tpk{>}» «\tin{vmm lookup 0x00000000}»
+  virt=0x00000000 -> NOT MAPPED
+
+«\tpk{>}» «\tin{vmm lookup 0x000B8000}»
+  virt=0x000B8000 -> NOT MAPPED
+
+«\tpk{>}» «\tin{vmm lookup 0xC0000000}»
+  virt=0xC0000000 -> phys=0x00000000 [P RW]
+
+«\tpk{>}» «\tin{vmm lookup 0xC00B8000}»
+  virt=0xC00B8000 -> phys=0x000B8000 [P RW]
+
+«\tpk{>}» «\tin{vmm lookup 0xC0100000}»
+  virt=0xC0100000 -> phys=0x00100000 [P RW]
+\end{tcblisting}
+
+可以看到：
+\begin{itemize}
+  \item 低地址（\hex{00000000}、\hex{000B8000}）全部显示 NOT MAPPED
+  \item 对应的 high-half 地址（加 \hex{C0000000}）映射正常
+  \item 物理地址 $=$ 虚拟地址 $-$ \hex{C0000000}，符合直接映射公式
+\end{itemize}
+
+% ============================================================================
+

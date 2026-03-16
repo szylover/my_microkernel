@@ -1,0 +1,12 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 设计统一的 Console 输入抽象层（键盘 IRQ + 串口轮询）
+  \item 实现行编辑器：回显、退格（\texttt{\textbackslash b}）、回车
+  \item 实现命令解析器：空格分词 → \texttt{argc/argv}
+  \item 设计可扩展的命令注册表（\texttt{cmd\_t} 结构体 + 静态数组）
+  \item 实现第一批命令：\texttt{cls}、\texttt{shutdown}、\texttt{cmds}
+\end{itemize}
+
+% ============================================================================
+

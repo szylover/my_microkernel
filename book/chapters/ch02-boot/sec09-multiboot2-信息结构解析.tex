@@ -1,0 +1,45 @@
+\section{Multiboot2 信息结构解析}
+\label{sec:mb2-info}
+
+GRUB 在 \reg{EBX} 中传递的 Multiboot2 info 是一个 tag 链表结构：
+
+\begin{lstlisting}[style=cstyle]
+/* 信息结构头部 */
+struct mb2_info {
+    uint32_t total_size;    /* 整个结构的字节数 */
+    uint32_t reserved;
+    /* 后面紧跟若干 tag，每个 tag 8 字节对齐 */
+};
+
+/* 每个 tag 的公共头 */
+struct mb2_tag {
+    uint32_t type;          /* tag 类型 */
+    uint32_t size;          /* tag 字节数（含此头） */
+};
+\end{lstlisting}
+
+遍历算法：从 \texttt{base + 8} 开始，每次跳过当前 tag 的 \texttt{size}（向上 8 字节对齐），
+直到遇到 end tag（type=0, size=8）。
+
+对我们最重要的是 \textbf{Memory Map Tag}（type=6），它报告物理内存布局——
+这是 PMM 初始化的输入数据（详见第~\ref{ch:pmm}~章）。
+
+\begin{lstlisting}[style=cstyle]
+struct mb2_mmap_entry {
+    uint64_t addr;      /* 区域起始物理地址 */
+    uint64_t len;       /* 区域长度 */
+    uint32_t type;      /* 1=可用, 2=保留, 3=ACPI, ... */
+    uint32_t reserved;
+};
+\end{lstlisting}
+
+\begin{thinkbox}
+Multiboot2 info 指针是\textbf{物理地址}，但 \texttt{kmain} 在分页开启后的高半区运行。
+为什么仍然能直接读取 \texttt{mb2\_info} 的内容？
+
+提示：回顾第~\ref{sec:dual-mapping}~节的 identity 映射——在 \texttt{vmm\_unmap\_identity()}
+调用之前，低地址物理页同时可通过 identity 映射和 high-half 映射访问。
+\end{thinkbox}
+
+% ============================================================================
+

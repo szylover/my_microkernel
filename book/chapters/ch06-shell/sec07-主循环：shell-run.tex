@@ -1,0 +1,18 @@
+\section{主循环：\texttt{shell\_run}}
+
+\codefile{src/kernel/core/shell.c}
+\begin{lstlisting}[style=cstyle]
+void shell_run(void) {
+    printk("\nInteractive shell ready.\n");
+    char line[SHELL_LINE_MAX];  // 128 字节栈上缓冲区
+
+    for (;;) {
+        shell_print_prompt();                    // "szy-kernel > "
+        shell_readline(line, sizeof(line));       // 阻塞读一行
+        shell_dispatch(line);                     // 分词 + 匹配 + 执行
+    }
+}
+\end{lstlisting}
+
+% ============================================================================
+

@@ -34,6 +34,7 @@ gh pr merge <pr-number-or-url> --squash --delete-branch
 - [ ] `docs/changelog.md` — 新增/删除文件、改接口、改行为时，必须追加当日记录
 - [ ] `docs/roadmap.md` — Stage 状态变化时，更新对应行的状态标记（如 ✅）
 - [ ] `compile_commands.json` — 新增/删除 `.c`/`.asm` 文件时，运行 `make compdb` 重新生成
+- [ ] `book/main.pdf` — 修改了 `book/` 下任何 `.tex` 文件时，在 `book/` 目录运行 `make` 重新生成 PDF
 - [ ] 下方"项目文件结构"中的目录树 — 目录或文件有变化时同步更新
 
 ---
@@ -58,6 +59,24 @@ gh pr merge <pr-number-or-url> --squash --delete-branch
 - **每次新增/删除/移动 C/ASM 源文件**后，必须更新 `compile_commands.json`
 - 更新方式：`make compdb`（依赖 `bear`）或 `AUTO_COMPDB=1 make iso`
 
+## Book / LaTeX 图片管理规范（强制）
+
+所有 TikZ 图片代码**必须**放在 `book/figures/chNN/` 目录下，按章节子目录组织：
+
+```
+figures/
+├── ch02/   # fig01-xxx.tex, fig02-xxx.tex, …
+├── ch03/
+├── …
+└── ch11/
+```
+
+- **命名规则**：`figNN-<label-slug>.tex`（如 `fig01-vaddr-split.tex`）
+- **文件内容**：仅包含 `\begin{tikzpicture}...\end{tikzpicture}` 绘图代码，不含 `\begin{figure}` / `\caption` / `\label`
+- **章节引用方式**：在 section `.tex` 文件中用 `\begin{figure}[H]\centering\input{figures/chNN/figNN-slug}\caption{...}\label{...}\end{figure}`
+- **新增/修改图片时**：直接编辑 `figures/chNN/` 下的文件，不要在 section 文件中内联 TikZ 代码
+- **遍历所有图片**：只需扫描 `figures/` 目录即可，无需遍历所有章节源码
+
 ## 变更记录同步（强烈推荐）
 
 - 改动对外接口/行为时，在 `docs/changelog.md` 追加当日记录
@@ -73,6 +92,19 @@ my_microkernel/
 │   └── copilot-instructions.md   # 本文件 — AI Agent 协作规约
 ├── Makefile                       # 薄 wrapper，转发到 src/Makefile
 ├── README.md
+├── book/                          # LaTeX 书稿 《自己动手写操作系统》
+│   ├── Makefile                   #   xelatex 构建（make → main.pdf）
+│   ├── main.tex                   #   主文件（\include 各章）
+│   ├── preamble.tex               #   宏包 & 样式定义
+│   ├── chapters/                  #   各章包装文件 + 子目录
+│   │   ├── ch00-preface.tex       #     前言（短文件，不拆分）
+│   │   ├── ch01-environment.tex   #     环境搭建（短文件）
+│   │   ├── ch02-boot.tex          #     → \input{ch02-boot/sec*.tex}
+│   │   ├── ch02-boot/             #       per-section 子文件
+│   │   ├── …                      #     ch03–ch11 同理
+│   │   ├── ch12-tss-ring3.tex     #     以下为占位章节（短文件）
+│   │   └── …
+│   └── figures/                   #   图片资源
 ├── docs/                          # 项目文档（面向人类）
 │   ├── changelog.md               #   变更日志
 │   ├── debug.md                   #   QEMU + GDB 调试指南

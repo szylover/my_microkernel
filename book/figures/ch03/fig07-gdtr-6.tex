@@ -1,0 +1,11 @@
+% figures/ch03/fig07-gdtr-6.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \node[memcell, minimum width=2.5cm, fill=green!10] (lim) {limit (16 bit)};
+  \node[memcell, minimum width=5cm, fill=blue!10, right=0cm of lim] (base) {base (32 bit)};
+  \node[memaddr, left=0.3cm of lim] {+0};
+  \node[memaddr, left=0.3cm of base] {};
+
+  % Arrow from base to GDT
+  \node[below=1.2cm of base, font=\small] (gdt) {gdt[0] | gdt[1] | gdt[2]};
+  \draw[pointer] (base.south) -- (gdt.north) node[midway, right, font=\scriptsize] {指向 GDT 数组};
+\end{tikzpicture}

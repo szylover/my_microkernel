@@ -1,0 +1,37 @@
+% figures/ch09/fig02-final-layout.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=7cm, font=\small, anchor=south west},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+  arr/.style={-{Stealth[length=3pt]}, thick, blue!60!black},
+]
+  % 低地址：未映射
+  \node[block, minimum height=2.0cm, fill=gray!10, dashed] (unmapped) at (0, 0)
+    {\parbox{6.5cm}{\centering\small\textit{未映射（将来的用户空间）}\\
+     访问触发 \#PF}};
+
+  % 直接映射区
+  \node[block, minimum height=1.5cm, fill=green!10] (direct) at (0, 2.0)
+    {\parbox{6.5cm}{\centering\small\textbf{直接映射区}\\
+     $\text{virt} = \text{phys} + \hex{C0000000}$}};
+
+  % 动态分配区
+  \node[block, minimum height=0.8cm, fill=yellow!10] (alloc) at (0, 3.5)
+    {\parbox{6.5cm}{\centering\small 动态分配区（vmm\_alloc\_pages）}};
+
+  % 内核堆
+  \node[block, minimum height=0.8cm, fill=orange!10] (heap) at (0, 4.3)
+    {\parbox{6.5cm}{\centering\small 内核堆（\hex{E0000000}+）}};
+
+  % 地址标注
+  \node[addr] at (-0.2, 0)    {\hex{00000000}};
+  \node[addr] at (-0.2, 2.0)  {\hex{C0000000}};
+  \node[addr] at (-0.2, 3.5)  {direct\_map\_end};
+  \node[addr] at (-0.2, 4.3)  {\hex{E0000000}};
+  \node[addr] at (-0.2, 5.1)  {\hex{FFFFFFFF}};
+
+  % 物理内存箭头
+  \node[draw, minimum width=2.5cm, minimum height=1.5cm, fill=blue!8,
+        font=\small, anchor=west] (phys) at (8.5, 2.0)
+    {\parbox{2cm}{\centering 物理\\内存}};
+  \draw[arr] (7.0, 2.75) -- (phys.west) node[midway, above, font=\scriptsize] {1:1};
+\end{tikzpicture}

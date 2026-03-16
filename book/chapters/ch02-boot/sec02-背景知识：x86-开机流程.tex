@@ -1,0 +1,35 @@
+\section{背景知识：x86 开机流程}
+
+当你按下电源按钮，到内核第一行 C 代码执行，中间经历了什么？
+
+\begin{enumerate}
+  \item \textbf{BIOS/UEFI 自检}——CPU 从 \hex{FFFFFFF0}（重置向量）开始执行 BIOS 固件，
+        完成硬件自检（POST）、枚举内存及 PCI 设备。
+  \item \textbf{GRUB 加载}——BIOS 读取启动扇区，加载 GRUB bootloader。
+        GRUB 解析 ELF 内核映像，找到 Multiboot2 header 确认格式正确。
+  \item \textbf{内核入口}——GRUB 把内核加载到 ELF \texttt{p\_paddr} 指定的物理地址，
+        设置好约定的寄存器状态，跳转到 \texttt{\_start}。
+\end{enumerate}
+
+\begin{cpustate}
+GRUB 移交控制权时的 CPU 状态：
+\begin{itemize}
+  \item \reg{EAX} = \hex{36d76289}（Multiboot2 magic，用于内核验证）
+  \item \reg{EBX} = Multiboot2 info 结构体的\textbf{物理地址}
+  \item \reg{CR0.PG} = 0（分页关闭），处于 32 位保护模式
+  \item \reg{EIP} ≈ \hex{00100000}（物理地址，内核加载位置）
+  \item 中断已禁用（\texttt{IF=0}），无可用栈
+\end{itemize}
+\end{cpustate}
+
+\begin{thinkbox}
+为什么内核要加载到 1\,MiB（\hex{100000}）而不是 0 地址？
+
+0--\hex{A0000}（640\,KiB）是传统 DOS 可用内存，但其中散布着 BIOS 数据区（BDA）、
+中断向量表（IVT, 0--\hex{3FF}）等关键结构，GRUB 运行时也在使用。
+\hex{A0000}--\hex{FFFFF} 是 VGA 缓冲区、ROM shadow 和 BIOS 扩展区。
+1\,MiB 以上才是干净的、可自由使用的连续 RAM。
+\end{thinkbox}
+
+% ============================================================================
+

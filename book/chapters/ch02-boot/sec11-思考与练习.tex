@@ -1,0 +1,31 @@
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{验证 Multiboot2 magic}
+
+在 \texttt{kmain} 的最开头，检查第一个参数是否等于 \hex{36d76289}。
+如果不等，打印 ``\texttt{FATAL: invalid multiboot2 magic: 0x\%x}'' 并 \texttt{hlt}。
+为什么从 GRUB 启动时这个值一定正确，但仍值得检查？
+（提示：考虑将来用其他 bootloader、或 chainloading 场景）。
+\end{exercise}
+
+\begin{exercise}
+\textbf{波特率计算}
+
+当前 \texttt{serial\_init()} 设置除数为 3，波特率 = $115200 \div 3 = 38400$。
+修改除数为 1，使波特率变为 115200。
+同时需要修改 QEMU 的 \texttt{-serial} 参数吗？
+（提示：QEMU 的虚拟串口会自动适配，但真实硬件上两端必须匹配。）
+\end{exercise}
+
+\begin{exercise}
+\textbf{增加 \texttt{\%b} 二进制格式支持}
+
+给 \texttt{vprintk} 添加 \texttt{\%b} 格式说明符，输出 32 位整数的二进制表示。
+例如 \texttt{printk("\%b", 0x83)} 应输出 \texttt{10000011}（省略前导零）
+或 \texttt{00000000000000000000000010000011}（填满 32 位）。
+
+建议参照 \texttt{fmt\_u32\_hex} 的实现方式，用循环从高位到低位逐位输出。
+宽度选项 \texttt{\%032b} 应输出完整的 32 位（前导零填充）。
+\end{exercise}
+

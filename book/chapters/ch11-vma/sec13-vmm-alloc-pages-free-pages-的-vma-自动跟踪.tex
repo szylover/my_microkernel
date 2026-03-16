@@ -1,0 +1,29 @@
+\section{\texttt{vmm\_alloc\_pages}/\texttt{free\_pages} 的 VMA 自动跟踪}
+
+当前 \texttt{vmm\_alloc\_pages} 只做 PMM 分配 + 页表映射，不通知 VMA。
+理想的流程是在分配/释放时自动跟踪：
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+void* vmm_alloc_pages(unsigned count) {
+    uint32_t vaddr = bump_next();                 /* 选虚拟地址 */
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t phys = pmm_alloc_page();
+        vmm_map_page(vaddr + i * PAGE_SIZE, phys,
+                     PTE_PRESENT | PTE_WRITABLE);
+    }
+    /* 自动注册 VMA */
+    if (vma_is_ready()) {
+        vma_add(vaddr, vaddr + count * PAGE_SIZE,
+                VMA_READ | VMA_WRITE, "vmm-alloc");
+    }
+    return (void*)vaddr;
+}
+\end{lstlisting}
+
+\texttt{vmm\_free\_pages} 的逆操作则调用 \texttt{vma\_remove(vaddr)}。
+这样 Page Fault handler 对所有动态映射都有完整的 VMA 覆盖，
+不会误判合法区域为非法访问。
+
+% ============================================================================
+

@@ -1,0 +1,24 @@
+% figures/ch11/fig02-vma-dispatch.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=3.5cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[box, fill=blue!8]   (caller) at (0, 0)
+    {调用者 (kmain / vmm / shell)};
+  \node[box, fill=yellow!12](api)    at (0, -1.3)
+    {\texttt{vma\_add()} / \texttt{vma\_find()}};
+  \node[box, fill=orange!12](disp)   at (0, -2.6)
+    {\texttt{vma.c} dispatch};
+  \node[box, fill=green!12] (sa)     at (-4.0,-4.2)
+    {\texttt{vma\_sorted\_array.c}\\（排序数组）};
+  \node[box, fill=green!12] (rb)     at (0,-4.2)
+    {\texttt{vma\_rbtree.c}\\（红黑树）};
+  \node[box, fill=green!12] (mt)     at (4.0,-4.2)
+    {\texttt{vma\_maple.c}\\（Maple Tree）};
+  \draw[arr] (caller)--(api);
+  \draw[arr] (api)--(disp);
+  \draw[arr] (disp)--(sa);
+  \draw[arr] (disp)--(rb);
+  \draw[arr] (disp)--(mt);
+\end{tikzpicture}

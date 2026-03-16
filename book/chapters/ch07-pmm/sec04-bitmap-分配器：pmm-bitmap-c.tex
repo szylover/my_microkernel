@@ -1,0 +1,150 @@
+\section{Bitmap 分配器：\texttt{pmm\_bitmap.c}}
+
+\subsection{核心数据结构}
+
+\codefile{src/kernel/mm/pmm\_bitmap.c}
+\begin{lstlisting}[style=cstyle]
+struct pmm_region {
+    uint32_t base;               // 区域起始物理地址
+    uint32_t pages;              // 管理的总页数
+    uint8_t* bitmap;             // 位图指针（每 bit 对应一页）
+    uint32_t bitmap_bytes;       // 位图有效字节数 = ceil(pages/8)
+    uint32_t bitmap_storage_bytes; // 实际分配字节数（对齐后）
+    uint32_t bitmap_pages;       // 位图本身占用的页数
+    uint32_t free;               // 当前空闲页数
+};
+
+static struct pmm_region g_regions[PMM_MAX_REGIONS];  // 最多 32 个区域
+static uint32_t g_region_count = 0;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig03-bitmap}
+  \caption{Bitmap 位图放置在区域开头，自身占用几页物理内存}
+\end{figure}
+
+\subsection{页 → bit 的映射}
+
+每个物理页对应位图中的 1 bit：
+\begin{itemize}
+  \item bit = 1：页被占用（used/reserved）
+  \item bit = 0：页空闲（free）
+\end{itemize}
+
+\codefile{src/kernel/mm/pmm\_bitmap.c}
+\begin{lstlisting}[style=cstyle]
+// 测试第 bit 位是否为 1
+static int bitmap_test_r(const struct pmm_region* r, uint32_t bit) {
+    uint32_t byte_idx = bit / 8;
+    uint8_t  bit_mask = (uint8_t)(1u << (bit % 8));
+    return (r->bitmap[byte_idx] & bit_mask) != 0;
+}
+
+// 置位（标记为 used）
+static void bitmap_set_r(struct pmm_region* r, uint32_t bit) {
+    r->bitmap[bit / 8] |= (uint8_t)(1u << (bit % 8));
+}
+
+// 清位（标记为 free）
+static void bitmap_clear_r(struct pmm_region* r, uint32_t bit) {
+    r->bitmap[bit / 8] &= (uint8_t)~(1u << (bit % 8));
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch07/fig04-8-bit-8}
+  \caption{位图的一个字节（8 bit）对应 8 个连续的物理页}
+\end{figure}
+
+\subsection{分配算法：Round-Robin + 线性扫描}
+
+\codefile{src/kernel/mm/pmm\_bitmap.c}
+\begin{lstlisting}[style=cstyle]
+void* pmm_bitmap_alloc_page(void) {
+    // Round-robin: 从上次分配的 region 开始，避免总是扫描第一个 region
+    for (uint32_t tries = 0; tries < g_region_count; tries++) {
+        uint32_t ri = (g_region_rr + tries) % g_region_count;
+        struct pmm_region* r = &g_regions[ri];
+        if (r->free == 0) continue;
+
+        uint32_t idx;
+        if (pmm_find_free_index(r, &idx)) {
+            bitmap_set_r(r, idx);       // 标记为 used
+            r->free--;
+            g_pmm_total_free--;
+            g_region_rr = ri;           // 记住本次从哪个 region 分配的
+            return (void*)(uintptr_t)region_index_to_addr(r, idx);
+        }
+    }
+    return NULL;  // OOM
+}
+\end{lstlisting}
+
+\texttt{pmm\_find\_free\_index} 的核心：先按字节扫描（跳过全 0xFF 的字节），
+找到有空位的字节后再逐 bit 检查。这把线性扫描的常数因子降低了 8 倍。
+
+\begin{thinkbox}
+Round-robin 跨 region 分配有什么好处？如果总是从 region 0 开始扫描，
+region 0 会很快碎片化，而 region 1 始终空闲——分配不均匀。
+Round-robin 均衡了各 region 的使用率。
+\end{thinkbox}
+
+\subsection{释放算法}
+
+\codefile{src/kernel/mm/pmm\_bitmap.c}
+\begin{lstlisting}[style=cstyle]
+void pmm_bitmap_free_page(void* page) {
+    uint32_t addr = (uint32_t)(uintptr_t)page;
+    // 安全检查：对齐？在管理范围内？
+    if (!pmm_addr_is_page_aligned(addr)) return;
+
+    // 找到包含该地址的 region
+    for (uint32_t i = 0; i < g_region_count; i++) {
+        struct pmm_region* r = &g_regions[i];
+        if (!region_contains_addr(r, addr)) continue;
+
+        uint32_t idx = region_addr_to_index(r, addr);
+        if (!bitmap_test_r(r, idx)) {
+            printk("[pmm] double free: 0x%08x\n", addr);  // 防御
+            return;
+        }
+        bitmap_clear_r(r, idx);
+        r->free++;
+        g_pmm_total_free++;
+        return;
+    }
+}
+\end{lstlisting}
+
+\begin{warnbox}
+Double-free 检测：如果 bit 已经是 0 还要清，说明同一个页被 free 了两次。
+这是严重 bug，打印警告但不执行清除（避免 free count 错乱）。
+\end{warnbox}
+
+\subsection{初始化流程}
+
+\texttt{pmm\_bitmap\_init()} 的完整步骤：
+
+\begin{enumerate}
+  \item 解析 Multiboot2 mmap tag，找出所有 type=1（Available）的区域
+  \item 对每个区域：截断到 $\ge$ 1MiB、$\le$ 4GiB、页对齐
+  \item 计算位图大小和放置位置（\texttt{pmm\_compute\_region\_layout}）——
+    位图本身也要占物理内存，需要避开内核镜像和 mb2 info
+  \item 清零位图 → 将位图自身占用的页标记为 used
+  \item 保留内核镜像区域（\texttt{\_\_kernel\_phys\_start} 到 \texttt{\_\_kernel\_phys\_end}）
+  \item 保留 Multiboot2 info 区域
+  \item 重新计算 free count
+  \item Selftest：分配 4 页 → 写入 pattern → 读回验证 → 释放 → 检查 free 恢复
+\end{enumerate}
+
+\begin{designbox}
+位图放置是初始化中最复杂的部分。位图需要放在可用物理内存中，
+但它不能覆盖内核镜像或 Multiboot2 info。
+\texttt{pmm\_compute\_region\_layout} 最多尝试 4 次不同的放置方案，
+直到找到一个不和任何已有数据重叠的位置。
+\end{designbox}
+
+% ============================================================================
+

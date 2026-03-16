@@ -1,0 +1,49 @@
+\section{核心函数：\texttt{vmm\_ensure\_page\_table}}
+
+在写入 PTE 之前，必须确保对应的 Page Table 存在。这是"按需创建"的关键：
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+static page_table_t* vmm_ensure_page_table(uint32_t pd_idx) {
+    uint32_t pde = g_kernel_pd.entries[pd_idx];
+
+    if (pde & PDE_PRESENT) {
+        // PDE 已有效，取出页表物理地址
+        uint32_t pt_phys = pde & ~0xFFFu;
+        return (page_table_t*)PHYS_TO_VIRT(pt_phys);
+    }
+
+    // PDE 不存在 -> 分配新页表
+    uint32_t pt_phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+    if (!pt_phys) return NULL;
+
+    // 通过虚拟地址清零（所有 PTE 的 Present=0）
+    page_table_t* pt_virt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
+    memzero_page(pt_virt);
+
+    // 填入 PDE：物理地址 | flags
+    g_kernel_pd.entries[pd_idx] = pt_phys | PDE_PRESENT | PDE_WRITABLE;
+
+    return pt_virt;
+}
+\end{lstlisting}
+
+步骤详解：
+
+\begin{enumerate}
+  \item 读取 \texttt{g\_kernel\_pd.entries[pd\_idx]}，检查 Present 位。
+  \item \textbf{已存在}：用 \texttt{\& \textasciitilde 0xFFF} 取出高 20 位物理地址，
+        \texttt{PHYS\_TO\_VIRT} 转为虚拟地址后返回。
+  \item \textbf{不存在}：调用 \texttt{pmm\_alloc\_page()} 获取一页物理内存。
+  \item 用 \texttt{memzero\_page()} 清零——确保所有 1024 个 PTE 的 Present=0。
+  \item 将物理地址与 flags 组合后写入 PDE。
+\end{enumerate}
+
+\begin{warnbox}
+清零新页表是\textbf{绝对必要}的。未清零的页表中可能残留垃圾数据，
+CPU 可能把任意非零值当作 Present=1 的 PTE，导致虚拟地址被映射到随机物理页
+——轻则数据损坏，重则 Triple Fault。
+\end{warnbox}
+
+% ============================================================================
+

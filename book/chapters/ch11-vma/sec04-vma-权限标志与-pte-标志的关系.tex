@@ -1,0 +1,38 @@
+\section{VMA 权限标志与 PTE 标志的关系}
+\label{sec:vma-flags}
+
+\codefile{src/include/kernel/vma.h}
+\begin{lstlisting}[style=cstyle]
+#define VMA_READ    0x01u   /* 可读 */
+#define VMA_WRITE   0x02u   /* 可写 */
+#define VMA_EXEC    0x04u   /* 可执行（配合 NX 位使用） */
+\end{lstlisting}
+
+VMA 标志描述的是\emph{语义层级}的权限意图；PTE 标志是\emph{硬件层级}的访问控制。
+它们之间的映射关系如表~\ref{tab:vma-pte-flags}~所示。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{VMA 标志} & \textbf{对应 PTE 操作} & \textbf{说明} \\
+\midrule
+\texttt{VMA\_READ}  & \texttt{PTE\_PRESENT}   & 页面存在即可读 \\
+\texttt{VMA\_WRITE} & \texttt{PTE\_WRITABLE}  & 设置 R/W 位 \\
+\texttt{VMA\_EXEC}  & 清除 NX 位（PAE/64-bit） & 32 位无 NX，留作扩展 \\
+\bottomrule
+\end{tabular}
+\caption{VMA 权限标志到 PTE 标志的映射}
+\label{tab:vma-pte-flags}
+\end{table}
+
+\begin{thinkbox}
+在 32 位非 PAE 模式下，x86 没有 NX（No-Execute）位——所有可读页面都可以执行。
+这意味着 \texttt{VMA\_EXEC} 在当前实现中其实不会产生硬件层面的约束。
+那为什么还要定义它？
+
+提示：考虑将来迁移到 PAE 或 64 位模式、以及软件层面的审计需求。
+\end{thinkbox}
+
+% ============================================================================
+

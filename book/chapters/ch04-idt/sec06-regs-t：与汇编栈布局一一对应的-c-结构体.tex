@@ -1,0 +1,34 @@
+\section{\texttt{regs\_t}：与汇编栈布局一一对应的 C 结构体}
+
+\codefile{src/include/arch/idt.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct regs {
+    // push gs/fs/es/ds（最后 push 的在最低地址 = 结构体最前面）
+    uint32_t gs, fs, es, ds;
+
+    // pushad（EAX 最先 push = 最高地址 → 结构体中排在后面）
+    // pushad 的 push 顺序: EAX ECX EDX EBX ESP EBP ESI EDI
+    // 栈上从高到低:        EAX ECX EDX EBX ESP EBP ESI EDI
+    // 结构体从前到后:      edi esi ebp esp ebx edx ecx eax
+    uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
+
+    // ISR stub push 的 int_no 和 err_code
+    uint32_t int_no, err_code;
+
+    // CPU 自动压入（最先压的在最高地址）
+    uint32_t eip, cs, eflags;
+} regs_t;
+\end{lstlisting}
+
+\begin{warnbox}
+\texttt{regs\_t} 的字段顺序是由汇编 push 顺序\textbf{反向}决定的：
+\begin{itemize}
+  \item 最后 push 的数据在最低地址 → 对应结构体的\textbf{第一个}字段
+  \item 最先 push 的数据在最高地址 → 对应结构体的\textbf{最后一个}字段
+\end{itemize}
+如果顺序搞反，C handler 读到的 \texttt{r->eip} 可能是 \texttt{ds} 的值——
+这种 bug 极难排查。图 \ref{fig:isr-stack} 是你的"参照表"。
+\end{warnbox}
+
+% ============================================================================
+

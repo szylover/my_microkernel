@@ -1,0 +1,27 @@
+% figures/ch07/fig03-bitmap.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % 内存区域
+  \fill[green!20] (0, 0) rectangle (10, 1);
+  \node[font=\small] at (5, 0.5) {可用物理内存区域};
+
+  % bitmap 在区域开头
+  \fill[blue!30] (0, 0) rectangle (0.8, 1);
+  \node[font=\tiny, rotate=90] at (0.4, 0.5) {bitmap};
+
+  % 管理的页
+  \foreach \i in {1,...,9} {
+    \draw[thin, gray] (\i, 0) -- (\i, 1);
+  }
+
+  % 标注
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (0, -0.1) -- (0.8, -0.1) node[midway, below=5pt, font=\scriptsize] {bitmap\_pages};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (0.8, -0.1) -- (10, -0.1) node[midway, below=5pt, font=\scriptsize] {可分配的物理页};
+
+  \node[font=\tiny, above] at (0, 1.1) {\texttt{base}};
+  \node[font=\tiny, above] at (10, 1.1) {\texttt{base + pages * 4K}};
+
+  % 位图 bit 示意
+  \node[font=\tiny\ttfamily, above=0.3cm, text=blue!60!black] at (0.4, 1.1) {每 bit 对应一页};
+\end{tikzpicture}

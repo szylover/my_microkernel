@@ -1,0 +1,63 @@
+\section{\texttt{vmm\_unmap\_page} 与 \texttt{vmm\_unmap\_identity}}
+
+\subsection{解除单页映射}
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+void vmm_unmap_page(uint32_t virt) {
+    if ((virt & 0xFFFu)) return;           // 对齐检查
+
+    uint32_t pdi = pd_index(virt);
+    uint32_t pde = g_kernel_pd.entries[pdi];
+    if (!(pde & PDE_PRESENT)) return;      // 页表不存在
+
+    uint32_t pt_phys = pde & ~0xFFFu;
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
+    pt->entries[pt_index(virt)] = 0;       // PTE 置 0
+
+    if (g_vmm_ready) vmm_invlpg(virt);    // 刷新 TLB
+}
+\end{lstlisting}
+
+\begin{warnbox}
+\texttt{vmm\_unmap\_page} 只断开虚拟→物理的映射，\textbf{不释放物理页}。
+物理页可能被多处引用（如共享内存），释放是调用者的责任。
+典型模式：先 \texttt{vmm\_get\_physical()} 拿到物理地址，再 \texttt{vmm\_unmap\_page()}，
+最后 \texttt{pmm\_free\_page()} 归还物理页。
+\end{warnbox}
+
+\subsection{拆除 Identity Mapping}
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle]
+void vmm_unmap_identity(void) {
+    if (!g_vmm_ready) return;
+
+    uint32_t first_kernel_pde = pd_index(KERNEL_VIRT_OFFSET); // 768
+    uint32_t cleared = 0;
+
+    for (uint32_t i = 0; i < first_kernel_pde; i++) {
+        if (g_kernel_pd.entries[i] & PDE_PRESENT) {
+            g_kernel_pd.entries[i] = 0;
+            cleared++;
+        }
+    }
+
+    // 重新加载 CR3 做全局 TLB 刷新
+    uint32_t pd_phys = VIRT_TO_PHYS(
+        (uint32_t)(uintptr_t)&g_kernel_pd);
+    vmm_load_page_directory(pd_phys);
+}
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{vmm\_unmap\_identity()} 执行后：
+\begin{itemize}
+  \item PDE[0]--PDE[767] 全部清零
+  \item 虚拟地址 \hex{00000000}--\hex{BFFFFFFF} 访问将触发 \#PF
+  \item CR3 被重新加载，TLB 全局刷新
+\end{itemize}
+\end{cpustate}
+
+% ============================================================================
+

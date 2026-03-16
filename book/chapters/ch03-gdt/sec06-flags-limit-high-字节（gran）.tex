@@ -1,0 +1,31 @@
+\section{Flags + Limit High 字节（gran）}
+
+字节 6 的 8 bit 被分成两半使用：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch03/fig06-gran-bit}
+  \caption{gran 字节的 bit 布局}
+\end{figure}
+
+\begin{bitfield}
+  \bit{7}{G (Granularity)：limit 的单位。
+    G=0：limit 单位是字节（最大 $2^{20} - 1 = $ 1MiB）。
+    G=1：limit 单位是 4KiB 页（最大 $2^{20} \times 4096 = $ 4GiB）。
+    平坦模型 limit=\hex{FFFFF} + G=1 覆盖完整 4GiB 地址空间。}
+  \bit{6}{D/B (Default Operation Size)：
+    D=1：32 位段（默认操作数和地址大小是 32 位）。
+    D=0：16 位段。我们在 32 位保护模式下必须设 D=1。}
+  \bit{5}{L (Long mode)：64 位代码段标志。i386 下\textbf{必须为 0}。}
+  \bit{4}{AVL (Available)：CPU 不使用，软件可自由使用。我们设为 0。}
+  \bit{0--3}{limit 的高 4 位 [16:19]。}
+\end{bitfield}
+
+我们的 flags = \hex{C0}：
+
+$$\hex{C0} = 1100\underbrace{0000}_{\text{limit\_hi}}$$
+
+即 G=1, D/B=1, L=0, AVL=0。与 limit\_high = \hex{0F} 合并后 gran = \hex{CF}。
+
+% ============================================================================
+

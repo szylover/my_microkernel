@@ -1,0 +1,43 @@
+\section{引导阶段区域注册}
+\label{sec:vma-boot}
+
+在 \texttt{kmain.c} 中，VMA 初始化后立即注册两个引导时建立的内核区域：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+vma_init();
+
+if (vma_is_ready()) {
+    /* 1. 直接映射区: 内核代码/数据 + 直接映射的物理内存 */
+    vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
+            VMA_READ | VMA_WRITE | VMA_EXEC, "direct-map");
+
+    /* 2. 内核堆区 */
+    vma_add(KHEAP_START,
+            KHEAP_START + KCONFIG_HEAP_INITIAL_PAGES * VMM_PAGE_SIZE,
+            VMA_READ | VMA_WRITE, "kheap");
+}
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{direct-map}：覆盖 \hex{C0000000} 到 \texttt{vmm\_direct\_map\_end()}，
+        包含内核代码（需要 EXEC）、只读数据和读写数据。权限给足 \texttt{rwx}，
+        更细粒度的分段保护留给将来的 \texttt{.text}/\texttt{.rodata} 拆分。
+
+  \item \texttt{kheap}：覆盖 \hex{E0000000} 开始的初始堆区域。
+        堆只做数据 \texttt{rw}，无需 \texttt{x}。
+        堆增长时应同步调用 \texttt{vma\_add} 或更新 end 来跟踪新区域。
+\end{itemize}
+
+\begin{designbox}
+注册 VMA 的时机是"谁建立映射，谁负责注册"：
+\begin{itemize}
+  \item \texttt{vmm\_init()} 建立直接映射 → \texttt{kmain} 注册 \texttt{direct-map}
+  \item \texttt{kmalloc\_init()} 建立堆映射 → \texttt{kmain} 注册 \texttt{kheap}
+  \item \texttt{vmm\_alloc\_pages()} 将来可在内部自动调用 \texttt{vma\_add}
+\end{itemize}
+这比集中在一处注册更不容易遗漏——映射与注册在同一上下文中完成。
+\end{designbox}
+
+% ============================================================================
+

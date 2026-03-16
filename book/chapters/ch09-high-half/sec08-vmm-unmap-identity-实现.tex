@@ -1,0 +1,85 @@
+\section{vmm\_unmap\_identity 实现}
+\label{sec:unmap-identity}
+
+一切指针转换完毕后，调用 \texttt{vmm\_unmap\_identity()} 拆除低地址映射：
+
+\codefile{src/kernel/mm/vmm.c}
+\begin{lstlisting}[style=cstyle, caption={vmm\_unmap\_identity() 完整实现}]
+void vmm_unmap_identity(void) {
+    /*
+     * 拆除 identity mapping（虚拟地址 0x00000000-0xBFFFFFFF）
+     *
+     * [WHY] identity mapping 只是 boot→high-half 过渡期的临时需要。
+     *   现在内核完全运行在 high-half (0xC0000000+)，
+     *   所有指针已通过 PHYS_TO_VIRT 转换，可以安全拆除。
+     *   拆除后，低地址空间留给将来的用户态进程。
+     */
+
+    if (!g_vmm_ready)
+        return;
+
+    uint32_t first_kernel_pde = pd_index(KERNEL_VIRT_OFFSET);
+    /* first_kernel_pde = 768 (0xC0000000 >> 22) */
+    uint32_t cleared = 0;
+
+    /* 步骤 1: 清零 PD[0..767] 中所有有效条目 */
+    for (uint32_t i = 0; i < first_kernel_pde; i++) {
+        if (g_kernel_pd.entries[i] & PDE_PRESENT) {
+            g_kernel_pd.entries[i] = 0;
+            cleared++;
+        }
+    }
+
+    /* 步骤 2: 重新加载 CR3 做全局 TLB 刷新 */
+    uint32_t pd_phys = VIRT_TO_PHYS(
+        (uint32_t)(uintptr_t)&g_kernel_pd);
+    vmm_load_page_directory(pd_phys);
+
+    printk("[vmm] identity mapping removed "
+           "(%u PDEs cleared)\n", (unsigned)cleared);
+}
+\end{lstlisting}
+
+逐步分析：
+
+\begin{enumerate}
+  \item \textbf{计算边界}：\texttt{KERNEL\_VIRT\_OFFSET} $= \hex{C0000000}$，
+        右移 22 位得到 PD index $= 768$。
+        所有低于 768 的 PDE 属于用户态地址空间。
+
+  \item \textbf{清零 PDE}：遍历 PD[0..767]，将所有 Present 的条目置 0。
+        置 0 后 CPU 查页表会发现 Present=0，触发 \#PF。
+
+  \item \textbf{TLB 刷新}：向 \reg{CR3} 重新写入页目录物理地址。
+        x86 规范：写 CR3 会使整个 TLB 无效化（除 Global 页外）。
+        这比逐页调用 \texttt{invlpg} 更高效，因为我们一次性清除了几百个 PDE。
+\end{enumerate}
+
+\begin{cpustate}
+执行 \texttt{vmm\_unmap\_identity()} 后：
+\begin{itemize}
+  \item PD[0..767] 全部为 0（Present=0）
+  \item PD[768..1023] 不变（high-half 映射完好）
+  \item TLB 已刷新，旧的 identity mapping 缓存被清除
+  \item 访问 \hex{00000000}--\hex{BFFFFFFF} 中任何地址 → \#PF
+  \item 内核代码继续通过 \hex{C0000000}+ 正常运行
+\end{itemize}
+\end{cpustate}
+
+\begin{warnbox}
+必须在调用此函数\textbf{之前}完成所有指针转换！
+
+内核的初始化顺序严格为：
+\begin{enumerate}
+  \item \texttt{vmm\_init()} — 建立 identity + high-half 双重映射
+  \item 转换所有低地址指针 → high-half 地址（如 \texttt{g\_mb2\_info}）
+  \item \texttt{vmm\_unmap\_identity()} — 拆除 identity mapping
+\end{enumerate}
+
+如果顺序颠倒（先拆除再转换），转换代码本身不会崩溃（因为
+\texttt{PHYS\_TO\_VIRT} 只是做加法运算），但在拆除之后访问未转换的
+旧指针就会 Page Fault。调试这类问题非常困难，因为症状可能延迟很久才出现。
+\end{warnbox}
+
+% ============================================================================
+

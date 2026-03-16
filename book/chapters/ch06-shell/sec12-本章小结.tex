@@ -1,0 +1,14 @@
+\section{本章小结}
+
+Shell 的核心数据结构：
+
+\begin{enumerate}
+  \item \textbf{\texttt{cmd\_t}}：name + help + fn 函数指针，每个命令一个独立编译单元
+  \item \textbf{\texttt{g\_cmds[]}}：静态指针数组，编译期确定，遍历分发
+  \item \textbf{行缓冲}：栈上 128 字节，tokenize 原地修改（零拷贝）
+  \item \textbf{Console 层}：统一键盘 + 串口输入，屏蔽输入源差异
+\end{enumerate}
+
+Shell 是内核开发阶段最重要的调试工具——后续每实现一个子系统
+都会立即添加对应的调试命令。下一章进入内存管理：PMM（物理内存分配器）。
+

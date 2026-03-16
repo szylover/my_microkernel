@@ -1,0 +1,16 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 开机流程：BIOS → GRUB → 内核 \texttt{\_start}
+  \item 掌握 Multiboot2 header 格式（magic / architecture / length / checksum）
+  \item 理解链接脚本 \texttt{linker.ld}：物理加载地址 1\,MiB、\texttt{.boot} 段、高半区布局
+  \item 掌握 \texttt{boot.asm}：PSE 页目录构造、CR4/CR3/CR0 设置、跳转到高半区
+  \item 理解引导期双重映射（identity + high-half）的必要性
+  \item 理解内核栈设置与 \texttt{kmain} 的 cdecl 调用约定
+  \item 掌握 UART 16550 寄存器与 \texttt{serial\_init()} 初始化步骤
+  \item 了解 \texttt{printk} 的 \texttt{va\_list} 实现与格式说明符
+  \item 理解 Multiboot2 info 结构的 tag 迭代解析
+\end{itemize}
+
+% ============================================================================
+

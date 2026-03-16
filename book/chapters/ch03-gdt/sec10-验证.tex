@@ -1,0 +1,41 @@
+\section{验证}
+
+\begin{tcblisting}{consolebox}
+# 串口输出：
+[init] gdt ok
+\end{tcblisting}
+
+如果 GDT 有误（如 access byte 写错、base/limit 计算错误），CPU 会在
+far jump 时 Triple Fault 并重启。
+
+\subsection{GDB 逐指令验证}
+
+\begin{tcblisting}{consolebox}
+# 终端 A
+«\tps{\$}» «\tin{make DEBUG=1 debug}»
+
+# 终端 B
+«\tps{\$}» «\tin{make gdb}»
+«\tps{(gdb)}» «\tin{b gdt\_flush}»
+«\tps{(gdb)}» «\tin{c}»
+Breakpoint 1, gdt_flush () at gdt_flush.asm:21
+«\tps{(gdb)}» «\tin{info reg cs ds ss}»
+cs  0x8   8           # GRUB 设置的 CS（通常也是 0x08）
+ds  0x10  16          # GRUB 设置的 DS
+ss  0x10  16
+
+«\tps{(gdb)}» «\tin{si}»              # lgdt [eax]
+«\tps{(gdb)}» «\tin{si}»              # jmp 0x08:.flush_cs
+«\tps{(gdb)}» «\tin{info reg cs}»
+cs  0x8   8           # CS 重新加载，hidden cache 已更新
+
+«\tps{(gdb)}» «\tin{si}»              # mov ax, 0x10
+«\tps{(gdb)}» «\tin{si}»              # mov ds, ax
+«\tps{(gdb)}» «\tin{info reg ds}»
+ds  0x10  16          # DS 重新加载
+
+«\tps{(gdb)}» «\tin{c}»               # 继续，应该看到串口打印 [init] gdt ok
+\end{tcblisting}
+
+% ============================================================================
+

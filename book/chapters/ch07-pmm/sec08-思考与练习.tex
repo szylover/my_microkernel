@@ -1,0 +1,29 @@
+\section{思考与练习}
+
+\begin{exercise}
+切换到 buddy 后端（\texttt{KCONFIG\_PMM\_BACKEND=1}），运行 \texttt{pmm state}。
+对比 bitmap 和 buddy 的 \texttt{free} 数量。buddy 为什么可能更少？
+（提示：buddy 的元数据——\texttt{free\_list} 节点和 order 标记——也占物理页。）
+\end{exercise}
+
+\begin{exercise}
+运行 \texttt{pmm alloc 100} → \texttt{pmm state} → \texttt{pmm freeall} → \texttt{pmm state}。
+free 是否完全恢复？如果差了几页，用 \texttt{pmm dump} 查看哪些页没被释放。
+\end{exercise}
+
+\begin{exercise}
+在 \texttt{pmm\_bitmap\_alloc\_page} 中注释掉 round-robin 逻辑
+（\texttt{g\_region\_rr = ri}），改为总是从 region 0 开始扫描。
+连续分配 1000 页后用 \texttt{pmm dump} 查看各 region 的分布。
+和 round-robin 对比有什么不同？
+\end{exercise}
+
+\begin{exercise}
+（挑战）bitmap 分配器不支持连续多页分配。实现一个
+\texttt{pmm\_bitmap\_alloc\_pages(unsigned count)} 函数：
+在位图中找到 \texttt{count} 个连续的 0 bit，全部置 1 并返回起始物理地址。
+这比 buddy 的 order 分配更灵活，但扫描开销更大。
+\end{exercise}
+
+% ============================================================================
+

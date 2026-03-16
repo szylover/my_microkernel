@@ -1,0 +1,19 @@
+% figures/ch06/fig05-tokenize-textbackslash-0-argv-.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % 输入行
+  \foreach \i/\ch in {0/p, 1/m, 2/m, 3/\textvisiblespace, 4/a, 5/l, 6/l, 7/o, 8/c, 9/\textvisiblespace, 10/3, 11/\textbackslash 0} {
+    \node[memcell, minimum width=0.9cm, minimum height=0.6cm, font=\ttfamily\small] (c\i) at (\i*0.95, 0) {\ch};
+  }
+  \node[font=\small, above=0.4cm of c5] {\texttt{line[]} 内容};
+
+  % Tokenize 后
+  \foreach \i/\ch in {0/p, 1/m, 2/m, 3/\textbackslash 0, 4/a, 5/l, 6/l, 7/o, 8/c, 9/\textbackslash 0, 10/3, 11/\textbackslash 0} {
+    \node[memcell, minimum width=0.9cm, minimum height=0.6cm, font=\ttfamily\small] (d\i) at (\i*0.95, -1.5) {\ch};
+  }
+  \node[font=\small, above=0.4cm of d5] {tokenize 后（空格变 \textbackslash 0）};
+
+  % argv pointers
+  \draw[pointer, red] ([yshift=-0.4cm]d0.south) -- (d0.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[0]="pmm"};
+  \draw[pointer, blue] ([yshift=-0.4cm]d4.south) -- (d4.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[1]="alloc"};
+  \draw[pointer, green!50!black] ([yshift=-0.4cm]d10.south) -- (d10.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[2]="3"};
+\end{tikzpicture}

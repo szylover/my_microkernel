@@ -1,0 +1,30 @@
+\section{\texttt{vm\_area\_t} 结构体}
+
+VMA 系统中最基本的数据结构是 \texttt{vm\_area\_t}——描述一段虚拟内存区域：
+
+\codefile{src/include/kernel/vma.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct vm_area {
+    uint32_t    start;      /* 起始虚拟地址（包含，页对齐） */
+    uint32_t    end;        /* 结束虚拟地址（不包含，页对齐） */
+    uint32_t    flags;      /* VMA_READ | VMA_WRITE | VMA_EXEC */
+    const char* name;       /* 人类可读名称, 如 "direct-map", "kheap" */
+} vm_area_t;
+\end{lstlisting}
+
+约定与 Linux 一致：\texttt{[start, end)} 左闭右开，\texttt{start} 和 \texttt{end} 都必须页对齐，
+不同 VMA 之间不允许地址重叠。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig01-vm-area-layout}
+  \caption{\texttt{vm\_area\_t} 内存布局（32 位平台）}
+  \label{fig:vm-area-layout}
+\end{figure}
+
+注意：\texttt{vm\_area\_t} 是\emph{公开的只读视图}，不包含后端内部管理字段（如红黑树颜色、
+父/子指针等）。这保持了接口与实现的解耦——调用者只读 \texttt{vm\_area\_t}，
+后端的内部节点可以包含任意附加字段。
+
+% ============================================================================
+

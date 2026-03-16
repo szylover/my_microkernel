@@ -20,7 +20,7 @@ FLAGS = -interaction=nonstopmode -halt-on-error -shell-escape
 
 all: $(MAIN).pdf
 
-$(MAIN).pdf: $(MAIN).tex preamble.tex chapters/*.tex
+$(MAIN).pdf: $(MAIN).tex preamble.tex chapters/*.tex chapters/**/*.tex figures/**/*.tex
 	$(ENGINE) $(FLAGS) $(MAIN).tex
 	$(ENGINE) $(FLAGS) $(MAIN).tex
 

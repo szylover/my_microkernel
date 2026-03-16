@@ -1,0 +1,16 @@
+% figures/ch06/fig02-cmd_t.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % cmd_t 结构
+  \node[memcell, minimum width=4cm, fill=blue!10, minimum height=0.7cm] (name) {name (const char*)};
+  \node[memcell, minimum width=4cm, fill=green!10, minimum height=0.7cm, above=0cm of name] (help) {help (const char*)};
+  \node[memcell, minimum width=4cm, fill=orange!10, minimum height=0.7cm, above=0cm of help] (fn) {fn (cmd\_fn\_t)};
+
+  \node[left=0.3cm of name, font=\small\bfseries] {cmd\_t};
+
+  % Pointers
+  \node[right=2cm of name, font=\ttfamily\small] (namestr) {"cls"};
+  \draw[pointer] (name.east) -- (namestr.west);
+
+  \node[right=2cm of fn, font=\ttfamily\small] (fnaddr) {cmd\_cls\_main()};
+  \draw[pointer] (fn.east) -- (fnaddr.west);
+\end{tikzpicture}

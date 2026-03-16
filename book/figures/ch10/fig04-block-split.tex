@@ -1,0 +1,15 @@
+% figures/ch10/fig04-block-split.tex — auto-extracted from chapter source
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.65cm, font=\ttfamily\small, anchor=west}]
+  \node[font=\bfseries\small, anchor=west] at (-0.5, 1.2) {拆分前：};
+  \node[cell, minimum width=1.8cm, fill=red!12]  at (0, 0.5) {\small hdr};
+  \node[cell, minimum width=7cm, fill=green!12]   at (1.8, 0.5) {\small 大空闲块};
+  \node[font=\bfseries\small, anchor=west] at (-0.5, -0.3) {拆分后：};
+  \node[cell, minimum width=1.8cm, fill=red!12]   at (0, -1) {\small hdr};
+  \node[cell, minimum width=2.5cm, fill=orange!15] at (1.8, -1) {\small 已分配};
+  \node[cell, minimum width=1.8cm, fill=red!12]   at (4.3, -1) {\small new};
+  \node[cell, minimum width=2.7cm, fill=green!12]  at (6.1, -1) {\small 新空闲};
+  \draw[{|}-{|}, thick] (1.8, -1.9) -- (4.3, -1.9);
+  \node[font=\scriptsize, below] at (3.05, -1.9) {\texttt{size}};
+  \draw[{|}-{|}, thick] (6.1, -1.9) -- (8.8, -1.9);
+  \node[font=\scriptsize, below] at (7.45, -1.9) {remaining};
+\end{tikzpicture}

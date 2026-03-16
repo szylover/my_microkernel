@@ -1,0 +1,105 @@
+\section{First-Fit 空闲链表}
+
+\subsection{\texttt{block\_header\_t} 结构}
+
+First-Fit 后端把堆区域切成若干块，每块前面有小 header，所有块串成双向链表：
+
+\codefile{src/kernel/mm/heap\_first\_fit.c}
+\begin{lstlisting}[style=cstyle]
+typedef struct block_header {
+    size_t size;                   /* 用户数据区大小（不含 header） */
+    int is_free;                   /* 0=已分配, 1=空闲 */
+    struct block_header* next;
+    struct block_header* prev;
+} block_header_t;
+#define HEADER_SIZE  ((sizeof(block_header_t) + 7u) & ~7u)  /* 16B */
+#define ALIGN8(x)   (((x) + 7u) & ~7u)
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig03-block-header-layout}
+  \caption{\texttt{block\_header\_t} 与用户数据区的内存布局}
+  \label{fig:block-header-layout}
+\end{figure}
+
+\texttt{kmalloc} 返回 \texttt{block + HEADER\_SIZE}；\texttt{kfree} 时往回退 16 字节即找到 header。
+32 位下 $\texttt{sizeof} = 4{+}4{+}4{+}4 = 16$，天然 8 字节对齐。
+
+% ---------------------------------------------------------------------------
+\subsection{分配：遍历 + 拆分}
+
+\texttt{heap\_first\_fit\_alloc(size)} 步骤：
+① 对齐 \texttt{ALIGN8(size)}；
+② 从头遍历找第一个 \texttt{is\_free \&\& size >= need}；
+③ 若块比请求大得多（余 $>$ \texttt{HEADER\_SIZE + 8}）则拆分；
+④ \texttt{is\_free = 0}，返回数据区指针。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig04-block-split}
+  \caption{First-Fit 分配时的块拆分}
+  \label{fig:block-split}
+\end{figure}
+
+核心拆分代码：
+
+\codefile{src/kernel/mm/heap\_first\_fit.c}
+\begin{lstlisting}[style=cstyle]
+if (curr->size - size > HEADER_SIZE + 8) {
+    block_header_t* new_block =
+        (block_header_t*)((uint8_t*)curr + HEADER_SIZE + size);
+    new_block->size    = curr->size - size - HEADER_SIZE;
+    new_block->is_free = 1;
+    new_block->next = curr->next;  new_block->prev = curr;
+    if (curr->next) curr->next->prev = new_block;
+    curr->size = size;
+    curr->next = new_block;
+}
+curr->is_free = 0;
+return (void*)((uint8_t*)curr + HEADER_SIZE);
+\end{lstlisting}
+
+\begin{thinkbox}
+拆分阈值 \texttt{HEADER\_SIZE + 8} 的含义：剩余空间必须够放 header（16\,B）加最小数据（8\,B），
+否则拆出的碎片永远不可用。若改成 \texttt{HEADER\_SIZE + 1}，返回的指针将不满足 8 字节对齐——
+许多 CPU 指令（如 SSE）会因此触发异常。
+\end{thinkbox}
+
+% ---------------------------------------------------------------------------
+\subsection{释放与合并}
+
+\texttt{heap\_first\_fit\_free(ptr)} 步骤：
+① \texttt{block = ptr - HEADER\_SIZE}；
+② 范围检查；
+③ \texttt{is\_free = 1}；
+④ 向后合并（while \texttt{next} 也 free 就 \texttt{merge\_with\_next}）；
+⑤ 向前合并（若 \texttt{prev} 也 free 让其吞并自己）。
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch10/fig05-block-coalesce}
+  \caption{相邻空闲块的合并}
+  \label{fig:block-coalesce}
+\end{figure}
+
+\codefile{src/kernel/mm/heap\_first\_fit.c}
+\begin{lstlisting}[style=cstyle]
+static void merge_with_next(block_header_t* block) {
+    block_header_t* victim = block->next;
+    block->size += HEADER_SIZE + victim->size;
+    block->next  = victim->next;
+    if (victim->next) victim->next->prev = block;
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么需要双向链表？
+
+单向链表向后合并（吃 next）没问题，但向前合并需要从 block 找前驱——
+单向链表要 $O(n)$ 遍历。双向链表多花 4\,B 存 \texttt{prev}，换来
+$O(1)$ 向前合并，是经典的空间换时间。
+\end{whybox}
+
+% ============================================================================
+

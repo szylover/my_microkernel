@@ -1,0 +1,8 @@
+% figures/ch03/fig09-gdt_flush.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  \node[memcell, minimum width=4cm, fill=orange!10] (ret) {return address};
+  \node[memaddr, left=0.3cm of ret] {ESP →};
+  \node[memcell, minimum width=4cm, fill=green!10, above=0cm of ret] (arg) {gdtr\_ptr};
+  \node[memaddr, left=0.3cm of arg] {ESP+4 →};
+  \node[above=0.3cm of arg, font=\scriptsize\itshape] {调用者的 push \&gdtr};
+\end{tikzpicture}

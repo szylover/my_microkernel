@@ -1,0 +1,26 @@
+\section{IRQ Mask 操作}
+
+\codefile{src/kernel/arch/pic.c}
+\begin{lstlisting}[style=cstyle]
+void pic_clear_mask(uint8_t irq) {
+    uint16_t port = (irq < 8) ? PIC1_DATA : PIC2_DATA;
+    uint8_t  line = (uint8_t)(irq & 7u);
+
+    uint8_t mask = inb(port);         // 读当前 mask
+    mask &= (uint8_t)~(1u << line);   // 清除对应 bit（0=允许）
+    outb(port, mask);                  // 写回
+}
+
+void pic_set_mask(uint8_t irq) {
+    // ...同理，把对应 bit 置 1（1=屏蔽）
+}
+\end{lstlisting}
+
+PIC 的 mask 寄存器（IMR）是一个 8-bit 值，每 bit 对应一个 IRQ：
+\begin{itemize}
+  \item bit = 0：允许该 IRQ 通过
+  \item bit = 1：屏蔽该 IRQ
+\end{itemize}
+
+% ============================================================================
+

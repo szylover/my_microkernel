@@ -1,0 +1,13 @@
+% figures/ch10/fig06-heap-brk.tex — auto-extracted from chapter source
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.7cm, font=\small, anchor=west}]
+  \node[cell, minimum width=4.5cm, fill=green!12] at (0, 0)
+    {\parbox{4cm}{\centering 已提交\\（有物理页）}};
+  \node[cell, minimum width=4.5cm, fill=gray!10, pattern=north east lines,
+        pattern color=gray!30] at (4.5, 0)
+    {\parbox{4.2cm}{\centering\small 未映射\\（PTE=0）}};
+  \node[font=\ttfamily\scriptsize, below] at (0, -0.35) {heap\_start};
+  \node[font=\ttfamily\scriptsize, below, text=blue!60!black] at (4.5,-0.35) {heap\_brk};
+  \node[font=\ttfamily\scriptsize, below] at (9, -0.35) {heap\_end};
+  \draw[-{Stealth[length=4pt]}, thick, blue!60!black]
+    (4.5, -0.9) -- (5.8, -0.9) node[midway, below, font=\scriptsize] {grow};
+\end{tikzpicture}

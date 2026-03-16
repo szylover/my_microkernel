@@ -1,0 +1,32 @@
+\section{Page Fault 集成}
+\label{sec:vma-pf}
+
+\#PF handler（ISR 14）收到故障地址 \texttt{cr2} 和错误码 \texttt{err\_code} 后，
+调用 \texttt{vma\_find(cr2)} 可以产生三种诊断结果：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch11/fig10-pf-vma-diag}
+  \caption{\#PF handler 中的 VMA 三种诊断}
+  \label{fig:pf-vma-diag}
+\end{figure}
+
+\begin{enumerate}
+  \item \textbf{Case 1: 无 VMA}（\texttt{vma\_find} 返回 NULL）——
+        该地址不属于任何已注册区域，是真正的非法访问。
+        内核态触发则 panic；用户态触发则杀死进程。
+
+  \item \textbf{Case 2: 权限不匹配}——地址属于某个 VMA，但操作违反权限。
+        例如写入一个仅 \texttt{VMA\_READ} 的区域。
+        对应 Linux 的 \texttt{SIGSEGV}。
+
+  \item \textbf{Case 3: 合法缺页（demand paging candidate）}——
+        地址属于 VMA 且权限匹配，只是物理页尚未分配。
+        分配物理页 → 建立映射 → 返回，程序继续运行。
+\end{enumerate}
+
+当前实现中我们尚未启用 demand paging，所有映射在 \texttt{vmm\_alloc\_pages} 时
+一步到位。但 VMA 框架为将来的按需分页奠定了基础。
+
+% ============================================================================
+

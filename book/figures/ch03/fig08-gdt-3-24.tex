@@ -1,0 +1,23 @@
+% figures/ch03/fig08-gdt-3-24.tex — auto-extracted from chapter source
+\begin{tikzpicture}[node distance=0cm]
+  % GDT array in memory
+  \node[memcell, minimum width=9cm, minimum height=0.8cm, fill=gray!10] (e0) {
+    00 00 00 00 00 00 00 00
+  };
+  \node[left=0.5cm of e0, font=\small\bfseries] {gdt[0] (Null)};
+
+  \node[memcell, minimum width=9cm, minimum height=0.8cm, fill=green!10, above=0cm of e0] (e1) {
+    FF FF 00 00 00 9A CF 00
+  };
+  \node[left=0.5cm of e1, font=\small\bfseries] {gdt[1] (Code)};
+
+  \node[memcell, minimum width=9cm, minimum height=0.8cm, fill=blue!10, above=0cm of e1] (e2) {
+    FF FF 00 00 00 92 CF 00
+  };
+  \node[left=0.5cm of e2, font=\small\bfseries] {gdt[2] (Data)};
+
+  % GDTR arrow
+  \node[left=3.5cm of e0, font=\small] (gdtr) {GDTR};
+  \draw[pointer] (gdtr.east) -- (e0.west);
+  \node[below=0.1cm of gdtr, font=\scriptsize\ttfamily] {limit=23, base=\&gdt};
+\end{tikzpicture}

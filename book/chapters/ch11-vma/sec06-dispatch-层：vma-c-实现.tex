@@ -1,0 +1,44 @@
+\section{Dispatch 层：\texttt{vma.c} 实现}
+
+\texttt{vma.c} 的职责非常简单——校验后端是否已注册，然后转发：
+
+\codefile{src/kernel/mm/vma.c}
+\begin{lstlisting}[style=cstyle]
+static const vma_ops_t* g_vma_ops = NULL;
+static int g_vma_ready = 0;
+
+void vma_register_backend(const vma_ops_t* ops) {
+    g_vma_ops = ops;
+}
+
+void vma_init(void) {
+    if (!g_vma_ops) {
+        printk("[vma] no backend registered\n");
+        return;
+    }
+    g_vma_ops->init();
+    g_vma_ready = 1;
+    printk("[vma] backend: %s, init ok\n", g_vma_ops->name);
+}
+
+int vma_add(uint32_t start, uint32_t end,
+            uint32_t flags, const char* name) {
+    if (!g_vma_ops || !g_vma_ready) return -1;
+    return g_vma_ops->add(start, end, flags, name);
+}
+\end{lstlisting}
+
+其余 \texttt{vma\_remove}/\texttt{vma\_find}/\texttt{vma\_dump}/\texttt{vma\_count}
+格式完全一致—— \texttt{if (!ready) return fallback; return g\_vma\_ops->xxx(...);}。
+
+\begin{designbox}
+Dispatch 层看似"什么都没做"，但它带来三个好处：
+\begin{enumerate}
+  \item \textbf{编译期解耦}——调用者只 \texttt{\#include "vma.h"}，不需要知道后端头文件；
+  \item \textbf{运行时切换}——\texttt{vma\_register\_backend} 在 init 前随时可换后端；
+  \item \textbf{安全守卫}——未初始化时所有 API 返回安全默认值，不会空指针崩溃。
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+

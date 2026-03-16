@@ -1,0 +1,154 @@
+\section{PS/2 键盘驱动：\texttt{keyboard.c}}
+
+\subsection{Scancode Set 1}
+
+PS/2 键盘按下键时发送一个 \term{make code}（0x00--0x7F），
+释放时发送 \term{break code}（make code | 0x80）。
+
+\codefile{src/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=cstyle]
+// Scancode Set 1 基础映射（部分）
+static const char scancode_map[0x40] = {
+    /* 0x00 */ 0,  0, '1','2','3','4','5','6','7','8','9','0','-','=',
+    /* 0x0E */ '\b', '\t',
+    /* 0x10 */ 'q','w','e','r','t','y','u','i','o','p','[',']','\n', 0,
+    /* 0x1E */ 'a','s','d','f','g','h','j','k','l',';','\'','`', 0, '\\',
+    /* 0x2C */ 'z','x','c','v','b','n','m',',','.','/', 0,  0,  0,  ' ',
+};
+\end{lstlisting}
+
+\begin{thinkbox}
+为什么键盘发送的是 scancode 而非 ASCII？
+
+因为键盘是一个"物理开关阵列"——它只知道哪个位置的键被按了或松了。
+把 scancode 翻译成哪个字符取决于\textbf{键盘布局}（US、UK、DE、中文等）。
+同一个 scancode 0x10 在 QWERTY 布局是 'q'，在 AZERTY 布局是 'a'。
+翻译工作由操作系统（或键盘驱动）完成。
+\end{thinkbox}
+
+\subsection{Shift 状态机}
+
+\codefile{src/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=cstyle]
+static volatile uint8_t g_shift_down;  // Shift 是否被按住
+
+static void keyboard_handle_scancode(uint8_t sc) {
+    // 0xE0 前缀：扩展键（方向键等），暂时忽略
+    if (sc == 0xE0u) { g_e0_prefix = 1; return; }
+    if (g_e0_prefix) { g_e0_prefix = 0; return; }
+
+    uint8_t released = (sc & 0x80u) != 0;  // 最高位=1 表示松开
+    uint8_t code = sc & 0x7Fu;              // 低 7 位 = make code
+
+    // Left Shift (0x2A) 或 Right Shift (0x36)
+    if (code == 0x2Au || code == 0x36u) {
+        g_shift_down = released ? 0 : 1;
+        return;
+    }
+
+    if (released) return;  // 只处理按下事件
+
+    // 根据 Shift 状态选择映射表
+    char ch = g_shift_down ? scancode_map_shift[code]
+                           : scancode_map[code];
+    if (ch) kbd_buf_put(ch);
+}
+\end{lstlisting}
+
+\subsection{环形缓冲区}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch05/fig04-irq-handler-head-tail}
+  \caption{键盘环形缓冲区：IRQ handler 写 head，主循环读 tail}
+\end{figure}
+
+\codefile{src/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=cstyle]
+#define KBD_BUF_SIZE 128
+
+static volatile char    g_kbd_buf[KBD_BUF_SIZE];
+static volatile uint8_t g_kbd_head;  // 下一个写位置
+static volatile uint8_t g_kbd_tail;  // 下一个读位置
+
+static void kbd_buf_put(char c) {
+    uint8_t next = (g_kbd_head + 1) % KBD_BUF_SIZE;
+    if (next == g_kbd_tail) return;  // 满了 → 丢弃
+    g_kbd_buf[g_kbd_head] = c;
+    g_kbd_head = next;
+}
+
+static int kbd_buf_get(char* out) {
+    if (g_kbd_tail == g_kbd_head) return 0;  // 空
+    *out = g_kbd_buf[g_kbd_tail];
+    g_kbd_tail = (g_kbd_tail + 1) % KBD_BUF_SIZE;
+    return 1;
+}
+\end{lstlisting}
+
+\begin{designbox}
+为什么用环形缓冲区而非普通数组？
+
+\begin{enumerate}
+  \item \textbf{解耦生产者和消费者}：IRQ handler（生产者）在中断上下文执行，
+    必须尽快返回。Shell 主循环（消费者）在非中断上下文运行，可以慢慢处理。
+  \item \textbf{避免数据拷贝}：环形缓冲区通过 head/tail 指针管理读写位置，
+    不需要移动数组元素。
+  \item \textbf{线程安全}：单生产者 + 单消费者的环形缓冲区在不需要锁的情况下
+    就是线程安全的（原子的 head/tail 更新）。
+\end{enumerate}
+\end{designbox}
+
+\begin{thinkbox}
+\texttt{g\_kbd\_buf} 和 \texttt{g\_kbd\_head/tail} 为什么要声明为 \texttt{volatile}？
+
+因为它们在两个"执行流"中被访问：
+\begin{itemize}
+  \item IRQ handler（中断上下文）写 \texttt{g\_kbd\_head}
+  \item \texttt{keyboard\_getc}（主循环）读 \texttt{g\_kbd\_head}
+\end{itemize}
+没有 \texttt{volatile}，编译器可能把 \texttt{g\_kbd\_head} 缓存在寄存器中，
+导致主循环永远看到旧值——缓冲区"永远为空"。
+\end{thinkbox}
+
+\subsection{公开 API}
+
+\codefile{src/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=cstyle]
+// 阻塞等待一个字符（hlt 直到 IRQ 把字符放入缓冲区）
+char keyboard_getc(void) {
+    char c;
+    while (!keyboard_try_getc(&c)) {
+        __asm__ volatile("hlt");  // 等下一个中断
+    }
+    return c;
+}
+
+// 非阻塞尝试读取（0=无字符，1=读到一个）
+int keyboard_try_getc(char* out) {
+    return kbd_buf_get(out);
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么用 \texttt{hlt} 而非空循环？
+
+\texttt{hlt} 让 CPU 进入低功耗状态直到下一个中断。空循环（\texttt{while(1)\{\}}）
+让 CPU 100\% 占用，白白浪费电力和 QEMU 宿主机 CPU 资源。
+\end{whybox}
+
+\subsection{\texttt{keyboard\_init}：注册 + 开 IRQ}
+
+\codefile{src/kernel/drivers/keyboard.c}
+\begin{lstlisting}[style=cstyle]
+void keyboard_init(void) {
+    irq_install_handler(1, keyboard_irq1_handler);
+    pic_clear_mask(1);  // 允许 IRQ1 通过 PIC
+}
+\end{lstlisting}
+
+注意此时 EFLAGS.IF 仍然是 0（中断关闭）。IRQ handler 不会触发，
+直到 \texttt{kmain} 末尾执行 \texttt{\_\_asm\_\_ volatile("sti")}。
+
+% ============================================================================
+

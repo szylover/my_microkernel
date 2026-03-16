@@ -1,0 +1,32 @@
+\section{后端切换：\texttt{kconfig.h}}
+
+三种后端已全部实现，通过 \texttt{kconfig.h} 的编译期开关选择：
+
+\codefile{src/include/kernel/kconfig.h}
+\begin{lstlisting}[style=cstyle]
+/*  0 = sorted-array  — 排序数组，简单稳定，早期默认
+ *  1 = rbtree         — 红黑树，O(log n) 全操作
+ *  2 = maple-tree     — B+ tree 变体，高扇出缓存友好
+ */
+#define KCONFIG_VMA_BACKEND  0
+\end{lstlisting}
+
+\texttt{kmain.c} 中根据宏值选择后端：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+#if KCONFIG_VMA_BACKEND == 0
+    vma_register_backend(vma_sorted_array_get_ops());
+#elif KCONFIG_VMA_BACKEND == 1
+    vma_register_backend(vma_rbtree_get_ops());
+#elif KCONFIG_VMA_BACKEND == 2
+    vma_register_backend(vma_maple_get_ops());
+#endif
+\end{lstlisting}
+
+修改 \texttt{KCONFIG\_VMA\_BACKEND} 后 \texttt{make iso}，
+用 \texttt{vma count} 命令确认当前加载的后端名称。
+\texttt{vma test} 自测试对所有三种后端均通过。
+
+% ============================================================================
+

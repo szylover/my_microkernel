@@ -1,0 +1,80 @@
+\section{链接脚本 \texttt{linker.ld} 详解}
+
+链接脚本控制 ELF 各段的虚拟地址（VMA）和物理地址（LMA）。
+对于高半区内核（high-half kernel），这两者不同：
+
+\codefile{src/boot/linker.ld}
+\begin{lstlisting}[style=cstyle, language={}]
+OUTPUT_FORMAT(elf32-i386)
+ENTRY(_start)
+KERNEL_VIRT_BASE = 0xC0000000;
+
+SECTIONS {
+    . = 1M;    /* 物理加载地址从 1 MiB 开始 */
+    __kernel_phys_start = .;
+
+    /* Boot 段：物理地址链接 + 物理地址加载 */
+    .boot ALIGN(4096) : {
+        KEEP(*(.multiboot_header))
+        *(.boot .boot.*)
+    }
+    .boot_bss ALIGN(4096) (NOLOAD) : {
+        *(.boot_bss .boot_bss.*)
+    }
+
+    /* 切换到高半区虚拟地址 */
+    . += KERNEL_VIRT_BASE;
+    __kernel_virt_start = .;
+
+    /* 内核段：虚拟地址是 0xC01xxxxx，物理地址通过 AT() 回到 1M+ */
+    .text ALIGN(4096) : AT(ADDR(.text) - KERNEL_VIRT_BASE) {
+        *(.text .text.*)
+    }
+    .rodata ALIGN(4096) : AT(ADDR(.rodata) - KERNEL_VIRT_BASE) {
+        *(.rodata .rodata.*)
+    }
+    .data ALIGN(4096) : AT(ADDR(.data) - KERNEL_VIRT_BASE) {
+        *(.data .data.*)
+    }
+    .bss ALIGN(4096) (NOLOAD) : AT(ADDR(.bss) - KERNEL_VIRT_BASE) {
+        *(COMMON)
+        *(.bss .bss.*)
+    }
+    __kernel_virt_end = .;
+    __kernel_phys_end = __kernel_virt_end - KERNEL_VIRT_BASE;
+}
+\end{lstlisting}
+
+核心要点：
+
+\begin{itemize}
+  \item \textbf{\texttt{. = 1M;}}——位置计数器从 1\,MiB 开始，GRUB 将内核加载到此处。
+
+  \item \textbf{\texttt{.boot} 段}——包含 Multiboot2 header 和早期引导代码。
+        这些代码在分页开启前执行，必须链接在物理地址上（否则 EIP 不对）。
+        \texttt{KEEP} 确保 \texttt{.multiboot\_header} 不被垃圾回收优化掉。
+
+  \item \textbf{\texttt{. += KERNEL\_VIRT\_BASE;}}——位置计数器跳到
+        \hex{C0000000} + 当前偏移，后续段链接在高半区虚拟地址。
+
+  \item \textbf{\texttt{AT(ADDR(.text) - KERNEL\_VIRT\_BASE)}}——
+        ELF 的 \texttt{p\_vaddr} = \hex{C01xxxxx}（链接地址），
+        但 \texttt{p\_paddr} = \hex{001xxxxx}（加载地址）。
+        GRUB 按 \texttt{p\_paddr} 加载到物理 RAM，
+        但代码中所有符号引用用的是虚拟地址——分页开启后才能正确解析。
+
+  \item \textbf{\texttt{\_\_kernel\_phys\_start}/\texttt{\_\_kernel\_phys\_end}}——
+        供 PMM 用来保留内核占用的物理内存，避免被分配出去。
+\end{itemize}
+
+\begin{thinkbox}
+如果去掉 \texttt{AT()} 宏会发生什么？
+
+ELF 的 \texttt{p\_paddr} 和 \texttt{p\_vaddr} 将相同（都是 \hex{C01xxxxx}）。
+GRUB 会尝试把内核加载到物理地址 \hex{C01xxxxx} ≈ 3\,GiB——
+如果机器只有 256\,MiB 内存，加载直接失败。
+即使内存足够，1\,MiB 以下的 BIOS 区域也已经错过，浪费了低端可用 RAM。
+\end{thinkbox}
+
+% ============================================================================
+

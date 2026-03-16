@@ -1,0 +1,21 @@
+\section{vmm\_init 后的双重映射}
+
+经过第~\ref{ch:vmm}~章的 \texttt{vmm\_init()}，临时 PSE 映射被 4\,KiB 细粒度页表替换，
+但 identity mapping 仍然保留。此时每个物理页 $P$ 有两个虚拟地址：
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  \textbf{映射类型} & \textbf{虚拟地址} \\
+  \midrule
+  Identity    & $P$（虚拟 $=$ 物理）\\
+  High-half   & $P + \hex{C0000000}$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+这意味着同一块物理内存可以通过两个不同的虚拟地址访问——这是一种浪费，
+也为将来的用户态进程留下了安全隐患。下一步就是拆除 identity mapping。
+
+% ============================================================================
+

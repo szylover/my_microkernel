@@ -1,0 +1,16 @@
+% figures/ch10/fig02-kmalloc-dispatch.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=3.2cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[box, fill=blue!8]   (caller) at (0, 0)    {调用者 (VMA / Shell)};
+  \node[box, fill=yellow!12](api)    at (0, -1.3)  {\texttt{kmalloc()} / \texttt{kfree()}};
+  \node[box, fill=orange!12](disp)   at (0, -2.6)  {\texttt{kmalloc.c} dispatch};
+  \node[box, fill=green!12] (ff)     at (-2.8,-4.0){\texttt{heap\_first\_fit.c}};
+  \node[box, fill=green!12] (slab)   at (2.8,-4.0) {\texttt{heap\_slab.c}};
+  \draw[arr] (caller)--(api);
+  \draw[arr] (api)--(disp);
+  \draw[arr] (disp)--(ff);
+  \draw[arr] (disp)--(slab);
+\end{tikzpicture}

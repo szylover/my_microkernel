@@ -1,0 +1,36 @@
+% figures/ch11/fig08-maple-node.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, minimum width=1.0cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  % Internal node
+  \node[font=\small\bfseries] at (-1.5, 0.3) {内部节点:};
+  \node[cell, fill=orange!15] (p0) at (0, 0) {P0};
+  \node[cell, fill=orange!15] (p1) at (1.0, 0) {P1};
+  \node[cell, fill=orange!15] (p2) at (2.0, 0) {$\cdots$};
+  \node[cell, fill=orange!15] (p8) at (3.0, 0) {P8};
+
+  \node[cell, fill=blue!10] (c0) at (0, -1.0) {C0};
+  \node[cell, fill=blue!10] (c1) at (1.0, -1.0) {C1};
+  \node[cell, fill=blue!10] (c2) at (2.0, -1.0) {$\cdots$};
+  \node[cell, fill=blue!10] (c9) at (3.0, -1.0) {C9};
+
+  \node[font=\scriptsize\color{gray}] at (4.5, 0) {9 pivots};
+  \node[font=\scriptsize\color{gray}] at (4.5, -1.0) {10 children};
+
+  % Leaf node
+  \node[font=\small\bfseries] at (-1.5, -2.5) {叶节点:};
+  \node[cell, fill=orange!15] at (0, -2.8) {P0};
+  \node[cell, fill=orange!15] at (1.0, -2.8) {P1};
+  \node[cell, fill=orange!15] at (2.0, -2.8) {$\cdots$};
+  \node[cell, fill=orange!15] at (3.0, -2.8) {P8};
+
+  \node[cell, fill=green!12] at (0, -3.8) {VMA};
+  \node[cell, fill=green!12] at (1.0, -3.8) {VMA};
+  \node[cell, fill=green!12] at (2.0, -3.8) {$\cdots$};
+  \node[cell, fill=green!12] at (3.0, -3.8) {VMA};
+
+  \node[font=\scriptsize\color{gray}] at (4.5, -2.8) {9 pivots};
+  \node[font=\scriptsize\color{gray}] at (4.5, -3.8) {10 VMA ptrs};
+\end{tikzpicture}

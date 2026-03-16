@@ -1,0 +1,23 @@
+% figures/ch11/fig05-vma-sa-find.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, minimum width=2.8cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  hit/.style={fill=green!20},
+  miss/.style={fill=red!10},
+]
+  \node[cell, fill=blue!8] (a0) at (0, 0) {[0x1000, 0x5000)};
+  \node[cell, fill=blue!8] (a1) at (2.8, 0) {[0x8000, 0xA000)};
+  \node[cell, fill=blue!8] (a2) at (5.6, 0) {[0xC000, 0xF000)};
+
+  % find(0x9000) → hit
+  \draw[-{Stealth[length=4pt]}, thick, green!50!black]
+    (4.2, 1.0) -- (4.2, 0.4);
+  \node[font=\scriptsize\color{green!50!black}] at (4.2, 1.2)
+    {find(0x9000) → area[1] ✓};
+
+  % find(0xB000) → miss (gap)
+  \draw[-{Stealth[length=4pt]}, thick, red!50!black]
+    (5.0, -1.0) -- (5.0, -0.4);
+  \node[font=\scriptsize\color{red!50!black}] at (5.0, -1.2)
+    {find(0xB000) → NULL (空洞)};
+\end{tikzpicture}

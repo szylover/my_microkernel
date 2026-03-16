@@ -1,0 +1,37 @@
+\section{Shell 验证}
+
+编译并启动 QEMU 后，可以用 \texttt{vmm} 命令验证页表状态：
+
+\begin{tcblisting}{consolebox}
+«\tps{\$}» «\tin{make iso \&\& make run}»
+...
+[vmm] init: replacing boot PSE with 4KiB page tables...
+[vmm] mapping phys 0x00000000 - 0x10000000
+[vmm] page directory: virt=0xc01xx000 phys=0x001xx000
+[vmm] loading new CR3...
+[vmm] 4KiB paging active! mapped 262144 KiB (131072 pages, 128 page tables)
+[vmm] identity:  0x00000000 - 0x10000000
+[vmm] high-half: 0xc0000000 - 0xd0000000
+[vmm] alloc area: 0xd0000000 - 0xFFFFFFFF
+
+«\tpk{>}» «\tin{vmm}»
+  PD index  Phys PT addr  Flags
+  0         0x001xx000    P W
+  1         0x001xx000    P W
+  ...
+  768       0x002xx000    P W
+  ...
+
+«\tpk{>}» «\tin{vmm 0xC0000000}»
+  virt=0xC0000000 -> phys=0x00000000 flags=P W
+\end{tcblisting}
+
+启动日志确认：
+\begin{itemize}
+  \item 物理 \hex{00000000}--\hex{10000000}（256\,MiB）被双重映射
+  \item 分配了 128 个 Page Table（identity 64 + high-half 64）
+  \item bump allocator 从 \hex{D0000000} 开始
+\end{itemize}
+
+% ============================================================================
+

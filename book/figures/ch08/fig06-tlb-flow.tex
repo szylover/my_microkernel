@@ -1,0 +1,17 @@
+% figures/ch08/fig06-tlb-flow.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=3pt]}, thick},
+]
+  \node[box, fill=blue!10]   (cpu)  at (0, 0)   {CPU 发出\\虚拟地址};
+  \node[box, fill=green!15]  (tlb)  at (4, 0)   {TLB 查找};
+  \node[box, fill=yellow!15] (hit)  at (8, 1)   {命中 → 物理地址};
+  \node[box, fill=red!10]    (miss) at (8, -1)  {未命中 → 走页表};
+  \node[box, fill=orange!10] (walk) at (12, -1) {PDE → PTE\\填入 TLB};
+
+  \draw[arr] (cpu) -- (tlb);
+  \draw[arr] (tlb) -- (hit)  node[midway, above, font=\scriptsize\itshape] {hit};
+  \draw[arr] (tlb) -- (miss) node[midway, below, font=\scriptsize\itshape] {miss};
+  \draw[arr] (miss) -- (walk);
+  \draw[arr, dashed] (walk) |- (hit);
+\end{tikzpicture}

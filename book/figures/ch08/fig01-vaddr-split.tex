@@ -1,0 +1,23 @@
+% figures/ch08/fig01-vaddr-split.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  box/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west},
+]
+  % 虚拟地址 32-bit 分段
+  \node[font=\bfseries\small] at (-1.5, 0.35) {虚拟地址};
+  \node[box, minimum width=3cm, fill=red!15]   (pdi) at (0, 0) {PD index};
+  \node[box, minimum width=3cm, fill=green!15] (pti) at (3, 0) {PT index};
+  \node[box, minimum width=3cm, fill=blue!15]  (off) at (6, 0) {Offset};
+
+  % bit 标注
+  \node[font=\scriptsize, above] at (0, 0.35) {31};
+  \node[font=\scriptsize, above] at (2.95, 0.35) {22};
+  \node[font=\scriptsize, above] at (3.05, 0.35) {21};
+  \node[font=\scriptsize, above] at (5.95, 0.35) {12};
+  \node[font=\scriptsize, above] at (6.05, 0.35) {11};
+  \node[font=\scriptsize, above] at (9, 0.35) {0};
+
+  % 尺寸标注
+  \node[font=\scriptsize\itshape, below] at (1.5, -0.05) {10 bits};
+  \node[font=\scriptsize\itshape, below] at (4.5, -0.05) {10 bits};
+  \node[font=\scriptsize\itshape, below] at (7.5, -0.05) {12 bits};
+\end{tikzpicture}

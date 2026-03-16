@@ -1,0 +1,23 @@
+% figures/ch05/fig05-shell.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  block/.style={draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, font=\small},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  \node[block, fill=gray!10]   (key)  {键盘按键};
+  \node[block, fill=blue!10, right=1.5cm of key]  (pic)  {PIC (IRQ1)};
+  \node[block, fill=orange!10, right=1.5cm of pic] (cpu)  {CPU};
+  \node[block, fill=green!10, below=1cm of cpu]    (stub) {irq1 stub (asm)};
+  \node[block, fill=green!10, below=0.8cm of stub] (disp) {irq\_handler\_c};
+  \node[block, fill=cyan!10, below=0.8cm of disp]  (kbd)  {keyboard\_irq1\_handler};
+  \node[block, fill=yellow!10, below=0.8cm of kbd]  (buf)  {g\_kbd\_buf};
+  \node[block, fill=purple!10, right=2.5cm of buf]  (shell){Shell (hlt → getc)};
+
+  \draw[arr] (key)  -- (pic) node[midway, above, font=\scriptsize] {scancode};
+  \draw[arr] (pic)  -- (cpu) node[midway, above, font=\scriptsize] {向量 0x21};
+  \draw[arr] (cpu)  -- (stub) node[midway, right, font=\scriptsize] {IDT[0x21]};
+  \draw[arr] (stub) -- (disp);
+  \draw[arr] (disp) -- (kbd) node[midway, right, font=\scriptsize] {g\_irq\_handlers[1]};
+  \draw[arr] (kbd)  -- (buf) node[midway, right, font=\scriptsize] {kbd\_buf\_put};
+  \draw[arr] (buf)  -- (shell) node[midway, above, font=\scriptsize] {kbd\_buf\_get};
+  \draw[arr, dashed] (disp.east) -- ++(1.5,0) node[right, font=\scriptsize] {pic\_send\_eoi(1)};
+\end{tikzpicture}

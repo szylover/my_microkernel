@@ -1,0 +1,27 @@
+% figures/ch02/fig01-mb2-header.tex — auto-extracted from chapter source
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, font=\ttfamily\small, anchor=west},
+]
+  \node[cell, minimum width=3cm, fill=red!15]    at (0, 0)   {\small magic};
+  \node[cell, minimum width=3cm, fill=blue!12]   at (3, 0)   {\small architecture};
+  \node[cell, minimum width=3cm, fill=green!12]  at (6, 0)   {\small header\_length};
+  \node[cell, minimum width=3cm, fill=yellow!15] at (9, 0)   {\small checksum};
+
+  \node[font=\scriptsize, below] at (1.5, -0.1) {\hex{E85250D6}};
+  \node[font=\scriptsize, below] at (4.5, -0.1) {0 = i386};
+  \node[font=\scriptsize, below] at (7.5, -0.1) {字节数};
+  \node[font=\scriptsize, below] at (10.5, -0.1) {使总和为 0};
+
+  \draw[{|}-{|}, thick] (0, -0.7) -- (3, -0.7);
+  \node[font=\scriptsize, below] at (1.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (3, -0.7) -- (6, -0.7);
+  \node[font=\scriptsize, below] at (4.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (6, -0.7) -- (9, -0.7);
+  \node[font=\scriptsize, below] at (7.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (9, -0.7) -- (12, -0.7);
+  \node[font=\scriptsize, below] at (10.5, -0.7) {4\,B};
+
+  % End tag
+  \node[cell, minimum width=4cm, fill=gray!15] at (0, -1.6) {\small end tag};
+  \node[font=\scriptsize] at (5.5, -1.6) {type=0, flags=0, size=8};
+\end{tikzpicture}

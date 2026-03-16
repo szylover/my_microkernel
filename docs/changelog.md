@@ -1,4 +1,12 @@
 
+## 2026-03-16 (Book restructure: split chapters + extract figures)
+- 长章节 ch02–ch11 按 `\section` 拆分为子文件，原 `.tex` 变为骨架文件（`\chapter` + `\input`），子文件存放在 `chapters/chNN-name/secNN-slug.tex`。
+- 60 个 TikZ 图片从章节源码提取到 `book/figures/chNN/figNN-slug.tex`，章节引用改为 `\input{figures/chNN/figNN-slug}`。
+- 修复 15 个 TikZ 图的文字/图形重叠问题：增大 bitcell 宽度、parbox 尺寸、节点间距、text width 约束等。
+- `preamble.tex`: 全局 `bitcell` 最小宽度 0.7cm → 1.0cm。
+- `book/Makefile`: 依赖项增加 `chapters/**/*.tex` 和 `figures/**/*.tex`。
+- `.github/copilot-instructions.md`: 新增 PDF 检查项到 Merge 前置检查清单；新增 Book/LaTeX 图片管理规范；补充 `book/` 项目文件结构。
+
 ## 2026-03-16 (Stage C-5/C-6 VMA rbtree + maple-tree backends)
 - 新增 `kernel/mm/vma_rbtree.c`：红黑树 VMA 后端，静态节点池 256 + NIL 哨兵 + freelist 回收，O(log n) 全操作（插入修复 3 case + 删除修复 4 case），迭代中序遍历 dump。
 - 新增 `kernel/mm/vma_maple.c`：Maple Tree (B+ tree 变体) VMA 后端，扇出度 10，树高 ≤ 3，叶节点分裂/上提，节点池 64 + VMA 池 256。

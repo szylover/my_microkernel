@@ -1,0 +1,46 @@
+\section{指针转换：拆除前的准备}
+
+\begin{warnbox}
+在调用 \texttt{vmm\_unmap\_identity()} 之前，必须将所有仍指向低地址的指针
+转换为 high-half 地址。否则拆除 identity mapping 后，解引用这些指针会
+触发 Page Fault。
+\end{warnbox}
+
+在我们的内核中，需要转换的关键指针包括：
+
+\subsection{\texttt{g\_mb2\_info}：Multiboot2 信息结构}
+
+GRUB 传入的 Multiboot2 info 指针是物理地址（由 \texttt{boot.asm} 从 \reg{EBX} 保存）。
+在 \texttt{vmm\_init()} 建立 high-half mapping 之后，需要将其转换：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle, caption={kmain.c：转换 Multiboot2 指针}]
+/* vmm_init 之后、vmm_unmap_identity 之前 */
+g_mb2_info = (const void*)PHYS_TO_VIRT(
+    (uint32_t)(uintptr_t)g_mb2_info);
+\end{lstlisting}
+
+如果忘记转换会怎样？
+\begin{itemize}
+  \item \texttt{g\_mb2\_info} 仍指向 $\sim$\hex{00010000}（物理地址）
+  \item 此时 identity mapping 还在，暂时不会出错
+  \item 但 \texttt{vmm\_unmap\_identity()} 之后，PD[0] 被清除
+  \item 下次 shell 命令访问 \texttt{g\_mb2\_info} → \hex{00010000} → Page Fault!
+\end{itemize}
+
+\subsection{PMM bitmap 指针}
+
+PMM bitmap 后端在 \texttt{pmm\_init()} 时将 bitmap 放置在物理内存中。
+由于 bitmap 后端内部存储的是虚拟地址指针（通过 identity mapping 期间可以等价于物理地址），
+在 \texttt{vmm\_init()} 建立 high-half mapping 后，PMM 内部的 bitmap 指针
+需要通过直接映射区的 high-half 地址来访问。
+
+\begin{thinkbox}
+如果 PMM bitmap 存储在物理地址 \hex{00200000}，在 identity mapping 拆除后，
+内核应该通过哪个虚拟地址访问它？
+
+答：\hex{C0200000}（$= \hex{00200000} + \hex{C0000000}$）
+\end{thinkbox}
+
+% ============================================================================
+
