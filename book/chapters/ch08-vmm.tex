@@ -1,0 +1,82 @@
+% ============================================================================
+\chapter{VMM：虚拟内存与分页}
+\label{ch:vmm}
+% Stage 6 — 对应 2026-03-11 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 两级页表（Page Directory + Page Table）
+  \item 实现 \texttt{vmm\_map\_page} / \texttt{vmm\_unmap\_page}
+  \item 建立 Identity Mapping（虚拟地址 == 物理地址），开启分页
+  \item 实现 Page Fault handler
+  \item Shell 命令：\texttt{vmm state}、\texttt{vmm lookup}
+\end{itemize}
+
+\section{背景知识：x86 二级分页}
+
+% TODO: 详细的虚拟地址拆分图
+% [31:22] PD index (10 bit) → [21:12] PT index (10 bit) → [11:0] Offset (12 bit)
+% CR3 → Page Directory → Page Table → 物理页帧
+
+\subsection{PDE / PTE 格式}
+
+% TODO: 完整的 bitfield 图
+% bit 0 (P), bit 1 (R/W), bit 2 (U/S), bit 5 (A), bit 6 (D), bit 7 (PS/PAT)
+% 高 20 位 = 页帧物理地址
+
+\subsection{TLB 与 \texttt{invlpg}}
+
+% TODO: TLB 是什么、为什么修改页表后要刷新
+
+\section{页目录与页表数据结构}
+
+% TODO: page_directory_t, page_table_t (aligned 4KiB)
+
+\section{核心 API：\texttt{vmm\_map\_page}}
+
+% TODO: 逐步讲解
+% 1. 计算 PD index + PT index
+% 2. vmm_ensure_page_table（按需分配页表）
+% 3. 写入 PTE
+% 4. invlpg 刷新 TLB
+
+\section{开启分页：\texttt{vmm\_init}}
+
+% TODO:
+% - 从 PMM 查询物理内存范围
+% - 逐页建立 identity mapping + high-half mapping
+% - 切换 CR3 → 新页目录
+% - 设置 g_next_vaddr（bump allocator 水位线）
+
+\begin{cpustate}
+\texttt{vmm\_load\_page\_directory(pd\_phys)} 将 CR3 指向新页目录。
+此后所有内存访问都经过 MMU 翻译。
+如果新页目录没有覆盖当前 EIP 所在页 → Triple Fault。
+\end{cpustate}
+
+\section{Page Fault Handler}
+
+% TODO: 读 CR2 → 解码 error code (P/W/U/RSVD/I) → printk 诊断 → halt
+
+\section{汇编辅助：\texttt{paging\_flush.asm}}
+
+% TODO: vmm_load_page_directory, vmm_enable_paging, vmm_invlpg
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > vmm state
+VMM: paging enabled
+VMM: 512 / 1024 PDE entries present
+szy-kernel > vmm lookup 0xC0100000
+virt 0xC0100000 -> phys 0x00100000  [P RW S]
+szy-kernel > vmm fault
+# 触发 Page Fault → 打印 CR2 + error code → halt
+\end{lstlisting}
+
+\section{本章小结}
+
+分页开启后，内核的每一次内存访问都受 MMU 控制——这是内存保护和
+虚拟地址空间的基础。下一章我们把内核搬到高地址（High-Half Kernel）。

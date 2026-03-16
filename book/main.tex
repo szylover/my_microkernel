@@ -1,0 +1,90 @@
+% ============================================================================
+% main.tex — 《自己动手写操作系统：从零构建 x86 微内核》
+% ============================================================================
+\documentclass[12pt, a4paper, openany]{book}
+
+\input{preamble}
+
+% ============================================================================
+\begin{document}
+
+% --- 封面 ---
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\Huge\bfseries 自己动手写操作系统 \par}
+  \vspace{0.5cm}
+  {\Large 从零构建 x86 微内核 \par}
+  \vspace{2cm}
+  {\large 基于 SZY-KERNEL 项目实战 \par}
+  \vspace{1cm}
+  {\large SZY \par}
+  \vspace{2cm}
+  {\large \today \par}
+  \vfill
+  {\small 本书随项目代码同步演进，每完成一个 Stage 即补充对应章节。}
+\end{titlepage}
+
+% --- 目录 ---
+\tableofcontents
+\newpage
+
+% ============================================================================
+% 第零部分：前言与环境
+% ============================================================================
+\part{准备工作}
+
+\include{chapters/ch00-preface}
+\include{chapters/ch01-environment}
+
+% ============================================================================
+% 第一部分：裸机基础设施（里程碑 A）
+% ============================================================================
+\part{裸机基础设施}
+
+\include{chapters/ch02-boot}
+\include{chapters/ch03-gdt}
+\include{chapters/ch04-idt}
+\include{chapters/ch05-irq-keyboard}
+\include{chapters/ch06-shell}
+
+% ============================================================================
+% 第二部分：内存管理（里程碑 B + C）
+% ============================================================================
+\part{内存管理}
+
+\include{chapters/ch07-pmm}
+\include{chapters/ch08-vmm}
+\include{chapters/ch09-high-half}
+\include{chapters/ch10-kmalloc}
+\include{chapters/ch11-vma}
+
+% ============================================================================
+% 第三部分：进程与用户态（里程碑 D）— 待完成
+% ============================================================================
+\part{进程与用户态}
+
+\include{chapters/ch12-tss-ring3}
+\include{chapters/ch13-elf-loader}
+\include{chapters/ch14-syscall}
+\include{chapters/ch15-process}
+\include{chapters/ch16-scheduler}
+
+% ============================================================================
+% 第四部分：文件系统（里程碑 E）— 待完成
+% ============================================================================
+\part{文件系统}
+
+\include{chapters/ch17-vfs}
+\include{chapters/ch18-ramfs}
+
+% ============================================================================
+% 附录
+% ============================================================================
+\appendix
+\part{附录}
+
+\include{chapters/appendix-tools}
+\include{chapters/appendix-x86-ref}
+
+\end{document}

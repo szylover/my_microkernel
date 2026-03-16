@@ -1,0 +1,63 @@
+% ============================================================================
+\chapter{IDT：中断描述符表}
+\label{ch:idt}
+% Stage 2b — 对应 2026-03-10 changelog（IDT 起步）
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 中断与异常机制
+  \item 实现 IDT，安装 CPU 异常 0--31 的处理程序
+  \item ISR stub（汇编）→ C handler 的调用约定
+  \item 用 \texttt{int3} 自检验证 IDT 正常工作
+\end{itemize}
+
+\section{背景知识：中断与异常}
+
+% TODO: 
+% - 异常 (Exception): 同步，CPU 执行指令时产生（如除零、Page Fault）
+% - 中断 (Interrupt): 异步，外部硬件触发（如键盘、定时器）
+% - 向量号 0-31: CPU 保留异常
+% - 向量号 32-255: 用户定义（IRQ, syscall 等）
+
+\subsection{IDT 条目格式}
+
+% TODO: idt_entry_t 的 bitfield 图示
+% offset_low(16) / selector(16) / zero(8) / type_attr(8) / offset_high(16)
+% type_attr: P=1, DPL=0, Type=0xE (32-bit interrupt gate)
+
+\subsection{错误码}
+
+% TODO: 哪些异常有错误码（#DF, #TS, #NP, #SS, #GP, #PF, #AC）
+% 没有错误码的异常需要 stub 手动 push 0 对齐栈
+
+\section{ISR 汇编 Stub：\texttt{isr\_stubs.asm}}
+
+% TODO: isr_common_stub 的压栈顺序
+% push err_code (或 push 0) → push int_no
+% pushad → push ds/es/fs/gs
+% call isr_handler_c
+% pop gs/fs/es/ds → popad → add esp,8 → iret
+
+\section{寄存器快照结构：\texttt{regs\_t}}
+
+% TODO: 和汇编 push 顺序一一对应的 C struct
+
+\section{C 异常处理：\texttt{isr\_handler\_c}}
+
+% TODO: 根据 int_no 打印异常名、错误码、EIP
+% Page Fault 特殊处理（读 CR2）
+
+\section{验证：\texttt{int3} 自检}
+
+\begin{lstlisting}[style=cstyle]
+// kmain 中插入：
+__asm__ volatile("int3");
+// 预期：串口打印 #BP Breakpoint vector=3，然后正常返回继续执行
+\end{lstlisting}
+
+\section{本章小结}
+
+IDT 是内核的"事件分发表"。我们现在能捕获 CPU 异常并打印诊断信息，
+而不是直接 Triple Fault。下一章我们接入硬件中断——PIC 和键盘。

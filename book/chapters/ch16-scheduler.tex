@@ -1,0 +1,57 @@
+% ============================================================================
+\chapter{调度器}
+\label{ch:scheduler}
+% Stage 14 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现时间片轮转（Round-Robin）调度
+  \item 实现上下文切换：寄存器保存/恢复 + CR3 切换
+  \item 利用 IRQ0（PIT 定时器）触发调度
+\end{itemize}
+
+\section{背景知识：CPU 调度}
+
+% TODO:
+% - 协作式 vs 抢占式调度
+% - 时间片（time quantum / time slice）
+% - PIT (Programmable Interval Timer) 配置
+
+\section{上下文切换}
+
+% TODO:
+% - 保存当前进程的寄存器（pushad + 段寄存器）到 PCB
+% - 切换 CR3（地址空间切换）
+% - 更新 TSS 中的 ESP0（内核栈）
+% - 恢复新进程的寄存器（popad）→ iret
+
+\begin{cpustate}
+上下文切换后：
+\begin{itemize}
+  \item CR3 指向新进程的页目录 → 地址空间切换
+  \item TSS.ESP0 指向新进程的内核栈 → 中断时用正确的栈
+  \item 通用寄存器恢复为新进程上次被切走时的状态
+\end{itemize}
+\end{cpustate}
+
+\section{Round-Robin 调度器}
+
+% TODO:
+% - 就绪队列（ready queue）
+% - schedule(): 选下一个进程 → context_switch()
+% - IRQ0 handler 中调用 schedule()
+
+\section{PIT 定时器配置}
+
+% TODO: 频率设置（如 100Hz = 每 10ms 一次中断）
+
+\section{验证}
+
+% TODO: 两个用户进程交替输出 → 串口看到交错输出
+
+\section{本章小结}
+
+调度器让多个进程分时运行。至此"进程与用户态"里程碑完成。
+下一部分进入文件系统。

@@ -1,0 +1,80 @@
+% ============================================================================
+\chapter{VMA：虚拟内存区域管理}
+\label{ch:vma}
+% Stage 9 — 对应 2026-03-16 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 VMA 的作用：显式跟踪每个虚拟内存区域的地址范围和权限
+  \item 实现可插拔 VMA 后端接口（\texttt{vma\_ops\_t}）
+  \item 第一个后端：红黑树（经典 Linux 风格）
+  \item Page Fault handler 集成 VMA 权限检查
+  \item Shell 命令：\texttt{vma list}、\texttt{vma find}、\texttt{vma test}
+\end{itemize}
+
+\section{背景知识：为什么需要 VMA}
+
+% TODO:
+% - Page Fault 发生时，内核需要判断：是合法的按需分页 vs 非法访问
+% - 没有 VMA → 只能 panic
+% - 有 VMA → 查询地址属于哪个区域 → 检查权限 → 合法则分配页，不合法则 kill 进程
+
+\subsection{Linux 的 VMA}
+
+% TODO: Linux vm_area_struct 简介（对比学习）
+
+\section{可插拔后端架构}
+
+% TODO: vma_ops_t（init/add/remove/find/dump/count）
+% vma.c dispatch → g_vma_ops
+% 和 pmm_ops_t / heap_ops_t 完全同一模式
+
+\section{VMA 权限标志}
+
+% TODO: VMA_READ(0x01), VMA_WRITE(0x02), VMA_EXEC(0x04)
+% 与 PTE flags 的关系
+
+\section{红黑树后端：\texttt{vma\_rbtree.c}}
+
+% TODO:
+% - 红黑树基本性质（5 条）
+% - 旋转（左旋、右旋）图示
+% - 插入修复（3 种 case + 镜像）
+% - 删除修复（4 种 case + 镜像）
+% - 为什么用红黑树而不是链表（O(log n) vs O(n)）
+% - 静态节点池（避免和 kmalloc 循环依赖）
+
+\section{Page Fault 集成}
+
+% TODO: idt.c 中 page_fault_handler 调用 vma_find
+% 三种情况：无VMA(非法) / 有VMA权限不符(保护违规) / 有VMA页不存在(demand paging候选)
+
+\section{Boot 区域注册}
+
+% TODO: kmain.c 中注册 direct-map + kheap
+% vmm_alloc_pages/vmm_free_pages 自动注册/移除 VMA
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > vma list
+VMA regions (2):
+  [ 0] 0xC0000000 - 0xD0000000  256 MiB  rwx  direct-map
+  [ 1] 0xE0000000 - 0xE0010000   64 KiB  rw-  kheap
+
+szy-kernel > vma test
+[vma-test] === VMA selftest ===
+[vma-test] test 1: add + find ... PASS
+[vma-test] test 2: find outside ... PASS
+[vma-test] test 3: overlap detection ... PASS
+[vma-test] test 4: remove + find ... PASS
+[vma-test] === ALL PASS ===
+\end{lstlisting}
+
+\section{本章小结}
+
+VMA 让内核从"隐式管理内存"进化到"显式跟踪每个区域"。
+这是实现按需分页（demand paging）、进程地址空间、\texttt{mmap} 的基础。
+内存管理子系统至此基本完成，下一部分进入进程与用户态。

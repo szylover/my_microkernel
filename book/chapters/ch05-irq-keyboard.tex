@@ -1,0 +1,64 @@
+% ============================================================================
+\chapter{IRQ、PIC 与键盘驱动}
+\label{ch:irq-keyboard}
+% Stage 3 — 对应 2026-03-10 changelog（IRQ + Keyboard）
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 8259 PIC（可编程中断控制器）的工作原理
+  \item Remap PIC 将 IRQ0--15 映射到 IDT 向量 0x20--0x2F
+  \item 实现 IRQ 分发框架（注册 handler + EOI）
+  \item 实现 PS/2 键盘驱动：scancode → ASCII + 环形缓冲区
+\end{itemize}
+
+\section{背景知识：8259 PIC}
+
+% TODO:
+% - 主 PIC (IRQ0-7, port 0x20/0x21) + 从 PIC (IRQ8-15, port 0xA0/0xA1)
+% - ICW1-ICW4 初始化序列
+% - Remap: 为什么要从默认的 0x08 改到 0x20（避开 CPU 异常）
+% - IMR (Interrupt Mask Register): 屏蔽/使能 IRQ
+% - EOI (End of Interrupt): 告诉 PIC 中断处理完毕
+
+\subsection{IRQ 向量映射}
+
+% TODO: 表格 IRQ0=0x20(Timer), IRQ1=0x21(Keyboard), ...
+
+\section{PIC 初始化：\texttt{pic.c}}
+
+% TODO: pic_init() 的 ICW1-4 序列逐步解释
+
+\section{IRQ 分发框架：\texttt{irq.c}}
+
+% TODO: g_irq_handlers[16], irq_install_handler, irq_handler_c
+
+\section{IRQ 汇编 Stub：\texttt{irq\_stubs.asm}}
+
+% TODO: 和 ISR stub 类似，但 push 的是 IRQ 号 + 调用 irq_handler_c
+
+\section{PS/2 键盘驱动：\texttt{keyboard.c}}
+
+% TODO:
+% - 端口 0x60 读 scancode
+% - Scancode Set 1 → ASCII 转换表（含 Shift 状态）
+% - 环形缓冲区（ring buffer）存储按键
+% - keyboard_getc() / keyboard_try_getc()
+
+\begin{designbox}
+为什么用环形缓冲区？中断处理程序必须尽快返回（否则会阻塞其他中断）。
+把字符存入缓冲区、由 shell 主循环消费，是经典的"生产者-消费者"模式。
+\end{designbox}
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+make iso && make run
+# 在 QEMU 窗口按键，串口应看到按键回显
+\end{lstlisting}
+
+\section{本章小结}
+
+硬件中断链路打通：PIC → IRQ stub → C handler → 键盘驱动 → 缓冲区。
+下一章我们用这个输入做交互式 Shell。

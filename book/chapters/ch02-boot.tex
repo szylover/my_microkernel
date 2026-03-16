@@ -1,0 +1,69 @@
+% ============================================================================
+\chapter{Multiboot2 引导与串口输出}
+\label{ch:boot}
+% Stage 1 — 对应 2026-03-10 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 编写 Multiboot2 兼容的引导头，让 GRUB 识别并加载我们的内核
+  \item 从汇编跳转到 C 入口 \texttt{kmain}
+  \item 通过 COM1 串口输出第一条调试信息
+  \item 解析 Multiboot2 info 结构，打印 tag 列表
+\end{itemize}
+
+\section{背景知识：x86 启动流程}
+
+% TODO: BIOS → GRUB → Multiboot2 协议 → 内核入口
+
+\subsection{Multiboot2 协议}
+
+% TODO: header 格式（magic / architecture / header_length / checksum / end tag）
+% 引用 Multiboot2 规范
+
+\subsection{实模式 → 保护模式}
+
+% TODO: 简要说明 GRUB 已经帮我们切到了 32-bit 保护模式
+
+\section{链接脚本 \texttt{linker.ld}}
+
+% TODO: 详解 .multiboot_header 的放置位置、1MiB 加载地址、KEEP 语义
+
+\begin{whybox}
+为什么内核要加载到 1MiB？低于 1MiB 的地址空间被 BIOS、VGA 显存、
+ROM 等占据，不可靠。1MiB 是约定俗成的安全起点。
+\end{whybox}
+
+\section{引导汇编 \texttt{boot.asm}}
+
+% TODO: 逐段讲解
+% - Multiboot2 header
+% - .bss 段的内核栈（16KiB）
+% - _start: 设置栈 → push mb2_info, mb2_magic → call kmain → hlt
+
+\section{C 入口 \texttt{kmain}}
+
+% TODO: serial_init → 串口输出 → mb2_dump_tags
+
+\section{串口驱动 \texttt{serial.c}}
+
+% TODO: COM1 端口 0x3F8、波特率设置、DLAB、serial_putc
+
+\section{printk：内核的 printf}
+
+% TODO: 可变参数、格式化、%d %x %s %p %u
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+make iso && make run
+# 预期：终端（-serial stdio）看到
+# [mb2] magic=36d76289
+# [mb2] tag type=... size=...
+\end{lstlisting}
+
+\section{本章小结}
+
+我们有了一个能被 GRUB 加载、跳转到 C 代码、并通过串口输出信息的最小内核。
+下一章我们设置 GDT，为后续的中断和内存管理做准备。

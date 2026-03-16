@@ -1,0 +1,61 @@
+% ============================================================================
+\chapter{交互式 Shell}
+\label{ch:shell}
+% Stage 4 — 对应 2026-03-10 changelog（Shell + Console + Commands）
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 Console 输入聚合层（统一键盘 IRQ1 和串口轮询）
+  \item 实现行编辑（回显、退格、回车）
+  \item 实现命令注册表和分发机制
+  \item 第一批命令：\texttt{cls}、\texttt{shutdown}、\texttt{cmds}
+\end{itemize}
+
+\section{架构设计}
+
+% TODO: 五层架构图
+% 输入层(console.c) → 行编辑(shell.c) → 命令解析 → 命令分发 → 命令实现(cmds/*.c)
+
+\begin{designbox}
+为什么抽象 Console 层？内核可能有多种输入源（键盘、串口、将来的网络终端）。
+Console 层统一提供 \texttt{console\_getc()}，Shell 不关心输入从哪来。
+\end{designbox}
+
+\section{Console 输入层：\texttt{console.c}}
+
+% TODO: console_try_getc 优先查键盘缓冲，再查串口轮询
+
+\section{Shell 主循环：\texttt{shell.c}}
+
+% TODO: shell_run → prompt → readline → tokenize → dispatch
+
+\section{命令接口：\texttt{cmd.h}}
+
+% TODO: cmd_t 结构体 + cmd_fn_t 签名
+% 每个命令一个 .c 文件，导出 const cmd_t
+% shell.c 维护 g_cmds[] 数组
+
+\section{命令实现示例：\texttt{cmd\_cls.c}}
+
+% TODO: ANSI 清屏序列 \x1b[2J\x1b[H
+
+\section{如何添加新命令}
+
+% TODO: 4 步骤（创建.c → 导出cmd_t → shell.c extern + 加入数组 → Makefile自动发现）
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > cmds
+Commands (3):
+cls   shutdown  cmds
+szy-kernel > cls
+# 屏幕清空
+\end{lstlisting}
+
+\section{本章小结}
+
+Shell 是内核开发阶段最重要的调试工具。有了可扩展的命令框架，
+后续每实现一个子系统（内存、进程等）都可以立即加入调试命令验证。

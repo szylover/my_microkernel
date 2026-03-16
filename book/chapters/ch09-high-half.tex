@@ -1,0 +1,65 @@
+% ============================================================================
+\chapter{High-Half Kernel}
+\label{ch:high-half}
+% Stage 7 — 对应 2026-03-12 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 将内核映射到虚拟地址 \hex{C0000000}+（高半区）
+  \item 拆除低地址 Identity Mapping，为用户态腾出 0--3GiB 空间
+  \item 所有指针从物理地址切换到虚拟地址
+\end{itemize}
+
+\section{背景知识：High-Half Kernel 架构}
+
+% TODO:
+% - 地址空间划分：0x00000000-0xBFFFFFFF (用户) / 0xC0000000-0xFFFFFFFF (内核)
+% - 直接映射区: virt = phys + 0xC0000000
+% - PHYS_TO_VIRT / VIRT_TO_PHYS 宏
+
+\begin{whybox}
+为什么要 High-Half？让每个用户进程都有完整的 0--3GiB 虚拟地址空间，
+同时内核在所有进程的页表中都占据相同的高地址区域。
+切换进程时只需换低 3GiB 的映射，内核部分不变。
+\end{whybox}
+
+\section{链接脚本改动}
+
+% TODO: linker.ld 中 . += KERNEL_VIRT_BASE 的含义
+% 物理加载地址 vs 虚拟链接地址
+
+\section{Boot 阶段的临时映射}
+
+% TODO: boot.asm 用 PSE 4MiB 大页同时建立 identity + high-half 映射
+% 为什么需要两份：切换 CR3 后 EIP 还在低地址，需要 identity 继续执行
+
+\section{vmm\_init 中的双重映射}
+
+% TODO: 逐页建立 identity + high-half → 切换 CR3 → 验证
+
+\section{拆除 Identity Mapping}
+
+% TODO: vmm_unmap_identity() 清除 PD[0..767]
+% 所有低地址访问变成 Page Fault
+% PMM 指针切换到 PHYS_TO_VIRT
+
+\begin{warnbox}
+拆除 identity mapping 前，必须确保所有指针（PMM bitmap、Multiboot2 info 等）
+都已转为虚拟地址（\texttt{PHYS\_TO\_VIRT}）。否则立即 Page Fault。
+\end{warnbox}
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > vmm lookup 0x00100000
+virt 0x00100000 -> NOT MAPPED
+szy-kernel > vmm lookup 0xC0100000
+virt 0xC0100000 -> phys 0x00100000  [P RW S]
+\end{lstlisting}
+
+\section{本章小结}
+
+内核现在安全地运行在高半区。低地址空间已清空，等待将来的用户态进程。
+下一章实现内核堆（kmalloc），让内核能做字节级的动态内存分配。

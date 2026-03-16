@@ -1,0 +1,82 @@
+% ============================================================================
+\chapter{PMM：物理内存管理}
+\label{ch:pmm}
+% Stage 5 — 对应 2026-03-11/12 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 解析 Multiboot2 Memory Map，获取物理内存布局
+  \item 实现可插拔 PMM 后端接口（\texttt{pmm\_ops\_t}）
+  \item 第一个后端：bitmap 分配器
+  \item 第二个后端：buddy system 分配器
+  \item Shell 调试命令：\texttt{free}、\texttt{mmap}、\texttt{pmm}
+\end{itemize}
+
+\section{背景知识：物理内存布局}
+
+% TODO:
+% - BIOS 留下的 memory map（可用区域 + 保留区域）
+% - Multiboot2 tag type=6 (memory map) 格式
+% - 典型布局：0-640K(可用) / 640K-1M(保留) / 1M+(可用)
+
+\section{可插拔后端架构}
+
+% TODO: pmm_ops_t 函数指针表（和 Linux file_operations 类比）
+% pmm.c dispatch 层 → 转发到 g_pmm_ops
+% 为什么要可插拔（bitmap 简单但碎片化，buddy 支持多阶分配）
+
+\subsection{接口定义：\texttt{pmm.h}}
+
+% TODO: pmm_ops_t 各字段详解
+
+\subsection{Dispatch 层：\texttt{pmm.c}}
+
+% TODO: 薄转发层
+
+\section{Bitmap 分配器：\texttt{pmm\_bitmap.c}}
+
+% TODO:
+% - 每个物理页对应 1 bit（0=free, 1=used）
+% - 位图放在哪里？Multiboot2 mmap 之后动态计算
+% - pmm_bitmap_init: 解析 mmap → 标记 kernel + reserved → selftest
+% - alloc: 线性扫描找第一个 free bit
+% - free: 清对应 bit
+
+\section{Buddy 分配器：\texttt{pmm\_buddy.c}}
+
+% TODO:
+% - Linux 风格 buddy system，order 0..10 (1页..1024页)
+% - free_list[MAX_ORDER+1] 数组
+% - 分裂（split）和合并（coalesce）
+% - alloc: 从最小满足 order 的 free_list 取，向下分裂
+% - free: 归还，检查 buddy 是否也空闲 → 向上合并
+
+\section{后端切换：\texttt{kconfig.h}}
+
+% TODO: KCONFIG_PMM_BACKEND 宏控制
+
+\section{Shell 命令}
+
+% TODO: free / mmap / pmm state / pmm alloc / pmm dump 示例
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > pmm state
+PMM: base=0x00100000, total=32768, free=32395, used=373
+PMM: backend=bitmap
+szy-kernel > pmm alloc 3
+pmm alloc: 0x07FC1000
+pmm alloc: 0x07FC2000
+pmm alloc: 0x07FC3000
+szy-kernel > pmm freeall
+pmm freeall: freed 3 pages
+\end{lstlisting}
+
+\section{本章小结}
+
+PMM 是内存管理的基石——所有虚拟内存映射最终都需要物理页支撑。
+可插拔后端模式让我们能在不改调用方的前提下切换分配算法。
+下一章我们在 PMM 之上构建虚拟内存（分页）。

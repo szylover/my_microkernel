@@ -1,0 +1,34 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.synctex(busy)
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
+*.idx
+*.ilg
+*.ind
+*.xdv
+
+# Output PDF (can toggle: uncomment to track, comment to ignore)
+# *.pdf
+
+# Build directory
+build/
+
+# Editor temp files
+*~
+*.swp
+*.bak
+.DS_Store

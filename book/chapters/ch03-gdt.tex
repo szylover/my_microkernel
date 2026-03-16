@@ -1,0 +1,60 @@
+% ============================================================================
+\chapter{GDT：全局描述符表}
+\label{ch:gdt}
+% Stage 2a — 对应 2026-03-10 changelog（GDT 起步）
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 保护模式下的段式内存管理
+  \item 实现平坦内存模型的 GDT（Null + Kernel Code + Kernel Data）
+  \item 用 \texttt{lgdt} 加载 GDT 并刷新段寄存器
+\end{itemize}
+
+\section{背景知识：段式内存管理}
+
+% TODO: 实模式 segment:offset → 保护模式 selector → GDT
+% 为什么现代 OS 用"平坦段"绕过分段
+
+\subsection{GDT 条目格式（8 字节）}
+
+% TODO: 逐字段图示
+% base (32 bit, 拆成三段) / limit (20 bit, 拆成两段) / access byte / flags
+% 详细的 bitfield 表
+
+\subsection{段选择子}
+
+% TODO: 16-bit selector = index(13) + TI(1) + RPL(2)
+% 0x08 = GDT[1], RPL=0 → 内核代码段
+% 0x10 = GDT[2], RPL=0 → 内核数据段
+
+\section{数据结构：\texttt{gdt.h} 与 \texttt{gdt.c}}
+
+% TODO: gdt_entry_t (packed), gdtr_t, gdt_init()
+
+\section{刷新段寄存器：\texttt{gdt\_flush.asm}}
+
+% TODO: lgdt → far jmp 0x08:flush → 设置 ds/es/fs/gs/ss = 0x10
+% 为什么需要 far jump（刷新隐藏的 CS 描述符缓存）
+
+\begin{cpustate}
+\texttt{lgdt} 后 CPU 开始使用新的 GDT。
+\texttt{jmp 0x08:flush} 将 CS 切换到新的内核代码段。
+随后 \texttt{mov ds/es/ss, 0x10} 切换数据段。
+此后所有内存访问都经过新 GDT 的段描述符。
+\end{cpustate}
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+# 串口输出：
+# [init] gdt ok
+\end{lstlisting}
+
+如果 GDT 有误（如 base/limit 计算错误），CPU 会 Triple Fault 并重启。
+
+\section{本章小结}
+
+GDT 在平坦模型下看似"多此一举"，但它是 x86 保护模式的硬性要求，
+也是后续 TSS（Ring 3 切换）的基础。下一章我们设置 IDT 来处理异常。

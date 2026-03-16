@@ -1,0 +1,74 @@
+% ============================================================================
+\chapter{内核堆：kmalloc 与 kfree}
+\label{ch:kmalloc}
+% Stage 8 — 对应 2026-03-13 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 在虚拟地址 \hex{E0000000} 处建立内核堆区域
+  \item 实现可插拔堆后端接口（\texttt{heap\_ops\_t}）
+  \item 第一个后端：first-fit 空闲链表分配器
+  \item 第二个后端：slab 分配器
+  \item Shell 命令：\texttt{heap status}、\texttt{heap alloc}、\texttt{heap test}
+\end{itemize}
+
+\section{背景知识：为什么需要内核堆}
+
+% TODO:
+% - PMM 只能分配整页（4KiB），但内核经常需要几十字节的小对象
+% - 堆在一大块连续虚拟内存上做字节级分配
+% - 堆区和直接映射区、vmm_alloc_pages 区互不干扰
+
+\section{堆虚拟地址规划}
+
+% TODO: KHEAP_START=0xE0000000, KHEAP_MAX_SIZE=256MiB, KHEAP_END=0xF0000000
+% 为什么选这个地址（不和直接映射区、bump allocator 冲突）
+
+\section{可插拔后端架构}
+
+% TODO: heap_ops_t（init/alloc/free/stats）
+% kmalloc.c dispatch → g_heap_ops
+% kconfig.h KCONFIG_HEAP_BACKEND 切换
+
+\section{First-Fit 空闲链表：\texttt{heap\_first\_fit.c}}
+
+% TODO:
+% - block_header: size / is_free / prev / next（双向链表）
+% - alloc: 遍历链表找第一个够大的 free block → 拆分
+% - free: 标记 is_free → 向前/向后合并相邻 free block
+% - 合并（coalescing）的重要性
+
+\subsection{数据结构图示}
+
+% TODO: 图：链表节点 [header | payload ...] → [header | payload ...] → ...
+
+\section{Slab 分配器：\texttt{heap\_slab.c}}
+
+% TODO:
+% - 7 级 cache: 32B, 64B, 128B, 256B, 512B, 1024B, 2048B
+% - 每级一个 slab（整页），bitmap 管理空闲 slot
+% - 优势：零碎片、O(1) 分配、缓存友好
+
+\section{kmalloc\_init：初始映射}
+
+% TODO: 在 KHEAP_START 映射初始 16 页物理内存 → 调后端 init
+
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > heap test
+[heap-test] === kmalloc/kfree selftest ===
+[heap-test] test 1: basic alloc/free ... PASS
+[heap-test] test 2: multiple allocs ... no overlap: PASS
+[heap-test] test 3: free all ... alloc_count == 0: PASS
+[heap-test] test 4: reuse after free ... PASS
+[heap-test] === ALL PASS ===
+\end{lstlisting}
+
+\section{本章小结}
+
+有了 kmalloc/kfree，内核可以动态分配任意大小的内存。
+下一章实现 VMA（虚拟内存区域管理），让 Page Fault handler
+能判断内存访问是否合法。
