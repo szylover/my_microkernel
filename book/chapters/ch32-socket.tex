@@ -1,0 +1,22 @@
+% ============================================================================
+\chapter{Socket API}
+\label{ch:socket}
+% 里程碑 H-3 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 BSD Socket 接口：\texttt{socket}/\texttt{bind}/\texttt{listen}/\texttt{accept}/\texttt{connect}/\texttt{send}/\texttt{recv}
+  \item 支持 \texttt{AF\_INET} 地址族
+  \item 支持 \texttt{SOCK\_STREAM}（TCP）和 \texttt{SOCK\_DGRAM}（UDP）
+  \item 与 VFS 集成：socket 作为文件描述符
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - BSD Socket API 概览
+% - socket 在内核中的表示（struct socket）
+% - 协议族与地址族
+% - 阻塞 vs 非阻塞 I/O

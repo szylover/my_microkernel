@@ -1,0 +1,22 @@
+% ============================================================================
+\chapter{磁盘文件系统}
+\label{ch:diskfs}
+% 里程碑 E-3 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 ATA/AHCI 磁盘驱动：读写扇区
+  \item 实现 FAT32 或 ext2 只读文件系统
+  \item 挂载到 VFS，支持 \texttt{open}/\texttt{read}/\texttt{stat}/\texttt{readdir}
+  \item 后续扩展写入支持
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - 块设备 vs 字符设备
+% - ATA PIO / DMA 模式
+% - FAT32 文件系统结构（BPB、FAT 表、目录项）
+% - ext2 文件系统结构（超级块、inode 表、块组描述符）

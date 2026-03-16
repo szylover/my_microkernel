@@ -1,0 +1,21 @@
+% ============================================================================
+\chapter{交叉编译工具链}
+\label{ch:cross-toolchain}
+% 里程碑 G-1 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 在宿主机上构建 \texttt{i686-szy-gcc} 交叉编译器
+  \item 构建配套的 binutils（\texttt{as}、\texttt{ld}、\texttt{objdump}）
+  \item 配置 sysroot，使交叉编译器能找到 SZY-KERNEL 的头文件和 libc
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - 什么是交叉编译（cross-compilation）
+% - GCC 构建三元组（build / host / target）
+% - sysroot 与头文件安装
+% - 构建步骤：binutils → GCC（bootstrap） → libc → GCC（完整）

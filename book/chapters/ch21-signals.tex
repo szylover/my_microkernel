@@ -1,0 +1,20 @@
+% ============================================================================
+\chapter{信号}
+\label{ch:signals}
+% 里程碑 F-1 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 POSIX 信号机制：\texttt{SIGINT}/\texttt{SIGTERM}/\texttt{SIGKILL}
+  \item 信号投递（pending → delivery）与默认处理
+  \item 用户态信号处理函数（\texttt{sigaction}）
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - 信号是什么：异步通知机制
+% - 信号的生命周期：产生 → 挂起 → 投递 → 处理
+% - 内核态 → 用户态信号跳板（signal trampoline）

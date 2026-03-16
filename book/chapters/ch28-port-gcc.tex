@@ -1,0 +1,21 @@
+% ============================================================================
+\chapter{移植 GCC}
+\label{ch:port-gcc}
+% 里程碑 G-2 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 让 GCC 能在 SZY-KERNEL 上编译并运行简单 C 程序
+  \item 实现 GCC 所需的系统调用子集（\texttt{fork}/\texttt{exec}/\texttt{waitpid}/\texttt{open}/\texttt{read}/\texttt{write}/\texttt{stat}）
+  \item 验证自举：在 OS 上编译 hello world 并执行
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - GCC 运行时依赖分析
+% - 移植清单：libc、文件系统、进程管理
+% - Canadian cross-compilation
+% - 自举测试策略
