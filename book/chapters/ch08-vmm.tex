@@ -9,60 +9,115 @@
 \begin{itemize}
   \item 理解 x86 两级页表（Page Directory + Page Table）
   \item 实现 \texttt{vmm\_map\_page} / \texttt{vmm\_unmap\_page}
-  \item 建立 Identity Mapping（虚拟地址 == 物理地址），开启分页
-  \item 实现 Page Fault handler
-  \item Shell 命令：\texttt{vmm state}、\texttt{vmm lookup}
+  \item 用 4KiB 页表替换 boot.asm 的 PSE 临时映射，开启正式分页
+  \item 实现按需分配页表（\texttt{vmm\_ensure\_page\_table}）
+  \item Shell 命令：\texttt{vmm state}、\texttt{vmm lookup}、\texttt{vmm fault}
 \end{itemize}
 
 \section{背景知识：x86 二级分页}
 
-% TODO: 详细的虚拟地址拆分图
-% [31:22] PD index (10 bit) → [21:12] PT index (10 bit) → [11:0] Offset (12 bit)
-% CR3 → Page Directory → Page Table → 物理页帧
+虚拟地址（32 位）被 CPU 拆成三段：
+
+\begin{lstlisting}[style=shellstyle]
+  31        22 21       12 11        0
+ +-----------+-----------+-----------+
+ | PD index  | PT index  |  Offset   |
+ |  (10 bit) |  (10 bit) |  (12 bit) |
+ +-----------+-----------+-----------+
+\end{lstlisting}
+
+翻译流程：\reg{CR3} → \texttt{PD[pd\_idx]} → \texttt{PT[pt\_idx]} → 物理页帧 + Offset
 
 \subsection{PDE / PTE 格式}
 
-% TODO: 完整的 bitfield 图
-% bit 0 (P), bit 1 (R/W), bit 2 (U/S), bit 5 (A), bit 6 (D), bit 7 (PS/PAT)
-% 高 20 位 = 页帧物理地址
+\begin{bitfield}
+  \bit{0}{P (Present)：1=有效，0=访问触发 \#PF}
+  \bit{1}{R/W：1=可读写，0=只读}
+  \bit{2}{U/S：1=用户态可访问，0=仅内核}
+  \bit{5}{A (Accessed)：CPU 访问后自动置 1}
+  \bit{6}{D (Dirty)：CPU 写入后自动置 1（仅 PTE）}
+  \bit{12--31}{物理页帧地址高 20 位}
+\end{bitfield}
 
-\subsection{TLB 与 \texttt{invlpg}}
+\begin{thinkbox}
+PDE 和 PTE 都有 R/W 位。如果 PDE 设了 Read-Only 但 PTE 设了 Writable，
+最终这个页是可写还是只读？提示：权限取\textbf{交集}（最严格的生效）。
+\end{thinkbox}
 
-% TODO: TLB 是什么、为什么修改页表后要刷新
+\section{核心实现}
 
-\section{页目录与页表数据结构}
+\subsection{\texttt{vmm\_ensure\_page\_table}：按需分配页表}
 
-% TODO: page_directory_t, page_table_t (aligned 4KiB)
+\begin{lstlisting}[style=cstyle]
+static page_table_t* vmm_ensure_page_table(uint32_t pd_idx) {
+    uint32_t pde = g_kernel_pd.entries[pd_idx];
+    if (pde & PDE_PRESENT) {
+        return (page_table_t*)PHYS_TO_VIRT(pde & ~0xFFFu);
+    }
+    // 从 PMM 分配一页作为新页表
+    uint32_t pt_phys = (uint32_t)pmm_alloc_page();
+    page_table_t* pt = (page_table_t*)PHYS_TO_VIRT(pt_phys);
+    memzero_page(pt);  // 所有 PTE = 0（未映射）
+    g_kernel_pd.entries[pd_idx] = pt_phys | PDE_PRESENT | PDE_WRITABLE;
+    return pt;
+}
+\end{lstlisting}
 
-\section{核心 API：\texttt{vmm\_map\_page}}
+\begin{whybox}
+为什么 PDE 中存物理地址而非虚拟地址？
 
-% TODO: 逐步讲解
-% 1. 计算 PD index + PT index
-% 2. vmm_ensure_page_table（按需分配页表）
-% 3. 写入 PTE
-% 4. invlpg 刷新 TLB
+PDE/PTE 是给 CPU 的 MMU 硬件读的。MMU 工作在物理地址层面——
+它拿到 \reg{CR3} 的物理地址，读 PDE 的物理地址找到页表，再读 PTE 的物理地址找到页帧。
+我们在 C 代码中访问页表时必须用 \texttt{PHYS\_TO\_VIRT} 转为虚拟地址。
+\end{whybox}
 
-\section{开启分页：\texttt{vmm\_init}}
+\subsection{\texttt{vmm\_map\_page}}
 
-% TODO:
-% - 从 PMM 查询物理内存范围
-% - 逐页建立 identity mapping + high-half mapping
-% - 切换 CR3 → 新页目录
-% - 设置 g_next_vaddr（bump allocator 水位线）
+\begin{lstlisting}[style=cstyle]
+int vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags) {
+    uint32_t pdi = virt >> 22;
+    uint32_t pti = (virt >> 12) & 0x3FF;
+    page_table_t* pt = vmm_ensure_page_table(pdi);
+    pt->entries[pti] = (phys & ~0xFFF) | (flags & 0xFFF);
+    if (g_vmm_ready) vmm_invlpg(virt);  // 刷新 TLB
+    return 0;
+}
+\end{lstlisting}
 
-\begin{cpustate}
-\texttt{vmm\_load\_page\_directory(pd\_phys)} 将 CR3 指向新页目录。
-此后所有内存访问都经过 MMU 翻译。
-如果新页目录没有覆盖当前 EIP 所在页 → Triple Fault。
-\end{cpustate}
+\begin{thinkbox}
+\texttt{vmm\_invlpg} 刷新的是单个虚拟地址在 TLB 中的缓存。
+如果我们映射了 1000 个页，需要调用 1000 次 \texttt{invlpg} 吗？
+有没有更高效的方法？（提示：重新加载 \reg{CR3} 会刷新整个 TLB。）
+\end{thinkbox}
 
-\section{Page Fault Handler}
+\subsection{\texttt{vmm\_init}：替换 boot PSE 映射}
 
-% TODO: 读 CR2 → 解码 error code (P/W/U/RSVD/I) → printk 诊断 → halt
+\begin{enumerate}
+  \item 清零页目录
+  \item 查询 PMM 确定需要映射的物理范围
+  \item 逐页建立 identity mapping + high-half mapping
+  \item 切换 \reg{CR3} 到新页目录
+  \item 设置 \texttt{g\_next\_vaddr}（bump allocator 水位线）
+\end{enumerate}
 
-\section{汇编辅助：\texttt{paging\_flush.asm}}
+\section{Bump 分配器：\texttt{vmm\_alloc\_pages}}
 
-% TODO: vmm_load_page_directory, vmm_enable_paging, vmm_invlpg
+\begin{lstlisting}[style=cstyle]
+void* vmm_alloc_pages(unsigned count) {
+    uint32_t start = g_next_vaddr;
+    g_next_vaddr += count * VMM_PAGE_SIZE;
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t phys = (uint32_t)pmm_alloc_page();
+        vmm_map_page(start + i * 4096, phys, PTE_PRESENT | PTE_WRITABLE);
+    }
+    return (void*)start;
+}
+\end{lstlisting}
+
+\begin{designbox}
+Bump allocator 不能回收虚拟地址空间——\texttt{free\_pages} 只归还物理页。
+这是有意为之的简化。Stage 9 的 VMA 红黑树会取代它做正式的虚拟地址管理。
+\end{designbox}
 
 \section{验证}
 
@@ -76,7 +131,28 @@ szy-kernel > vmm fault
 # 触发 Page Fault → 打印 CR2 + error code → halt
 \end{lstlisting}
 
+\section{思考与练习}
+
+\begin{exercise}
+用 \texttt{vmm pd 768 8} 查看高半区的页目录条目。每个 PDE 覆盖多少虚拟内存？
+计算前 8 个 PDE 一共覆盖了多少 MiB。
+\end{exercise}
+
+\begin{exercise}
+手动用 \texttt{vmm map 0xF0000000 0x00200000} 建立一个映射，然后
+\texttt{vmm lookup 0xF0000000} 验证。再 \texttt{vmm unmap 0xF0000000} 后
+再查一次。思考：映射后能否直接读写 \hex{F0000000}？（当前 Shell 没有
+直接读内存的命令，但你可以在 C 代码中尝试。）
+\end{exercise}
+
+\begin{exercise}
+TLB 是"页表翻译缓存"。如果修改了 PTE 但没有 \texttt{invlpg}，CPU 可能
+使用旧的缓存结果。在 \texttt{vmm\_map\_page} 中注释掉 \texttt{invlpg} 调用，
+然后 map → unmap → 重新 map 同一个地址，观察是否出现异常行为。
+\end{exercise}
+
 \section{本章小结}
 
-分页开启后，内核的每一次内存访问都受 MMU 控制——这是内存保护和
-虚拟地址空间的基础。下一章我们把内核搬到高地址（High-Half Kernel）。
+分页开启后，内核的每一次内存访问都受 MMU 控制。
+我们有了 4KiB 粒度的映射能力和 Page Fault 诊断。
+下一章把内核搬到高地址（High-Half Kernel）。
