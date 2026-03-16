@@ -1,63 +1,243 @@
 % ============================================================================
 \chapter{IDT：中断描述符表}
 \label{ch:idt}
-% Stage 2b — 对应 2026-03-10 changelog（IDT 起步）
+% Stage 2b — 对应 2026-03-10 changelog
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 理解 x86 中断与异常机制
-  \item 实现 IDT，安装 CPU 异常 0--31 的处理程序
-  \item ISR stub（汇编）→ C handler 的调用约定
-  \item 用 \texttt{int3} 自检验证 IDT 正常工作
+  \item 理解 x86 中断与异常的区分及向量号分配
+  \item 实现 256 项 IDT，安装 CPU 异常 0--31 的 handler
+  \item 设计 ISR 汇编 stub → C handler 的调用约定和寄存器快照
+  \item 用 \texttt{int3} 指令自检验证 IDT 正常工作
 \end{itemize}
 
+% ============================================================================
 \section{背景知识：中断与异常}
 
-% TODO: 
-% - 异常 (Exception): 同步，CPU 执行指令时产生（如除零、Page Fault）
-% - 中断 (Interrupt): 异步，外部硬件触发（如键盘、定时器）
-% - 向量号 0-31: CPU 保留异常
-% - 向量号 32-255: 用户定义（IRQ, syscall 等）
+x86 的中断向量表（IDT）有 256 个条目（向量号 0--255），分三类：
 
-\subsection{IDT 条目格式}
+\begin{longtable}{cll}
+  \toprule
+  \textbf{向量} & \textbf{类型} & \textbf{来源} \\
+  \midrule
+  0--31   & CPU 异常 (Exception) & 同步——CPU 执行指令时产生（除零、Page Fault 等） \\
+  32--47  & 硬件中断 (IRQ)       & 异步——外部设备触发（键盘、定时器、磁盘等） \\
+  48--255 & 软件自定义           & \texttt{int N} 指令（如 \texttt{int 0x80} 系统调用） \\
+  \bottomrule
+\end{longtable}
 
-% TODO: idt_entry_t 的 bitfield 图示
-% offset_low(16) / selector(16) / zero(8) / type_attr(8) / offset_high(16)
-% type_attr: P=1, DPL=0, Type=0xE (32-bit interrupt gate)
+\subsection{有错误码的异常}
 
-\subsection{错误码}
+某些异常会让 CPU 自动向栈上压入一个错误码（error code），其他异常不会。这对
+汇编 stub 很重要——没有错误码的异常需要手动 push 0 来对齐栈。
 
-% TODO: 哪些异常有错误码（#DF, #TS, #NP, #SS, #GP, #PF, #AC）
-% 没有错误码的异常需要 stub 手动 push 0 对齐栈
+有错误码的异常：\#DF(8)、\#TS(10)、\#NP(11)、\#SS(12)、\#GP(13)、\#PF(14)、\#AC(17)。
 
-\section{ISR 汇编 Stub：\texttt{isr\_stubs.asm}}
+% ============================================================================
+\section{数据结构}
 
-% TODO: isr_common_stub 的压栈顺序
-% push err_code (或 push 0) → push int_no
-% pushad → push ds/es/fs/gs
-% call isr_handler_c
-% pop gs/fs/es/ds → popad → add esp,8 → iret
-
-\section{寄存器快照结构：\texttt{regs\_t}}
-
-% TODO: 和汇编 push 顺序一一对应的 C struct
-
-\section{C 异常处理：\texttt{isr\_handler\_c}}
-
-% TODO: 根据 int_no 打印异常名、错误码、EIP
-% Page Fault 特殊处理（读 CR2）
-
-\section{验证：\texttt{int3} 自检}
+\subsection{IDT 条目格式（8 字节）}
 
 \begin{lstlisting}[style=cstyle]
-// kmain 中插入：
-__asm__ volatile("int3");
-// 预期：串口打印 #BP Breakpoint vector=3，然后正常返回继续执行
+typedef struct __attribute__((packed)) {
+    uint16_t offset_low;    // handler 地址低 16 位
+    uint16_t selector;      // 代码段选择子（通常 0x08 = 内核代码段）
+    uint8_t  zero;          // 保留，必须为 0
+    uint8_t  type_attr;     // P(1) | DPL(2) | 0 | Type(4)
+    uint16_t offset_high;   // handler 地址高 16 位
+} idt_entry_t;
 \end{lstlisting}
 
+\texttt{type\_attr} = \hex{8E} 的含义：
+
+\begin{bitfield}
+  \bit{7}{P (Present) = 1：此门有效}
+  \bit{5--6}{DPL = 0：只有 Ring 0 能通过 \texttt{int} 触发（将来用户态 syscall 需要 DPL=3）}
+  \bit{4}{0（固定）}
+  \bit{0--3}{Type = \texttt{1110b} = 32-bit Interrupt Gate（自动清 IF，禁用中断嵌套）}
+\end{bitfield}
+
+\begin{whybox}
+Interrupt Gate vs Trap Gate 的区别？
+
+两者唯一的区别是 Interrupt Gate 在进入 handler 时\textbf{自动清除 EFLAGS.IF}
+（关中断），而 Trap Gate 不清。我们用 Interrupt Gate 确保异常处理期间不被
+其他中断打断。
+\end{whybox}
+
+\subsection{寄存器快照结构 \texttt{regs\_t}}
+
+汇编 stub 按固定顺序将所有寄存器压栈，然后 C handler 把栈指针当作
+\texttt{regs\_t*} 来读取：
+
+\begin{lstlisting}[style=cstyle]
+typedef struct regs {
+    uint32_t gs, fs, es, ds;                // 段寄存器（手动 push）
+    uint32_t edi, esi, ebp, esp,            // pushad
+             ebx, edx, ecx, eax;
+    uint32_t int_no, err_code;              // stub push 的向量号和错误码
+    uint32_t eip, cs, eflags;              // CPU 自动压栈
+} regs_t;
+\end{lstlisting}
+
+\begin{warnbox}
+\texttt{regs\_t} 的字段顺序必须和汇编 stub 的 push 顺序\textbf{严格一致}。
+如果顺序错了，C 代码读到的寄存器值全部是错的——这种 bug 极难排查。
+\end{warnbox}
+
+% ============================================================================
+\section{ISR 汇编 Stub：\texttt{isr\_stubs.asm}}
+
+每个异常向量需要一个汇编入口来统一栈布局，然后调用 C 的 \texttt{isr\_handler\_c}。
+
+\subsection{对齐栈：有/无错误码}
+
+\begin{lstlisting}[style=nasmstyle]
+; 无错误码的异常（如 #DE, #BP）：手动 push 0 对齐
+isr0:
+    push dword 0        ; 伪 error_code
+    push dword 0        ; int_no = 0
+    jmp isr_common_stub
+
+; 有错误码的异常（如 #GP, #PF）：CPU 已经 push 了 error_code
+isr13:
+    push dword 13       ; int_no = 13
+    jmp isr_common_stub
+\end{lstlisting}
+
+\subsection{公共 stub}
+
+\begin{lstlisting}[style=nasmstyle]
+isr_common_stub:
+    pushad              ; 保存 EAX~EDI（8 个通用寄存器）
+    push ds             ; 保存段寄存器
+    push es
+    push fs
+    push gs
+
+    mov ax, 0x10        ; 切换到内核数据段
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    push esp            ; 参数：指向 regs_t 的指针
+    call isr_handler_c
+    add esp, 4
+
+    pop gs              ; 恢复段寄存器
+    pop fs
+    pop es
+    pop ds
+    popad               ; 恢复通用寄存器
+    add esp, 8          ; 跳过 int_no 和 err_code
+    iret                ; 从中断返回
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{iret} 执行时，CPU 从栈上弹出 EIP、CS、EFLAGS（如果发生了特权级切换，
+还会弹出 SS 和 ESP）。\reg{CS} 的恢复意味着 CPL 可能从 Ring 0 回到 Ring 3
+（将来做用户态时会用到）。
+\end{cpustate}
+
+% ============================================================================
+\section{C 异常处理：\texttt{isr\_handler\_c}}
+
+\begin{lstlisting}[style=cstyle]
+void isr_handler_c(const regs_t* r) {
+    // Page Fault 特殊处理
+    if (r->int_no == 14) {
+        page_fault_handler(r);
+        // 当前阶段：不可恢复，halt
+        for (;;) __asm__ volatile("hlt");
+    }
+
+    printk("[isr] %s vector=%u err=0x%08x eip=0x%08x\n",
+           exception_name(r->int_no),
+           r->int_no, r->err_code, r->eip);
+
+    // Breakpoint (int3) 允许返回——用来做自检
+    if (r->int_no == 3) return;
+
+    // 其他异常：Kernel panic
+    printk("Kernel panic: %s\n", exception_name(r->int_no));
+    for (;;) __asm__ volatile("hlt");
+}
+\end{lstlisting}
+
+\begin{designbox}
+为什么 \texttt{int3}（Breakpoint）允许返回而其他异常 halt？
+
+\texttt{int3} 是调试用的指令，触发后 \reg{EIP} 已经指向下一条指令，
+正常 \texttt{iret} 即可继续执行。我们利用这个特性做"自检"——
+在 \texttt{kmain} 里执行 \texttt{int3}，如果串口打印了 \texttt{\#BP Breakpoint}
+并继续运行，说明 IDT 工作正常。
+
+而除零（\#DE）、非法指令（\#UD）等异常指向的 \reg{EIP} 通常还是故障指令本身，
+如果直接返回会无限触发同一异常。
+\end{designbox}
+
+\subsection{Page Fault Handler}
+
+Page Fault 需要额外读取 \reg{CR2}（故障虚拟地址）并解码错误码：
+
+\begin{lstlisting}[style=cstyle]
+static void page_fault_handler(const regs_t* r) {
+    uint32_t fault_addr = read_cr2();
+    uint32_t err = r->err_code;
+
+    printk("Faulting address (CR2): 0x%08x\n", fault_addr);
+    printk("  %s\n", (err & 0x01) ? "Protection violation"
+                                   : "Page not present");
+    printk("  Caused by: %s\n", (err & 0x02) ? "write" : "read");
+    printk("  CPU mode:  %s\n", (err & 0x04) ? "user" : "kernel");
+}
+\end{lstlisting}
+
+Page Fault 错误码的 bitfield：
+
+\begin{bitfield}
+  \bit{0}{P：0=页不存在，1=权限违规（页存在但不允许访问）}
+  \bit{1}{W/R：0=读操作引起，1=写操作引起}
+  \bit{2}{U/S：0=内核态发生，1=用户态发生}
+  \bit{3}{RSVD：页表条目的保留位被错误设置}
+  \bit{4}{I/D：取指令（instruction fetch）引起}
+\end{bitfield}
+
+% ============================================================================
+\section{验证：\texttt{int3} 自检}
+
+在 \texttt{kmain} 中加入：
+
+\begin{lstlisting}[style=cstyle]
+idt_init();
+printk("[init] idt ok\n");
+__asm__ volatile("int3");   // 触发 #BP → 打印 → 返回 → 继续
+printk("int3 returned, IDT works!\n");
+\end{lstlisting}
+
+预期串口输出：
+\begin{lstlisting}[style=shellstyle]
+[init] idt ok
+[isr] #BP Breakpoint vector=3 err=0x00000000 eip=0xC01xxxxx
+int3 returned, IDT works!
+\end{lstlisting}
+
+如果看不到 \texttt{int3 returned}，说明 \texttt{iret} 有问题——检查 stub 的
+栈布局是否和 \texttt{regs\_t} 一致。
+
+% ============================================================================
 \section{本章小结}
 
-IDT 是内核的"事件分发表"。我们现在能捕获 CPU 异常并打印诊断信息，
-而不是直接 Triple Fault。下一章我们接入硬件中断——PIC 和键盘。
+IDT 是内核的"事件分发表"。安装了 0--31 号异常处理程序后：
+
+\begin{itemize}
+  \item 除零、非法指令等错误会打印诊断信息而非直接 Triple Fault
+  \item Page Fault 能显示故障地址和原因，是后续调试分页的关键
+  \item \texttt{int3} 自检验证了整条链路：ISR stub → C handler → iret
+\end{itemize}
+
+下一章我们接入硬件中断——初始化 8259 PIC，安装 IRQ handler，
+让键盘能触发中断并输入字符。
