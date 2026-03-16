@@ -1,64 +1,164 @@
 % ============================================================================
 \chapter{IRQ、PIC 与键盘驱动}
 \label{ch:irq-keyboard}
-% Stage 3 — 对应 2026-03-10 changelog（IRQ + Keyboard）
+% Stage 3 — 对应 2026-03-10 changelog
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 理解 8259 PIC（可编程中断控制器）的工作原理
-  \item Remap PIC 将 IRQ0--15 映射到 IDT 向量 0x20--0x2F
-  \item 实现 IRQ 分发框架（注册 handler + EOI）
+  \item 理解 8259 PIC（可编程中断控制器）的工作原理与 remap
+  \item 实现 IRQ 分发框架：handler 注册 + EOI 发送
   \item 实现 PS/2 键盘驱动：scancode → ASCII + 环形缓冲区
+  \item 验证按键能正确输入
 \end{itemize}
 
+% ============================================================================
 \section{背景知识：8259 PIC}
 
-% TODO:
-% - 主 PIC (IRQ0-7, port 0x20/0x21) + 从 PIC (IRQ8-15, port 0xA0/0xA1)
-% - ICW1-ICW4 初始化序列
-% - Remap: 为什么要从默认的 0x08 改到 0x20（避开 CPU 异常）
-% - IMR (Interrupt Mask Register): 屏蔽/使能 IRQ
-% - EOI (End of Interrupt): 告诉 PIC 中断处理完毕
+x86 PC 有两片级联的 8259 PIC，管理 16 条硬件中断线（IRQ0--15）：
 
-\subsection{IRQ 向量映射}
+\begin{longtable}{cll}
+  \toprule
+  \textbf{IRQ} & \textbf{设备} & \textbf{PIC} \\
+  \midrule
+  0  & PIT（定时器）   & 主 PIC \\
+  1  & PS/2 键盘       & 主 PIC \\
+  2  & 级联从 PIC      & 主 PIC \\
+  8  & CMOS/RTC        & 从 PIC \\
+  14 & Primary ATA     & 从 PIC \\
+  \bottomrule
+\end{longtable}
 
-% TODO: 表格 IRQ0=0x20(Timer), IRQ1=0x21(Keyboard), ...
+\subsection{为什么要 Remap？}
 
-\section{PIC 初始化：\texttt{pic.c}}
+PIC 上电后默认将 IRQ0--7 映射到中断向量 8--15，与 CPU 异常重叠！
+必须 remap 到 0x20--0x2F（32--47）来避免冲突。
 
-% TODO: pic_init() 的 ICW1-4 序列逐步解释
+\begin{thinkbox}
+如果不做 remap，IRQ1（键盘）会映射到向量 9。向量 9 原本是什么异常？
+这会导致什么后果？
+\end{thinkbox}
 
-\section{IRQ 分发框架：\texttt{irq.c}}
+\subsection{ICW 初始化序列}
 
-% TODO: g_irq_handlers[16], irq_install_handler, irq_handler_c
+remap 通过向 PIC 发送 4 个 ICW（Initialization Command Words）完成：
 
-\section{IRQ 汇编 Stub：\texttt{irq\_stubs.asm}}
-
-% TODO: 和 ISR stub 类似，但 push 的是 IRQ 号 + 调用 irq_handler_c
-
-\section{PS/2 键盘驱动：\texttt{keyboard.c}}
-
-% TODO:
-% - 端口 0x60 读 scancode
-% - Scancode Set 1 → ASCII 转换表（含 Shift 状态）
-% - 环形缓冲区（ring buffer）存储按键
-% - keyboard_getc() / keyboard_try_getc()
-
-\begin{designbox}
-为什么用环形缓冲区？中断处理程序必须尽快返回（否则会阻塞其他中断）。
-把字符存入缓冲区、由 shell 主循环消费，是经典的"生产者-消费者"模式。
-\end{designbox}
-
-\section{验证}
-
-\begin{lstlisting}[style=shellstyle]
-make iso && make run
-# 在 QEMU 窗口按键，串口应看到按键回显
+\begin{lstlisting}[style=cstyle]
+void pic_init(void) {
+    // ICW1: 开始初始化序列
+    outb(0x20, 0x11);  outb(0xA0, 0x11);
+    // ICW2: 基向量（主 PIC → 0x20，从 PIC → 0x28）
+    outb(0x21, 0x20);  outb(0xA1, 0x28);
+    // ICW3: 主从级联关系
+    outb(0x21, 0x04);  outb(0xA1, 0x02);
+    // ICW4: 8086 模式
+    outb(0x21, 0x01);  outb(0xA1, 0x01);
+    // OCW1: 屏蔽所有 IRQ（后续按需开启）
+    outb(0x21, 0xFF);  outb(0xA1, 0xFF);
+}
 \end{lstlisting}
 
+\subsection{EOI（End of Interrupt）}
+
+每次 IRQ handler 完成后必须向 PIC 发送 EOI，否则 PIC 不会再发送该优先级及以下的中断：
+
+\begin{lstlisting}[style=cstyle]
+void pic_send_eoi(uint8_t irq) {
+    if (irq >= 8) outb(0xA0, 0x20);  // 从 PIC
+    outb(0x20, 0x20);                  // 主 PIC
+}
+\end{lstlisting}
+
+\begin{warnbox}
+忘记发 EOI 是最常见的硬件中断 bug。表现为：第一次按键有反应，之后键盘完全无响应。
+\end{warnbox}
+
+% ============================================================================
+\section{IRQ 分发框架：\texttt{irq.c}}
+
+\begin{lstlisting}[style=cstyle]
+static irq_handler_t g_irq_handlers[16] = {0};
+
+void irq_install_handler(uint8_t irq, irq_handler_t handler) {
+    g_irq_handlers[irq] = handler;
+}
+
+void irq_handler_c(regs_t* regs) {
+    uint8_t irq = regs->int_no - 0x20;
+    if (irq < 16 && g_irq_handlers[irq]) {
+        g_irq_handlers[irq](regs);
+    }
+    pic_send_eoi(irq);
+}
+\end{lstlisting}
+
+\begin{designbox}
+为什么用函数指针数组而非 switch/case？
+
+每个驱动只需调用 \texttt{irq\_install\_handler(1, keyboard\_irq\_handler)} 即可注册。
+添加新设备不需要修改 irq.c，符合开放封闭原则。
+\end{designbox}
+
+% ============================================================================
+\section{PS/2 键盘驱动：\texttt{keyboard.c}}
+
+\subsection{Scancode → ASCII}
+
+键盘按下时发送 scancode（Make code），释放时发送 scancode + 0x80（Break code）。
+我们维护一张 scancode → ASCII 的查找表（Scancode Set 1）。
+
+\begin{thinkbox}
+为什么键盘发送的是 scancode 而非 ASCII？思考：键盘如何表示"Shift 被按住"和"Shift 被释放"？
+如果直接发 ASCII，怎么区分大小写？
+\end{thinkbox}
+
+\subsection{环形缓冲区}
+
+\begin{lstlisting}[style=cstyle]
+#define KB_BUF_SIZE 256
+static char kb_buf[KB_BUF_SIZE];
+static volatile uint32_t kb_head = 0;
+static volatile uint32_t kb_tail = 0;
+\end{lstlisting}
+
+IRQ handler（中断上下文）向 \texttt{kb\_head} 写入字符，
+主循环从 \texttt{kb\_tail} 读取。
+
+\begin{designbox}
+为什么用环形缓冲区？
+
+中断处理必须尽快返回（否则阻塞其他中断）。环形缓冲区让 IRQ handler 只做
+"存字符"，消费由 shell 主循环完成——经典的生产者-消费者模式。
+\end{designbox}
+
+\subsection{公开 API}
+
+\begin{lstlisting}[style=cstyle]
+char keyboard_getc(void);       // 阻塞等待一个字符
+int  keyboard_try_getc(char*);  // 非阻塞尝试读取
+\end{lstlisting}
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+注释掉 \texttt{pic\_send\_eoi} 的调用，重新运行。第一次按键后再按键，还有反应吗？
+恢复后试试忘记给从 PIC 发 EOI（只保留主 PIC EOI），IRQ8--15 的设备是否受影响？
+\end{exercise}
+
+\begin{exercise}
+修改 \texttt{KB\_BUF\_SIZE} 为 4（极小缓冲区）。快速连续打字，观察是否丢字符。
+思考：环形缓冲区满时应该丢弃新字符还是覆盖旧字符？各有什么优缺点？
+\end{exercise}
+
+\begin{exercise}
+在键盘驱动中添加对 Caps Lock 的支持。提示：Caps Lock 的 scancode 是 0x3A，
+它是一个"切换键"——按一次开启，再按一次关闭。
+\end{exercise}
+
+% ============================================================================
 \section{本章小结}
 
-硬件中断链路打通：PIC → IRQ stub → C handler → 键盘驱动 → 缓冲区。
-下一章我们用这个输入做交互式 Shell。
+硬件中断链路打通：PIC remap → IRQ stub → C handler → 键盘驱动 → 环形缓冲区。
+下一章我们用这个输入能力构建交互式 Shell。
