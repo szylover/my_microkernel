@@ -1,0 +1,44 @@
+% ============================================================================
+\chapter{VFS：虚拟文件系统}
+\label{ch:vfs}
+% Stage 15 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 设计 VFS 抽象层：统一 \texttt{open}/\texttt{read}/\texttt{write}/\texttt{close} 接口
+  \item 实现文件描述符表（per-process fd table）
+  \item 为后续具体文件系统（ramfs、FAT32）提供挂载框架
+\end{itemize}
+
+\section{背景知识：为什么需要 VFS}
+
+% TODO:
+% - Unix 哲学："一切皆文件"
+% - 不同文件系统（ext2, FAT, procfs）共享相同 API
+% - Linux VFS 四大对象: superblock, inode, dentry, file
+
+\section{VFS 数据结构}
+
+% TODO:
+% - vfs_ops_t: mount/open/read/write/close/stat/readdir
+% - vnode (inode 简化版)
+% - file descriptor → vnode + offset
+
+\section{文件描述符表}
+
+% TODO: 每个进程 fd_table[MAX_FD]，fd 0/1/2 = stdin/stdout/stderr
+
+\section{系统调用集成}
+
+% TODO: sys_open, sys_read, sys_write, sys_close 通过 VFS 分发
+
+\section{验证}
+
+% TODO: open("/dev/serial") → write → 串口输出
+
+\section{本章小结}
+
+VFS 是文件系统的"可插拔接口"。下一章实现第一个具体文件系统 ramfs，
+让用户程序能读取打包在内核镜像中的文件。

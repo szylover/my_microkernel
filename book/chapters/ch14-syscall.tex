@@ -1,0 +1,57 @@
+% ============================================================================
+\chapter{系统调用}
+\label{ch:syscall}
+% Stage 12 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解系统调用的本质：用户态 → 内核态的受控入口
+  \item 实现 \texttt{int 0x80} 系统调用门
+  \item 第一批 syscall：\texttt{write}、\texttt{exit}、\texttt{brk}
+  \item 用户态 syscall 封装库
+\end{itemize}
+
+\section{背景知识：为什么需要系统调用}
+
+% TODO:
+% - 用户态 (Ring 3) 不能直接访问硬件、修改页表
+% - 系统调用是"合法的特权提升"通道
+% - int 0x80 (Linux 传统) vs sysenter/syscall (现代)
+% - 我们先用 int 0x80（简单，调试方便）
+
+\subsection{系统调用约定}
+
+% TODO:
+% - EAX = syscall number
+% - EBX, ECX, EDX, ESI, EDI = 参数
+% - 返回值在 EAX
+
+\section{IDT 配置}
+
+% TODO: 在 idt_set_gate(0x80, ...) 中 DPL=3，允许 Ring 3 触发
+
+\section{Syscall 分发}
+
+% TODO: syscall_handler_c → switch(eax) → sys_write / sys_exit / sys_brk
+
+\section{第一批系统调用}
+
+% TODO:
+% - sys_write(fd, buf, count): fd=1 输出到串口
+% - sys_exit(code): 终止当前进程
+% - sys_brk(addr): 调整用户堆边界
+
+\section{用户态封装}
+
+% TODO: 内联汇编封装 syscall(nr, arg1, arg2, ...)
+
+\section{验证}
+
+% TODO: 用户态程序调 write(1, "hello\n", 6) → 串口输出
+
+\section{本章小结}
+
+系统调用桥接了用户态和内核态。有了 write/exit，用户程序能输出信息和正常退出。
+下一章实现进程管理（PCB、fork、exec）。

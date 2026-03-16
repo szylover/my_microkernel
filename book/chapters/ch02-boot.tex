@@ -1,0 +1,647 @@
+% Stage 1 — Multiboot2 引导与串口输出
+% ============================================================================
+\chapter{Multiboot2 引导与串口输出}
+\label{ch:boot}
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 开机流程：BIOS → GRUB → 内核 \texttt{\_start}
+  \item 掌握 Multiboot2 header 格式（magic / architecture / length / checksum）
+  \item 理解链接脚本 \texttt{linker.ld}：物理加载地址 1\,MiB、\texttt{.boot} 段、高半区布局
+  \item 掌握 \texttt{boot.asm}：PSE 页目录构造、CR4/CR3/CR0 设置、跳转到高半区
+  \item 理解引导期双重映射（identity + high-half）的必要性
+  \item 理解内核栈设置与 \texttt{kmain} 的 cdecl 调用约定
+  \item 掌握 UART 16550 寄存器与 \texttt{serial\_init()} 初始化步骤
+  \item 了解 \texttt{printk} 的 \texttt{va\_list} 实现与格式说明符
+  \item 理解 Multiboot2 info 结构的 tag 迭代解析
+\end{itemize}
+
+% ============================================================================
+\section{背景知识：x86 开机流程}
+
+当你按下电源按钮，到内核第一行 C 代码执行，中间经历了什么？
+
+\begin{enumerate}
+  \item \textbf{BIOS/UEFI 自检}——CPU 从 \hex{FFFFFFF0}（重置向量）开始执行 BIOS 固件，
+        完成硬件自检（POST）、枚举内存及 PCI 设备。
+  \item \textbf{GRUB 加载}——BIOS 读取启动扇区，加载 GRUB bootloader。
+        GRUB 解析 ELF 内核映像，找到 Multiboot2 header 确认格式正确。
+  \item \textbf{内核入口}——GRUB 把内核加载到 ELF \texttt{p\_paddr} 指定的物理地址，
+        设置好约定的寄存器状态，跳转到 \texttt{\_start}。
+\end{enumerate}
+
+\begin{cpustate}
+GRUB 移交控制权时的 CPU 状态：
+\begin{itemize}
+  \item \reg{EAX} = \hex{36d76289}（Multiboot2 magic，用于内核验证）
+  \item \reg{EBX} = Multiboot2 info 结构体的\textbf{物理地址}
+  \item \reg{CR0.PG} = 0（分页关闭），处于 32 位保护模式
+  \item \reg{EIP} ≈ \hex{00100000}（物理地址，内核加载位置）
+  \item 中断已禁用（\texttt{IF=0}），无可用栈
+\end{itemize}
+\end{cpustate}
+
+\begin{thinkbox}
+为什么内核要加载到 1\,MiB（\hex{100000}）而不是 0 地址？
+
+0--\hex{A0000}（640\,KiB）是传统 DOS 可用内存，但其中散布着 BIOS 数据区（BDA）、
+中断向量表（IVT, 0--\hex{3FF}）等关键结构，GRUB 运行时也在使用。
+\hex{A0000}--\hex{FFFFF} 是 VGA 缓冲区、ROM shadow 和 BIOS 扩展区。
+1\,MiB 以上才是干净的、可自由使用的连续 RAM。
+\end{thinkbox}
+
+% ============================================================================
+\section{Multiboot2 Header}
+
+GRUB 扫描 OS 映像的前 32\,KiB，寻找 8 字节对齐的 Multiboot2 header。
+header 格式如下：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.8cm, font=\ttfamily\small, anchor=west},
+]
+  \node[cell, minimum width=3cm, fill=red!15]    at (0, 0)   {\small magic};
+  \node[cell, minimum width=3cm, fill=blue!12]   at (3, 0)   {\small architecture};
+  \node[cell, minimum width=3cm, fill=green!12]  at (6, 0)   {\small header\_length};
+  \node[cell, minimum width=3cm, fill=yellow!15] at (9, 0)   {\small checksum};
+
+  \node[font=\scriptsize, below] at (1.5, -0.1) {\hex{E85250D6}};
+  \node[font=\scriptsize, below] at (4.5, -0.1) {0 = i386};
+  \node[font=\scriptsize, below] at (7.5, -0.1) {字节数};
+  \node[font=\scriptsize, below] at (10.5, -0.1) {使总和为 0};
+
+  \draw[{|}-{|}, thick] (0, -0.7) -- (3, -0.7);
+  \node[font=\scriptsize, below] at (1.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (3, -0.7) -- (6, -0.7);
+  \node[font=\scriptsize, below] at (4.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (6, -0.7) -- (9, -0.7);
+  \node[font=\scriptsize, below] at (7.5, -0.7) {4\,B};
+  \draw[{|}-{|}, thick] (9, -0.7) -- (12, -0.7);
+  \node[font=\scriptsize, below] at (10.5, -0.7) {4\,B};
+
+  % End tag
+  \node[cell, minimum width=4cm, fill=gray!15] at (0, -1.6) {\small end tag};
+  \node[font=\scriptsize] at (5.5, -1.6) {type=0, flags=0, size=8};
+\end{tikzpicture}
+\caption{Multiboot2 Header 格式}
+\label{fig:mb2-header}
+\end{figure}
+
+校验和的计算使四个 32 位字段之和在 $2^{32}$ 模下为 0：
+$$\texttt{checksum} = \texttt{0x100000000} - (\texttt{magic} + \texttt{arch} + \texttt{length})$$
+
+对应的汇编实现：
+
+\begin{lstlisting}[style=nasmstyle]
+section .multiboot_header
+align 8
+header_start:
+    dd 0xe85250d6                       ; Multiboot2 magic
+    dd 0                                ; architecture: i386
+    dd header_end - header_start        ; header length
+    dd 0x100000000 - (0xe85250d6 + 0 + (header_end - header_start))
+
+    ; Required end tag
+    dw 0    ; type
+    dw 0    ; flags
+    dd 8    ; size
+align 8
+header_end:
+\end{lstlisting}
+
+\begin{warnbox}
+Multiboot2 header 必须位于映像的前 32\,KiB 内，且 8 字节对齐。
+链接脚本必须确保 \texttt{.multiboot\_header} 是映像中最早的段，
+否则 GRUB 会报 ``\texttt{error: no multiboot header found}'' 并拒绝加载。
+\end{warnbox}
+
+% ============================================================================
+\section{链接脚本 \texttt{linker.ld} 详解}
+
+链接脚本控制 ELF 各段的虚拟地址（VMA）和物理地址（LMA）。
+对于高半区内核（high-half kernel），这两者不同：
+
+\begin{lstlisting}[style=cstyle, language={}]
+OUTPUT_FORMAT(elf32-i386)
+ENTRY(_start)
+KERNEL_VIRT_BASE = 0xC0000000;
+
+SECTIONS {
+    . = 1M;    /* 物理加载地址从 1 MiB 开始 */
+    __kernel_phys_start = .;
+
+    /* Boot 段：物理地址链接 + 物理地址加载 */
+    .boot ALIGN(4096) : {
+        KEEP(*(.multiboot_header))
+        *(.boot .boot.*)
+    }
+    .boot_bss ALIGN(4096) (NOLOAD) : {
+        *(.boot_bss .boot_bss.*)
+    }
+
+    /* 切换到高半区虚拟地址 */
+    . += KERNEL_VIRT_BASE;
+    __kernel_virt_start = .;
+
+    /* 内核段：虚拟地址是 0xC01xxxxx，物理地址通过 AT() 回到 1M+ */
+    .text ALIGN(4096) : AT(ADDR(.text) - KERNEL_VIRT_BASE) {
+        *(.text .text.*)
+    }
+    .rodata ALIGN(4096) : AT(ADDR(.rodata) - KERNEL_VIRT_BASE) {
+        *(.rodata .rodata.*)
+    }
+    .data ALIGN(4096) : AT(ADDR(.data) - KERNEL_VIRT_BASE) {
+        *(.data .data.*)
+    }
+    .bss ALIGN(4096) (NOLOAD) : AT(ADDR(.bss) - KERNEL_VIRT_BASE) {
+        *(COMMON)
+        *(.bss .bss.*)
+    }
+    __kernel_virt_end = .;
+    __kernel_phys_end = __kernel_virt_end - KERNEL_VIRT_BASE;
+}
+\end{lstlisting}
+
+核心要点：
+
+\begin{itemize}
+  \item \textbf{\texttt{. = 1M;}}——位置计数器从 1\,MiB 开始，GRUB 将内核加载到此处。
+
+  \item \textbf{\texttt{.boot} 段}——包含 Multiboot2 header 和早期引导代码。
+        这些代码在分页开启前执行，必须链接在物理地址上（否则 EIP 不对）。
+        \texttt{KEEP} 确保 \texttt{.multiboot\_header} 不被垃圾回收优化掉。
+
+  \item \textbf{\texttt{. += KERNEL\_VIRT\_BASE;}}——位置计数器跳到
+        \hex{C0000000} + 当前偏移，后续段链接在高半区虚拟地址。
+
+  \item \textbf{\texttt{AT(ADDR(.text) - KERNEL\_VIRT\_BASE)}}——
+        ELF 的 \texttt{p\_vaddr} = \hex{C01xxxxx}（链接地址），
+        但 \texttt{p\_paddr} = \hex{001xxxxx}（加载地址）。
+        GRUB 按 \texttt{p\_paddr} 加载到物理 RAM，
+        但代码中所有符号引用用的是虚拟地址——分页开启后才能正确解析。
+
+  \item \textbf{\texttt{\_\_kernel\_phys\_start}/\texttt{\_\_kernel\_phys\_end}}——
+        供 PMM 用来保留内核占用的物理内存，避免被分配出去。
+\end{itemize}
+
+\begin{thinkbox}
+如果去掉 \texttt{AT()} 宏会发生什么？
+
+ELF 的 \texttt{p\_paddr} 和 \texttt{p\_vaddr} 将相同（都是 \hex{C01xxxxx}）。
+GRUB 会尝试把内核加载到物理地址 \hex{C01xxxxx} ≈ 3\,GiB——
+如果机器只有 256\,MiB 内存，加载直接失败。
+即使内存足够，1\,MiB 以下的 BIOS 区域也已经错过，浪费了低端可用 RAM。
+\end{thinkbox}
+
+% ============================================================================
+\section{\texttt{boot.asm} 详解：从物理地址到高半区}
+
+\texttt{boot.asm} 是内核的入口点 \texttt{\_start}。
+它的核心任务是：在没有分页的情况下构建临时页目录，开启分页后跳转到高半区。
+
+\subsection{保存 Multiboot2 信息}
+
+\begin{lstlisting}[style=nasmstyle]
+_start:
+    mov esi, eax            ; magic (0x36d76289)
+    mov edi, ebx            ; mb2 info pointer (physical address)
+\end{lstlisting}
+
+GRUB 传入的 \reg{EAX}（magic）和 \reg{EBX}（info 指针）保存在 callee-saved
+寄存器 \reg{ESI}/\reg{EDI} 中，以便后续传给 \texttt{kmain}。
+
+\subsection{PSE 页目录构造}
+
+\begin{lstlisting}[style=nasmstyle]
+; 清零页目录 (1024 x 4B = 4 KiB)
+push edi
+mov ecx, 1024
+xor eax, eax
+mov edi, boot_pd
+rep stosd
+pop edi
+
+; 填充 PSE 映射: 256 x 4 MiB = 1 GiB
+xor ecx, ecx
+.fill_pse:
+    mov eax, ecx
+    shl eax, 22             ; eax = ecx * 4 MiB
+    or  eax, 0x83           ; PS(bit7) | RW(bit1) | Present(bit0)
+    mov [boot_pd + ecx*4], eax          ; identity: PD[i]
+    mov [boot_pd + 768*4 + ecx*4], eax  ; high-half: PD[768+i]
+    inc ecx
+    cmp ecx, 256
+    jb  .fill_pse
+\end{lstlisting}
+
+\begin{whybox}
+为什么用 PSE（4\,MiB 大页）而不是标准 4\,KiB 页？
+
+4\,KiB 页需要分配 page table（每个 PDE 指向一个 4\,KiB 页表），
+但此时 PMM 还没初始化——我们甚至不知道哪些物理内存可用。
+PSE 模式下 PDE 自身就包含 4\,MiB 页的物理基地址，不需要页表。
+只需一个页目录（4\,KiB）就能映射整个地址空间。
+
+\texttt{vmm\_init()} 之后会用 4\,KiB 页表替换这些 PSE 条目，
+实现更细粒度的权限控制。
+\end{whybox}
+
+PSE PDE 的位格式：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  bitcell/.style={draw, minimum width=0.7cm, minimum height=0.6cm,
+                  font=\ttfamily\small, anchor=west},
+]
+  \node[bitcell, minimum width=4.2cm, fill=blue!12] at (0, 0) {\small phys[31:22]};
+  \node[bitcell, minimum width=2.8cm, fill=gray!10] at (4.2, 0) {\small 保留/PAT};
+  \node[bitcell, fill=red!15]   at (7, 0) {\small 1};
+  \node[bitcell, fill=gray!10]  at (7.7, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (8.4, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (9.1, 0) {\small 0};
+  \node[bitcell, fill=gray!10]  at (9.8, 0) {\small 0};
+  \node[bitcell, fill=green!15] at (10.5, 0) {\small 1};
+  \node[bitcell, fill=green!15] at (11.2, 0) {\small 1};
+
+  \node[font=\scriptsize, above] at (2.1, 0.6) {bits 31--22};
+  \node[font=\scriptsize, above] at (7.0, 0.6) {PS};
+  \node[font=\scriptsize, above] at (10.5, 0.6) {RW};
+  \node[font=\scriptsize, above] at (11.2, 0.6) {P};
+
+  \node[font=\scriptsize, below] at (6, -0.3) {0x83 = 1000\,0011$_2$ = PS $|$ RW $|$ Present};
+\end{tikzpicture}
+\caption{PSE 模式 PDE 位域（\texttt{0x83} 标志）}
+\label{fig:pse-pde-bits}
+\end{figure}
+
+\subsection{双重映射：Identity + High-Half}
+\label{sec:dual-mapping}
+
+循环将同一物理地址同时写入两个 PD 位置：
+
+\begin{itemize}
+  \item \texttt{PD[i]}（$i = 0..255$）——Identity 映射：虚拟 $i \times 4\text{MiB}$ → 物理 $i \times 4\text{MiB}$
+  \item \texttt{PD[768+i]}——High-half 映射：虚拟 $\hex{C0000000} + i \times 4\text{MiB}$ → 物理 $i \times 4\text{MiB}$
+\end{itemize}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=4.5cm, minimum height=0.7cm,
+                font=\small, anchor=west},
+  arr/.style={-{Stealth[length=5pt]}, thick, blue!60!black},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  % 虚拟地址空间
+  \node[font=\bfseries\small] at (1.5, 3) {虚拟地址空间};
+  \node[block, fill=green!15] (id) at (0, 2) {identity: 0--1\,GiB};
+  \node[block, fill=gray!10]  (gap) at (0, 1.3) {未映射};
+  \node[block, fill=red!15]   (hh) at (0, 0.6) {high-half: 0xC0000000--};
+  \node[addr] at (-0.2, 2) {\hex{00000000}};
+  \node[addr] at (-0.2, 1.3) {\hex{40000000}};
+  \node[addr] at (-0.2, 0.6) {\hex{C0000000}};
+
+  % 物理地址空间
+  \node[font=\bfseries\small] at (9, 3) {物理内存};
+  \node[block, fill=blue!12, minimum height=1.4cm] (phys) at (7, 1.3)
+    {RAM: 0--1\,GiB};
+  \node[addr] at (6.8, 2) {\hex{00000000}};
+
+  % 箭头
+  \draw[arr] (4.5, 2.0) -- (7, 2.0) node[midway, above, font=\scriptsize] {1:1};
+  \draw[arr] (4.5, 0.6) -- (7, 1.0) node[midway, below, font=\scriptsize]
+    {-\,\hex{C0000000}};
+\end{tikzpicture}
+\caption{引导期双重映射：identity 和 high-half 指向同一物理内存}
+\label{fig:dual-mapping}
+\end{figure}
+
+\begin{warnbox}
+如果只建 high-half 映射而不建 identity 映射会发生什么？
+
+开启分页后，CPU 的下一条指令在物理地址 $\sim$\hex{001xxxxx}。
+没有 identity 映射，MMU 无法翻译当前 EIP → \textbf{Page Fault} →
+此时 IDT 还没设置 → \textbf{Double Fault} →
+没有 DF handler → \textbf{Triple Fault} → CPU 重启。
+
+整个"死亡连锁"发生在一条指令之内，QEMU 会直接 reboot，
+串口什么输出都看不到——这也是引导调试最令人头疼的问题之一。
+\end{warnbox}
+
+\subsection{开启 PSE 和分页}
+
+\begin{lstlisting}[style=nasmstyle]
+; CR4.PSE = 1 (允许 4 MiB 页)
+mov eax, cr4
+or  eax, 0x00000010     ; bit 4 = PSE
+mov cr4, eax
+
+; CR3 <- boot_pd (物理地址)
+mov eax, boot_pd
+mov cr3, eax
+
+; CR0.PG = 1 (开启分页)
+mov eax, cr0
+or  eax, 0x80000000     ; bit 31 = PG
+mov cr0, eax
+\end{lstlisting}
+
+\begin{cpustate}
+三步 CR 操作后 CPU 状态的逐步变化：
+\begin{enumerate}
+  \item \texttt{CR4.PSE = 1}——CPU 现在\emph{允许} 4\,MiB 页，但还没开启分页。
+  \item \texttt{CR3 = boot\_pd}——告诉 CPU 页目录在哪，但分页仍关闭。
+  \item \texttt{CR0.PG = 1}——分页\textbf{立即生效}！
+        从下一条指令开始，所有内存访问经过 MMU 翻译。
+        Identity 映射保证当前 EIP 仍然有效。
+\end{enumerate}
+\end{cpustate}
+
+\subsection{跳转到高半区}
+
+\begin{lstlisting}[style=nasmstyle]
+mov eax, _start_high    ; 链接地址 = 0xC01xxxxx
+jmp eax                 ; 跳到高半区虚拟地址
+\end{lstlisting}
+
+\texttt{\_start\_high} 在 \texttt{.text} 段中，链接在 \hex{C01xxxxx}。
+\texttt{mov eax, \_start\_high} 把这个高虚拟地址加载到 \reg{EAX}，
+\texttt{jmp eax} 跳转——MMU 通过 PD[768] 将 \hex{C01xxxxx} 翻译回物理 \hex{001xxxxx}。
+
+从此内核运行在高半区虚拟地址空间。
+
+% ============================================================================
+\section{栈设置与 \texttt{kmain} 调用}
+
+进入高半区后，第一件事是设置栈和调用 C 入口：
+
+\begin{lstlisting}[style=nasmstyle]
+section .text
+_start_high:
+    mov esp, stack_top      ; 栈顶（高半区虚拟地址）
+    and esp, 0xFFFFFFF0     ; 16 字节对齐（SSE 要求）
+
+    ; cdecl 调用约定：参数从右向左压栈
+    push edi                ; mb2_info (物理地址)
+    push esi                ; mb2_magic
+    call kmain
+    add esp, 8              ; 清理参数（不会执行到这里）
+
+.hlt:
+    hlt
+    jmp .hlt
+
+section .bss
+align 4096
+stack_bottom:
+    resb 16384              ; 16 KiB 内核栈
+stack_top:
+\end{lstlisting}
+
+\begin{itemize}
+  \item 栈在 \texttt{.bss} 段中分配 16\,KiB（\texttt{resb 16384}），
+        \texttt{stack\_top} 是栈的高地址端（x86 栈向下增长）。
+  \item \texttt{and esp, 0xFFFFFFF0} 确保 16 字节对齐——System V ABI 要求
+        调用函数前 \reg{ESP} 必须 16 字节对齐。
+  \item \texttt{push edi; push esi; call kmain}——\texttt{cdecl} 约定，
+        参数从右向左压栈，\texttt{kmain(uint32\_t magic, void* mb2\_info)}。
+  \item \texttt{kmain} 正常不会返回；如果返回则 \texttt{hlt} 停住 CPU。
+\end{itemize}
+
+% ============================================================================
+\section{UART 16550 串口输出}
+\label{sec:serial}
+
+在 OS 开发中，串口是最可靠的调试输出通道——
+VGA 文本模式需要正确的显存映射，而串口只需要几个 I/O 端口。
+QEMU 可以将串口输出重定向到终端（\texttt{-serial stdio}），非常方便。
+
+\subsection{16550 寄存器表}
+
+COM1 的基地址为 \hex{3F8}，各寄存器偏移如表~\ref{tab:uart-regs}：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{cllp{5.5cm}}
+\toprule
+\textbf{偏移} & \textbf{DLAB=0} & \textbf{DLAB=1} & \textbf{说明} \\
+\midrule
++0 & DATA（读/写） & DLL（除数低字节） & 收发数据 / 波特率低字节 \\
++1 & IER（中断使能） & DLM（除数高字节） & 中断控制 / 波特率高字节 \\
++2 & IIR / FCR & — & 中断识别 / FIFO 控制 \\
++3 & LCR（线路控制） & — & 数据位/停止位/校验/DLAB \\
++4 & MCR（Modem 控制） & — & RTS/DTR/OUT 控制 \\
++5 & LSR（线路状态） & — & bit\,0=DataReady, bit\,5=THR Empty \\
+\bottomrule
+\end{tabular}
+\caption{UART 16550 寄存器（COM1 = \hex{3F8}）}
+\label{tab:uart-regs}
+\end{table}
+
+\texttt{DLAB}（Divisor Latch Access Bit）是 LCR 的 bit\,7。
+当 DLAB=1 时，偏移 +0 和 +1 变为波特率除数寄存器。
+
+\subsection{\texttt{serial\_init()} 初始化步骤}
+
+\begin{lstlisting}[style=cstyle]
+void serial_init(void) {
+    outb(COM1 + 1, 0x00);  // 1. 关闭所有中断
+    outb(COM1 + 3, 0x80);  // 2. 设置 DLAB=1
+    outb(COM1 + 0, 0x03);  // 3. 除数低字节=3 -> 38400 baud
+    outb(COM1 + 1, 0x00);  // 4. 除数高字节=0
+    outb(COM1 + 3, 0x03);  // 5. 8N1, DLAB=0
+    outb(COM1 + 2, 0xC7);  // 6. 启用 FIFO, 清缓冲, 14B 阈值
+    outb(COM1 + 4, 0x0B);  // 7. RTS/DTR/OUT2 置位
+}
+\end{lstlisting}
+
+逐步解析：
+\begin{enumerate}
+  \item 关中断——此时 PIC/IDT 还没设好，串口中断会引发异常。
+  \item DLAB=1——让偏移 +0/+1 变成除数寄存器。
+  \item 除数 = 3——波特率 = $115200 \div 3 = 38400$。
+  \item 除数高字节 = 0。
+  \item LCR = \texttt{0x03} = 8 数据位、无校验、1 停止位（8N1），同时 DLAB=0。
+  \item FCR = \texttt{0xC7} = 启用 FIFO + 清空收发缓冲区 + 14 字节触发阈值。
+  \item MCR = \texttt{0x0B} = RTS + DTR + OUT2（OUT2 在 PC 上与 IRQ 线相连）。
+\end{enumerate}
+
+\subsection{发送一个字符}
+
+\begin{lstlisting}[style=cstyle]
+void serial_putc(char c) {
+    if (c == '\n') {
+        while (!serial_transmit_empty()) {}
+        outb(COM1, '\r');       // CRLF: 先回车
+    }
+    while (!serial_transmit_empty()) {} // 等 THR 空
+    outb(COM1, (uint8_t)c);
+}
+
+static int serial_transmit_empty(void) {
+    return (inb(COM1 + 5) & 0x20) != 0;  // LSR bit5
+}
+\end{lstlisting}
+
+发送前轮询 LSR 的 bit\,5（Transmitter Holding Register Empty）。
+遇到 \texttt{'\textbackslash n'} 时先发 \texttt{'\textbackslash r'}（CR），
+确保串口终端换行后光标回到行首（否则输出会呈"阶梯状"）。
+
+% ============================================================================
+\section{\texttt{printk} 实现概述}
+\label{sec:printk}
+
+\texttt{printk} 是内核的 \texttt{printf}——唯一的格式化输出设施。
+所有输出最终通过 \texttt{serial\_putc} 发送到串口。
+
+\subsection{核心结构}
+
+\begin{lstlisting}[style=cstyle]
+void printk(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintk(fmt, args);     // 内部实现
+    va_end(args);
+}
+\end{lstlisting}
+
+\texttt{vprintk} 逐字符扫描 \texttt{fmt}，遇到 \texttt{\%} 时解析格式说明符。
+支持的格式如表~\ref{tab:printk-formats}：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{6cm}}
+\toprule
+\textbf{说明符} & \textbf{参数类型} & \textbf{说明} \\
+\midrule
+\texttt{\%d} & \texttt{int}      & 有符号十进制 \\
+\texttt{\%u} & \texttt{unsigned} & 无符号十进制 \\
+\texttt{\%x} & \texttt{unsigned} & 小写十六进制（无 \texttt{0x} 前缀） \\
+\texttt{\%p} & \texttt{void*}    & 指针，格式 \texttt{0xXXXXXXXX}（固定 8 位） \\
+\texttt{\%s} & \texttt{char*}    & 字符串（NULL 安全，输出 \texttt{(null)}） \\
+\texttt{\%c} & \texttt{int}      & 单个字符 \\
+\texttt{\%\%} & —               & 字面 \texttt{\%} \\
+\bottomrule
+\end{tabular}
+\caption{\texttt{printk} 支持的格式说明符}
+\label{tab:printk-formats}
+\end{table}
+
+\subsection{格式化选项}
+
+\texttt{vprintk} 还支持：
+\begin{itemize}
+  \item \textbf{宽度} —— \texttt{\%8x} 输出至少 8 个字符（右对齐，空格填充）。
+  \item \textbf{零填充} —— \texttt{\%08x} 左侧补零。
+  \item \textbf{左对齐} —— \texttt{\%-16s} 左对齐、右侧补空格。
+\end{itemize}
+
+\begin{designbox}
+为什么从头实现 \texttt{printk} 而不用 \texttt{libc} 的 \texttt{printf}？
+
+内核没有标准 C 库（freestanding 环境）。\texttt{printf} 依赖 \texttt{FILE*}、
+\texttt{stdout}、\texttt{write} 系统调用等基础设施——这些都是我们自己要实现的东西。
+内核的 \texttt{printk} 直接写 \texttt{serial\_putc}，零依赖、零缓冲。
+\end{designbox}
+
+% ============================================================================
+\section{Multiboot2 信息结构解析}
+\label{sec:mb2-info}
+
+GRUB 在 \reg{EBX} 中传递的 Multiboot2 info 是一个 tag 链表结构：
+
+\begin{lstlisting}[style=cstyle]
+/* 信息结构头部 */
+struct mb2_info {
+    uint32_t total_size;    /* 整个结构的字节数 */
+    uint32_t reserved;
+    /* 后面紧跟若干 tag，每个 tag 8 字节对齐 */
+};
+
+/* 每个 tag 的公共头 */
+struct mb2_tag {
+    uint32_t type;          /* tag 类型 */
+    uint32_t size;          /* tag 字节数（含此头） */
+};
+\end{lstlisting}
+
+遍历算法：从 \texttt{base + 8} 开始，每次跳过当前 tag 的 \texttt{size}（向上 8 字节对齐），
+直到遇到 end tag（type=0, size=8）。
+
+对我们最重要的是 \textbf{Memory Map Tag}（type=6），它报告物理内存布局——
+这是 PMM 初始化的输入数据（详见第~\ref{ch:pmm}~章）。
+
+\begin{lstlisting}[style=cstyle]
+struct mb2_mmap_entry {
+    uint64_t addr;      /* 区域起始物理地址 */
+    uint64_t len;       /* 区域长度 */
+    uint32_t type;      /* 1=可用, 2=保留, 3=ACPI, ... */
+    uint32_t reserved;
+};
+\end{lstlisting}
+
+\begin{thinkbox}
+Multiboot2 info 指针是\textbf{物理地址}，但 \texttt{kmain} 在分页开启后的高半区运行。
+为什么仍然能直接读取 \texttt{mb2\_info} 的内容？
+
+提示：回顾第~\ref{sec:dual-mapping}~节的 identity 映射——在 \texttt{vmm\_unmap\_identity()}
+调用之前，低地址物理页同时可通过 identity 映射和 high-half 映射访问。
+\end{thinkbox}
+
+% ============================================================================
+\section{验证}
+
+编译并启动后，串口应出现类似如下输出：
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+[serial] init ok (COM1, 38400 baud)
+[mmap] Multiboot2 Memory Map:
+  [0x0 - 0x9FC00] type=1 (available)   ~639 KiB
+  [0x100000 - 0x7FE0000] type=1 (available)  ~126 MiB
+  ...
+[pmm] backend: bitmap
+[pmm] init ok: 32495 free pages (126 MiB)
+\end{lstlisting}
+
+\begin{itemize}
+  \item 如果启动后什么都看不到——检查 QEMU 是否加了 \texttt{-serial stdio}。
+  \item 如果看到 VGA 上有 ``\texttt{HH}'' 但串口无输出——
+        \texttt{serial\_init()} 可能有问题，检查端口号和波特率除数。
+  \item 如果 QEMU 反复重启——Triple Fault。检查 Multiboot2 header 和页目录构造。
+\end{itemize}
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{验证 Multiboot2 magic}
+
+在 \texttt{kmain} 的最开头，检查第一个参数是否等于 \hex{36d76289}。
+如果不等，打印 ``\texttt{FATAL: invalid multiboot2 magic: 0x\%x}'' 并 \texttt{hlt}。
+为什么从 GRUB 启动时这个值一定正确，但仍值得检查？
+（提示：考虑将来用其他 bootloader、或 chainloading 场景）。
+\end{exercise}
+
+\begin{exercise}
+\textbf{波特率计算}
+
+当前 \texttt{serial\_init()} 设置除数为 3，波特率 = $115200 \div 3 = 38400$。
+修改除数为 1，使波特率变为 115200。
+同时需要修改 QEMU 的 \texttt{-serial} 参数吗？
+（提示：QEMU 的虚拟串口会自动适配，但真实硬件上两端必须匹配。）
+\end{exercise}
+
+\begin{exercise}
+\textbf{增加 \texttt{\%b} 二进制格式支持}
+
+给 \texttt{vprintk} 添加 \texttt{\%b} 格式说明符，输出 32 位整数的二进制表示。
+例如 \texttt{printk("\%b", 0x83)} 应输出 \texttt{10000011}（省略前导零）
+或 \texttt{00000000000000000000000010000011}（填满 32 位）。
+
+建议参照 \texttt{fmt\_u32\_hex} 的实现方式，用循环从高位到低位逐位输出。
+宽度选项 \texttt{\%032b} 应输出完整的 32 位（前导零填充）。
+\end{exercise}

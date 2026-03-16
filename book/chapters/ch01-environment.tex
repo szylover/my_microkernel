@@ -1,0 +1,76 @@
+% ============================================================================
+\chapter{开发环境搭建}
+\label{ch:environment}
+% ============================================================================
+
+\section{本章目标}
+
+在动手写任何内核代码之前，先把工具链准备好：交叉编译器、汇编器、
+链接器、GRUB 打包工具和 QEMU 模拟器。
+
+\section{宿主机环境}
+
+\begin{itemize}
+  \item 操作系统：Ubuntu 22.04+ / WSL2（本书使用 WSL2 + VS Code Remote）
+  \item 编辑器：VS Code + clangd 扩展
+\end{itemize}
+
+\section{必要工具安装}
+
+% TODO: 从 docs/howto.md 整理
+\begin{lstlisting}[style=shellstyle]
+sudo apt update
+sudo apt install -y nasm gcc binutils grub-pc-bin \
+    xorriso qemu-system-x86 gcc-multilib gdb bear
+\end{lstlisting}
+
+各工具的作用：
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{工具} & \textbf{用途} \\
+  \midrule
+  \texttt{nasm}           & x86 汇编器（NASM 语法） \\
+  \texttt{gcc -m32}       & C 编译器（32 位模式） \\
+  \texttt{ld}             & 链接器 \\
+  \texttt{grub-mkrescue}  & 生成 GRUB 可引导 ISO \\
+  \texttt{xorriso}        & ISO 9660 工具（grub-mkrescue 依赖） \\
+  \texttt{qemu-system-i386} & x86 模拟器 \\
+  \texttt{gdb}            & 调试器 \\
+  \texttt{bear}           & 生成 \texttt{compile\_commands.json}（给 clangd） \\
+  \bottomrule
+\end{longtable}
+
+\section{项目目录结构}
+
+% TODO: 从 copilot-instructions.md 的文件结构复制
+\begin{lstlisting}[style=shellstyle]
+my_microkernel/
+  src/
+    boot/          # Multiboot2 引导 + 链接脚本
+    include/       # 公共头文件
+    kernel/        # 内核实现
+  docs/            # 项目文档
+  book/            # 本书 LaTeX 源码
+  Makefile         # 顶层 wrapper
+\end{lstlisting}
+
+\section{构建与运行闭环}
+
+% TODO: 详细展开 make iso / make run / make debug 流程
+
+\begin{lstlisting}[style=shellstyle]
+cd src
+make iso        # 编译内核 + 打包 ISO
+make run        # QEMU 启动
+make debug      # QEMU -S 等待 GDB 连接
+make gdb        # 另一个终端启动 GDB
+\end{lstlisting}
+
+\section{VS Code 调试集成}
+
+% TODO: 从 docs/debug.md 整理 launch.json / tasks.json 配置
+
+\section{本章小结}
+
+工具链就绪后，下一章我们写第一行代码——Multiboot2 引导头和内核入口。

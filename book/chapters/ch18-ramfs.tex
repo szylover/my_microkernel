@@ -1,0 +1,40 @@
+% ============================================================================
+\chapter{initrd / ramfs：内存文件系统}
+\label{ch:ramfs}
+% Stage 16 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 ramfs（内存中的简易文件系统）
+  \item 将初始文件打包进内核镜像（initrd）
+  \item ELF 加载器通过 VFS 读取文件，而非硬编码内存地址
+\end{itemize}
+
+\section{背景知识：initrd}
+
+% TODO:
+% - Linux 的 initramfs / initrd 概念
+% - GRUB 的 module 加载（Multiboot2 module tag）
+% - 打包格式选择（tar? 自定义? cpio?）
+
+\section{Ramfs 实现}
+
+% TODO:
+% - 简单的目录树结构（静态数组或链表）
+% - 文件内容直接存在内存中
+% - 实现 vfs_ops_t 的 open/read/stat/readdir
+
+\section{GRUB Module 加载}
+
+% TODO: Multiboot2 module tag 解析 → 获取 initrd 的物理地址和大小
+
+\section{验证}
+
+% TODO: 打包一个 hello.elf 到 initrd → exec("/hello") → 运行成功
+
+\section{本章小结}
+
+有了 ramfs，用户程序可以通过标准文件系统接口访问文件。
+这为将来移植更复杂的文件系统（FAT32、ext2）和用户态工具链奠定基础。

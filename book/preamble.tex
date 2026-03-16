@@ -1,0 +1,214 @@
+% ============================================================================
+% preamble.tex — 包、字体、排版、代码高亮、自定义命令
+% ============================================================================
+
+% --- 中文支持 (XeLaTeX) ---
+\usepackage{ctex}              % 中文排版核心
+\usepackage{fontspec}          % 字体选择
+
+% --- 页面布局 ---
+\usepackage[
+  a4paper,
+  top=2.5cm, bottom=2.5cm,
+  left=2.5cm, right=2.5cm
+]{geometry}
+
+% --- 数学 ---
+\usepackage{amsmath, amssymb}
+
+% --- 图表 ---
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}          % 专业表格线
+\usepackage{longtable}
+\usepackage{tabularx}
+
+% --- 绘图（内存布局、数据结构、bitfield 图、指针关系） ---
+\usepackage{tikz}
+\usetikzlibrary{
+  positioning,    % 相对定位 (right=of, below=of)
+  calc,           % 坐标计算
+  arrows.meta,    % 箭头样式
+  decorations.pathreplacing,  % 花括号标注
+  fit,            % 包围框
+  shapes.multipart,  % 多段节点（struct field 图）
+}
+
+% 内存块样式
+\tikzset{
+  memcell/.style={
+    draw, minimum width=2cm, minimum height=0.6cm,
+    font=\ttfamily\small, anchor=west,
+  },
+  memaddr/.style={
+    font=\ttfamily\scriptsize\color{gray}, anchor=east,
+  },
+  pointer/.style={
+    -{Stealth[length=4pt]}, thick, blue!60!black,
+  },
+  bitcell/.style={
+    draw, minimum width=0.7cm, minimum height=0.6cm,
+    font=\ttfamily\small, anchor=west,
+  },
+  fieldlabel/.style={
+    font=\small\itshape, text=blue!50!black,
+  },
+}
+
+% --- 颜色与代码高亮 ---
+\usepackage{xcolor}
+\usepackage{listings}
+
+% 代码样式：C 语言
+\lstdefinestyle{cstyle}{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  frame=single,
+  framesep=4pt,
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+% 代码样式：x86 汇编（NASM）
+\lstdefinestyle{nasmstyle}{
+  language=[x86masm]Assembler,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  frame=single,
+  framesep=4pt,
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+% 代码样式：Shell / Makefile
+\lstdefinestyle{shellstyle}{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray}\itshape,
+  frame=single,
+  framesep=4pt,
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+\lstset{style=cstyle}  % 默认 C
+
+% --- 超链接 ---
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!80!black,
+  citecolor=green!50!black,
+  pdfauthor={SZY},
+  pdftitle={自己动手写操作系统},
+}
+
+% --- 页眉页脚 ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- 自定义命令 ---
+
+% 寄存器名
+\newcommand{\reg}[1]{\texttt{#1}}
+
+% 十六进制地址
+\newcommand{\hex}[1]{\texttt{0x#1}}
+
+% 关键术语首次出现
+\newcommand{\term}[1]{\textbf{#1}}
+
+% Bitfield 描述环境
+\newenvironment{bitfield}
+  {\begin{description}\setlength{\itemsep}{0pt}}
+  {\end{description}}
+\newcommand{\bit}[2]{\item[\texttt{bit #1}] #2}
+
+% 设计决策高亮框
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable, skins}
+
+\newtcolorbox{designbox}[1][]{
+  colback=blue!3,
+  colframe=blue!40!black,
+  fonttitle=\bfseries,
+  title={设计决策},
+  breakable,
+  #1
+}
+
+\newtcolorbox{whybox}[1][]{
+  colback=green!3,
+  colframe=green!40!black,
+  fonttitle=\bfseries,
+  title={为什么？},
+  breakable,
+  #1
+}
+
+\newtcolorbox{warnbox}[1][]{
+  colback=red!3,
+  colframe=red!40!black,
+  fonttitle=\bfseries,
+  title={注意},
+  breakable,
+  #1
+}
+
+% CPU 状态说明框
+\newtcolorbox{cpustate}[1][]{
+  colback=orange!3,
+  colframe=orange!40!black,
+  fonttitle=\bfseries,
+  title={CPU 状态变化},
+  breakable,
+  #1
+}
+
+% --- 思考题与练习 ---
+
+% 计数器（按章重置）
+\newcounter{thinknum}[chapter]
+\newcounter{exercisenum}[chapter]
+
+% 思考题（穿插在正文中的小问题，引导读者停下来想一想）
+\newtcolorbox{thinkbox}[1][]{
+  colback=purple!3,
+  colframe=purple!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{thinknum}思考 \thechapter.\thethinknum},
+  breakable,
+  #1
+}
+
+% 动手练习（章末的实操题目）
+\newtcolorbox{exercise}[1][]{
+  colback=cyan!3,
+  colframe=cyan!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{exercisenum}练习 \thechapter.\theexercisenum},
+  breakable,
+  #1
+}

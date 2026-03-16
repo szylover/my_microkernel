@@ -1,0 +1,56 @@
+% ============================================================================
+\chapter{进程管理}
+\label{ch:process}
+% Stage 13 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 设计进程控制块（PCB / \texttt{task\_struct}）
+  \item 每个进程拥有独立的页表和 VMA 树
+  \item 实现 \texttt{fork}（COW + VMA 复制）、\texttt{exec}、\texttt{waitpid}
+\end{itemize}
+
+\section{背景知识：进程抽象}
+
+% TODO:
+% - 进程 = 独立地址空间 + 执行上下文 + 资源集合
+% - PCB 记录进程所有状态：寄存器快照、页目录、VMA 列表、PID、状态
+
+\section{PCB 数据结构}
+
+% TODO: task_struct 各字段详解
+% pid, state, page_directory, vma_root, kernel_stack, regs, parent, children
+
+\section{进程地址空间}
+
+% TODO:
+% - 每个进程独立的页目录（内核部分共享，用户部分独立）
+% - VMA 树记录用户态内存区域
+% - CR3 切换 = 地址空间切换
+
+\section{fork：进程复制}
+
+% TODO:
+% - 复制 PCB
+% - 复制 VMA 树
+% - COW (Copy-On-Write): 共享物理页、标记只读 → Page Fault 时再复制
+% - 返回值：父进程得到子 PID，子进程得到 0
+
+\section{exec：加载新程序}
+
+% TODO: 清空用户地址空间 → ELF 加载 → 重设入口点
+
+\section{waitpid：等待子进程}
+
+% TODO: 阻塞/非阻塞等待、回收子进程资源
+
+\section{验证}
+
+% TODO: fork → 子进程 exec 新程序 → 父进程 waitpid
+
+\section{本章小结}
+
+进程管理让内核能同时运行多个独立程序。下一章实现调度器，
+让这些进程分时共享 CPU。

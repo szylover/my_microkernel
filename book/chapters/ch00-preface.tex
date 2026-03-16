@@ -1,0 +1,75 @@
+% ============================================================================
+\chapter{前言}
+% ============================================================================
+
+\section{这本书要做什么}
+
+本书记录一个完整的 x86 微内核操作系统——SZY-KERNEL——从第一行汇编代码到能运行
+用户态程序的全过程。每一章对应项目的一个 Stage，包含：
+
+\begin{itemize}
+  \item \textbf{目标}：这一步要实现什么功能
+  \item \textbf{背景知识}：必要的硬件/CPU 原理
+  \item \textbf{设计决策}：为什么选择这种方案而非其他
+  \item \textbf{逐行代码讲解}：关键数据结构和实现
+  \item \textbf{验证}：如何确认代码正确工作
+\end{itemize}
+
+\section{目标读者}
+
+\begin{itemize}
+  \item 有 C 语言基础，了解指针、结构体、位运算
+  \item 有基本的计算机组成原理概念（寄存器、内存、中断）
+  \item 对"操作系统到底怎么工作的"感到好奇
+  \item 不要求有汇编经验——书中会逐行解释每条汇编指令
+\end{itemize}
+
+\section{项目愿景}
+
+\begin{enumerate}
+  \item 自举移植 GCC 编译器（在自己的 OS 上编译 C 代码）
+  \item 运行 Vim 文本编辑器
+  \item 支持 TCP/IP 网络（至少能 ping）
+\end{enumerate}
+
+设计原则：
+\begin{itemize}
+  \item \textbf{自研优先}——内存管理、分页、调度、系统调用全部自己写
+  \item \textbf{POSIX 子集}——不追求完整，够移植 GCC/Vim 即可
+  \item \textbf{微内核}——内核只做内存、调度、IPC，驱动尽量在用户态
+\end{itemize}
+
+\section{全书路线图}
+
+\begin{longtable}{clll}
+  \toprule
+  \textbf{Stage} & \textbf{章节} & \textbf{名称} & \textbf{里程碑} \\
+  \midrule
+  \endhead
+  1  & 第2章  & Multiboot2 引导与串口输出  & A: 裸机基础 \\
+  2  & 第3章  & GDT：全局描述符表          & A \\
+  3  & 第4章  & IDT：中断描述符表          & A \\
+  4  & 第5章  & IRQ 与键盘驱动             & A \\
+  5  & 第6章  & 交互式 Shell               & A \\
+  6  & 第7章  & PMM：物理内存管理          & B: 内存管理 \\
+  7  & 第8章  & VMM：虚拟内存与分页        & B \\
+  8  & 第9章  & High-Half Kernel           & C: 高级内存 \\
+  9  & 第10章 & 内核堆 kmalloc             & C \\
+  10 & 第11章 & VMA：虚拟内存区域          & C \\
+  11 & 第12章 & TSS 与 Ring 3              & D: 进程 \\
+  12 & 第13章 & ELF 加载器                 & D \\
+  13 & 第14章 & 系统调用                   & D \\
+  14 & 第15章 & 进程管理                   & D \\
+  15 & 第16章 & 调度器                     & D \\
+  16 & 第17章 & VFS 虚拟文件系统           & E: 文件系统 \\
+  17 & 第18章 & initrd / ramfs             & E \\
+  \bottomrule
+\end{longtable}
+
+\section{如何阅读本书}
+
+建议按顺序阅读。每章末尾都有"本章小结"和"验证步骤"，确认当前 Stage
+的代码能正常工作后再进入下一章。
+
+所有代码可在 \url{https://github.com/szylover/my_microkernel} 找到，
+每个 Stage 对应一个 git tag 或 PR。

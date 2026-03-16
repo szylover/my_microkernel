@@ -1,0 +1,591 @@
+% ============================================================================
+\chapter{IRQ、PIC 与键盘驱动}
+\label{ch:irq-keyboard}
+% Stage 3 — 对应 2026-03-10 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 8259 PIC 的硬件架构：主从级联、ICW 初始化序列、IRQ mask、EOI
+  \item 理解为什么必须 remap PIC（避免与 CPU 异常冲突）
+  \item 实现 IRQ 分发框架：函数指针数组 + 统一 EOI
+  \item 理解 IRQ 汇编 stub 与 ISR stub 的关系
+  \item 实现 PS/2 键盘驱动：scancode 解码、Shift 状态机、环形缓冲区
+  \item 掌握中断上下文与主循环之间的生产者-消费者模式
+\end{itemize}
+
+% ============================================================================
+\section{背景知识：8259 PIC 硬件架构}
+
+PC 有两片级联的 8259A PIC（Programmable Interrupt Controller），
+
+每片管理 8 条 IRQ 线，合计 16 条：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  chip/.style={draw, minimum width=2.5cm, minimum height=3.5cm, font=\small\bfseries},
+  irqline/.style={draw, -{Stealth[length=3pt]}, thick},
+]
+  % Master PIC
+  \node[chip, fill=blue!10] (master) {Master PIC};
+  \node[above=0.1cm of master, font=\small] {端口 \hex{20}/\hex{21}};
+
+  % Slave PIC
+  \node[chip, fill=orange!10, right=3cm of master] (slave) {Slave PIC};
+  \node[above=0.1cm of slave, font=\small] {端口 \hex{A0}/\hex{A1}};
+
+  % CPU
+  \node[draw, minimum width=1.5cm, minimum height=1cm, left=2.5cm of master, fill=gray!10] (cpu) {CPU};
+
+  % CPU ← Master
+  \draw[irqline] (master.west) -- (cpu.east) node[midway, above, font=\scriptsize] {INTR};
+
+  % Master ← Slave (on IRQ2)
+  \draw[irqline] (slave.west) -- (master.east) node[midway, above, font=\scriptsize] {IRQ2};
+
+  % IRQ lines on master (left side labels)
+  \foreach \i/\dev in {0/PIT Timer, 1/Keyboard, 2/Cascade, 3/COM2, 4/COM1, 5/LPT2, 6/FDC, 7/LPT1} {
+    \node[right=0.1cm of master.north east, yshift={-\i*0.4cm-0.3cm}, font=\tiny, anchor=west] {IRQ\i: \dev};
+  }
+
+  % IRQ lines on slave
+  \foreach \i/\dev in {8/CMOS RTC, 9/Free, 10/Free, 11/Free, 12/PS\slash 2 Mouse, 13/FPU, 14/Primary ATA, 15/Secondary ATA} {
+    \pgfmathtruncatemacro{\idx}{\i-8}
+    \node[right=0.1cm of slave.north east, yshift={-\idx*0.4cm-0.3cm}, font=\tiny, anchor=west] {IRQ\i: \dev};
+  }
+\end{tikzpicture}
+\caption{8259 PIC 主从级联架构与 IRQ 分配}
+\end{figure}
+
+\subsection{为什么必须 Remap？}
+
+PIC 上电后的默认映射：
+
+\begin{longtable}{lcl}
+  \toprule
+  \textbf{IRQ} & \textbf{默认向量} & \textbf{冲突} \\
+  \midrule
+  IRQ0 & 8  & \#DF (Double Fault) \\
+  IRQ1 & 9  & Coprocessor Segment Overrun \\
+  IRQ7 & 15 & Reserved \\
+  \bottomrule
+\end{longtable}
+
+IRQ0-7 的默认向量 8-15 和 CPU 异常\textbf{完全重叠}！如果不 remap，
+按键盘（IRQ1）会被 CPU 当成向量 9（Coprocessor Segment Overrun）处理。
+
+\begin{thinkbox}
+如果你忘了做 remap 就启用了 IRQ1，按键盘后会发生什么？
+CPU 认为向量 9 是一个异常，会调用 \texttt{isr9} 的 handler。
+ISR handler 打印 ``Coprocessor Segment Overrun'' 然后 halt。
+键盘表现为：按一下就死机。
+\end{thinkbox}
+
+% ============================================================================
+\section{PIC 初始化：ICW 序列详解}
+
+PIC 通过 4 个 ICW（Initialization Command Word）完成初始化。
+每个 ICW 有精确的格式和发送顺序：
+
+\begin{lstlisting}[style=cstyle]
+void pic_init(void) {
+    // 保存当前 mask（可选，我们会覆盖）
+    uint8_t a1 = inb(PIC1_DATA);
+    uint8_t a2 = inb(PIC2_DATA);
+\end{lstlisting}
+
+\subsection{ICW1：开始初始化}
+
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_CMD, 0x11);  // ICW1: INIT + ICW4_NEEDED
+    io_wait();
+    outb(PIC2_CMD, 0x11);
+    io_wait();
+\end{lstlisting}
+
+\hex{11} = ICW1\_INIT (bit 4=1) | ICW1\_ICW4 (bit 0=1)。
+
+向命令端口写入 ICW1 告诉 PIC："开始初始化序列，后面会有 ICW4"。
+
+\begin{whybox}
+\texttt{io\_wait()} 是什么？ISA 总线的某些旧设备需要在连续 I/O 操作间
+插入一个短延迟。常见实现是向端口 \hex{80}（POST 诊断端口）写一个字节：
+
+\begin{lstlisting}[style=cstyle]
+static inline void io_wait(void) {
+    outb(0x80, 0);  // 约 1 微秒延迟
+}
+\end{lstlisting}
+\end{whybox}
+
+\subsection{ICW2：向量偏移}
+
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x20);  // master: IRQ0 → 向量 0x20
+    io_wait();
+    outb(PIC2_DATA, 0x28);  // slave:  IRQ8 → 向量 0x28
+    io_wait();
+\end{lstlisting}
+
+这就是\textbf{remap 的核心}：告诉每片 PIC 它管理的 IRQ 对应的起始向量号。
+
+Remap 后的映射：
+
+\begin{longtable}{ccl}
+  \toprule
+  \textbf{IRQ} & \textbf{向量} & \textbf{设备} \\
+  \midrule
+  0  & \hex{20} (32) & PIT Timer \\
+  1  & \hex{21} (33) & PS/2 Keyboard \\
+  2  & \hex{22} (34) & Cascade（slave PIC） \\
+  8  & \hex{28} (40) & CMOS RTC \\
+  14 & \hex{2E} (46) & Primary ATA \\
+  \bottomrule
+\end{longtable}
+
+\subsection{ICW3：级联关系}
+
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x04);  // master: slave 挂在 IRQ2 (bit 2 = 1)
+    io_wait();
+    outb(PIC2_DATA, 0x02);  // slave: cascade identity = 2
+    io_wait();
+\end{lstlisting}
+
+Master 的 ICW3 是一个 bitmask：bit $N$ = 1 表示 IRQ$N$ 上挂了一个 slave PIC。
+\hex{04} = bit 2 = IRQ2 上有 slave。
+
+Slave 的 ICW3 是自身的 cascade identity：2 表示"我挂在 master 的 IRQ2 上"。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  \foreach \i/\label in {0/0, 1/0, 2/\textbf{1}, 3/0, 4/0, 5/0, 6/0, 7/0} {
+    \node[bitcell, fill=white] (m\i) at (\i*0.8, 0) {\label};
+    \node[font=\tiny\ttfamily, above=0.1cm of m\i] {IRQ\i};
+  }
+  \node[below=0.5cm of m2, font=\small\itshape] {Slave 挂在 IRQ2};
+  \draw[pointer] (m2.south) -- ++(0, -0.3);
+\end{tikzpicture}
+\caption{Master PIC 的 ICW3 = \hex{04}：IRQ2 位置为 1}
+\end{figure}
+
+\subsection{ICW4：模式设置}
+
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0x01);  // 8086/88 模式
+    io_wait();
+    outb(PIC2_DATA, 0x01);
+    io_wait();
+\end{lstlisting}
+
+\hex{01} = ICW4\_8086：告诉 PIC 工作在 8086 模式（相对于 8085 模式）。
+现代 x86 都用这个。
+
+\subsection{初始 Mask：全部关闭}
+
+\begin{lstlisting}[style=cstyle]
+    outb(PIC1_DATA, 0xFF);  // mask 所有 master IRQ
+    outb(PIC2_DATA, 0xFF);  // mask 所有 slave IRQ
+}
+\end{lstlisting}
+
+\begin{designbox}
+初始化后先把所有 IRQ mask 掉。原因：
+\begin{enumerate}
+  \item 此时大部分 IRQ 还没安装 handler。如果中断进来但 IDT 中没有有效的 gate，CPU 会触发 \#GP。
+  \item 每个驱动在 init 时自己调用 \texttt{pic\_clear\_mask(irq)} 打开需要的 IRQ — "谁用谁开"原则。
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+\section{EOI（End of Interrupt）}
+
+IRQ handler 执行完后\textbf{必须}向 PIC 发送 EOI，否则 PIC 认为当前中断
+还在处理中，不会发送同级或更低优先级的后续中断。
+
+\begin{lstlisting}[style=cstyle]
+void pic_send_eoi(uint8_t irq) {
+    if (irq >= 8) {
+        outb(PIC2_CMD, 0x20);  // 先通知 slave
+    }
+    outb(PIC1_CMD, 0x20);      // 再通知 master（所有 IRQ 都要）
+}
+\end{lstlisting}
+
+\begin{warnbox}
+忘记发 EOI 是最常见的硬件中断 bug。表现为：第一次按键有反应，之后键盘完全死掉。
+因为 PIC 还在等待上一次 IRQ1 的 EOI，拒绝发送新的中断。
+\end{warnbox}
+
+\begin{thinkbox}
+为什么 slave IRQ（8--15）需要向\textbf{两片} PIC 都发 EOI？
+
+因为 slave 是挂在 master 的 IRQ2 上的。一次 slave IRQ 同时占用了：
+\begin{enumerate}
+  \item slave PIC 的一个 IRQ 槽位
+  \item master PIC 的 IRQ2 槽位
+\end{enumerate}
+两边都要通知释放。
+\end{thinkbox}
+
+% ============================================================================
+\section{IRQ Mask 操作}
+
+\begin{lstlisting}[style=cstyle]
+void pic_clear_mask(uint8_t irq) {
+    uint16_t port = (irq < 8) ? PIC1_DATA : PIC2_DATA;
+    uint8_t  line = (uint8_t)(irq & 7u);
+
+    uint8_t mask = inb(port);         // 读当前 mask
+    mask &= (uint8_t)~(1u << line);   // 清除对应 bit（0=允许）
+    outb(port, mask);                  // 写回
+}
+
+void pic_set_mask(uint8_t irq) {
+    // ...同理，把对应 bit 置 1（1=屏蔽）
+}
+\end{lstlisting}
+
+PIC 的 mask 寄存器（IMR）是一个 8-bit 值，每 bit 对应一个 IRQ：
+\begin{itemize}
+  \item bit = 0：允许该 IRQ 通过
+  \item bit = 1：屏蔽该 IRQ
+\end{itemize}
+
+% ============================================================================
+\section{IRQ 分发框架：\texttt{irq.c}}
+
+\subsection{函数指针数组}
+
+\begin{lstlisting}[style=cstyle]
+static irq_handler_t g_irq_handlers[16];  // 初始全为 NULL
+
+void irq_install_handler(uint8_t irq, irq_handler_t handler) {
+    if (irq < 16) {
+        g_irq_handlers[irq] = handler;
+    }
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  % Array
+  \foreach \i in {0,...,7} {
+    \node[memcell, minimum width=2.5cm, minimum height=0.5cm] (h\i) at (0, -\i*0.5) {};
+    \node[memaddr, left=0.1cm of h\i, font=\tiny\ttfamily] {[\i]};
+  }
+  \node[font=\small\ttfamily, above=0.2cm of h0] {g\_irq\_handlers[16]};
+
+  % NULL for most
+  \foreach \i in {0,2,3,4,5,6,7} {
+    \node[font=\tiny\ttfamily, text=gray] at (h\i) {NULL};
+  }
+
+  % Handler for IRQ1
+  \node[font=\tiny\ttfamily, text=blue!60!black] at (h1) {keyboard\_irq1\_handler};
+
+  % Arrow to handler function
+  \node[draw, minimum width=3.5cm, fill=green!10, right=3cm of h1, font=\small] (kbdfn) {keyboard\_irq1\_handler()};
+  \draw[pointer] (h1.east) -- (kbdfn.west);
+\end{tikzpicture}
+\caption{IRQ 分发表：\texttt{g\_irq\_handlers} 函数指针数组}
+\end{figure}
+
+\subsection{统一 C 入口}
+
+\begin{lstlisting}[style=cstyle]
+void irq_handler_c(const irq_regs_t* r) {
+    uint8_t irq = (uint8_t)(r->int_no - 0x20u);
+
+    // 调用已注册的 handler（如果有）
+    if (irq < 16 && g_irq_handlers[irq]) {
+        g_irq_handlers[irq](r);
+    }
+
+    // 统一发送 EOI
+    pic_send_eoi(irq);
+}
+\end{lstlisting}
+
+\begin{designbox}
+EOI 在 dispatcher 中统一发送，而非让每个 handler 自己发。好处：
+\begin{enumerate}
+  \item 驱动开发者不会忘记发 EOI
+  \item handler 只需专注于设备逻辑
+  \item 将来做更复杂的 IRQ 优先级管理时只改 dispatcher 一处
+\end{enumerate}
+\end{designbox}
+
+\subsection{IRQ 汇编 Stub}
+
+IRQ stub 和 ISR stub 结构相同（push err\_code=0 → push int\_no → pushad → call C）：
+
+\begin{lstlisting}[style=nasmstyle]
+%macro IRQ 2
+irq%1:
+    push dword 0          ; err_code = 0（硬件 IRQ 无 error code）
+    push dword %2         ; int_no = vector (0x20 + irq)
+    jmp irq_common_stub
+%endmacro
+
+IRQ 0, 0x20    ; IRQ0 → 向量 0x20
+IRQ 1, 0x21    ; IRQ1 → 向量 0x21（键盘）
+; ... 共 16 个 ...
+\end{lstlisting}
+
+\texttt{irq\_common\_stub} 和 \texttt{isr\_common\_stub} 完全一样
+（pushad → push 段寄存器 → call C → 恢复 → iret），
+只是调用的 C 函数不同（\texttt{irq\_handler\_c} vs \texttt{isr\_handler\_c}）。
+
+% ============================================================================
+\section{PS/2 键盘驱动：\texttt{keyboard.c}}
+
+\subsection{Scancode Set 1}
+
+PS/2 键盘按下键时发送一个 \term{make code}（0x00--0x7F），
+释放时发送 \term{break code}（make code | 0x80）。
+
+\begin{lstlisting}[style=cstyle]
+// Scancode Set 1 基础映射（部分）
+static const char scancode_map[0x40] = {
+    /* 0x00 */ 0,  0, '1','2','3','4','5','6','7','8','9','0','-','=',
+    /* 0x0E */ '\b', '\t',
+    /* 0x10 */ 'q','w','e','r','t','y','u','i','o','p','[',']','\n', 0,
+    /* 0x1E */ 'a','s','d','f','g','h','j','k','l',';','\'','`', 0, '\\',
+    /* 0x2C */ 'z','x','c','v','b','n','m',',','.','/', 0,  0,  0,  ' ',
+};
+\end{lstlisting}
+
+\begin{thinkbox}
+为什么键盘发送的是 scancode 而非 ASCII？
+
+因为键盘是一个"物理开关阵列"——它只知道哪个位置的键被按了或松了。
+把 scancode 翻译成哪个字符取决于\textbf{键盘布局}（US、UK、DE、中文等）。
+同一个 scancode 0x10 在 QWERTY 布局是 'q'，在 AZERTY 布局是 'a'。
+翻译工作由操作系统（或键盘驱动）完成。
+\end{thinkbox}
+
+\subsection{Shift 状态机}
+
+\begin{lstlisting}[style=cstyle]
+static volatile uint8_t g_shift_down;  // Shift 是否被按住
+
+static void keyboard_handle_scancode(uint8_t sc) {
+    // 0xE0 前缀：扩展键（方向键等），暂时忽略
+    if (sc == 0xE0u) { g_e0_prefix = 1; return; }
+    if (g_e0_prefix) { g_e0_prefix = 0; return; }
+
+    uint8_t released = (sc & 0x80u) != 0;  // 最高位=1 表示松开
+    uint8_t code = sc & 0x7Fu;              // 低 7 位 = make code
+
+    // Left Shift (0x2A) 或 Right Shift (0x36)
+    if (code == 0x2Au || code == 0x36u) {
+        g_shift_down = released ? 0 : 1;
+        return;
+    }
+
+    if (released) return;  // 只处理按下事件
+
+    // 根据 Shift 状态选择映射表
+    char ch = g_shift_down ? scancode_map_shift[code]
+                           : scancode_map[code];
+    if (ch) kbd_buf_put(ch);
+}
+\end{lstlisting}
+
+\subsection{环形缓冲区}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  % 缓冲区数组
+  \foreach \i in {0,...,9} {
+    \node[memcell, minimum width=1.2cm, minimum height=0.6cm] (buf\i) at (\i*1.3, 0) {};
+    \node[font=\tiny\ttfamily, above=0.1cm of buf\i] {\i};
+  }
+  \node[font=\small\ttfamily, above=0.6cm of buf4] {g\_kbd\_buf[128]（只画前 10 个）};
+
+  % 内容
+  \node[font=\ttfamily\small] at (buf2) {'a'};
+  \node[font=\ttfamily\small] at (buf3) {'b'};
+  \node[font=\ttfamily\small] at (buf4) {'c'};
+
+  % head / tail pointers
+  \draw[pointer, red!60!black] (buf2.south) -- ++(0, -0.6) node[below, font=\small] {tail（消费者读取）};
+  \draw[pointer, blue!60!black] (buf5.south) -- ++(0, -0.6) node[below, font=\small] {head（IRQ 写入）};
+\end{tikzpicture}
+\caption{键盘环形缓冲区：IRQ handler 写 head，主循环读 tail}
+\end{figure}
+
+\begin{lstlisting}[style=cstyle]
+#define KBD_BUF_SIZE 128
+
+static volatile char    g_kbd_buf[KBD_BUF_SIZE];
+static volatile uint8_t g_kbd_head;  // 下一个写位置
+static volatile uint8_t g_kbd_tail;  // 下一个读位置
+
+static void kbd_buf_put(char c) {
+    uint8_t next = (g_kbd_head + 1) % KBD_BUF_SIZE;
+    if (next == g_kbd_tail) return;  // 满了 → 丢弃
+    g_kbd_buf[g_kbd_head] = c;
+    g_kbd_head = next;
+}
+
+static int kbd_buf_get(char* out) {
+    if (g_kbd_tail == g_kbd_head) return 0;  // 空
+    *out = g_kbd_buf[g_kbd_tail];
+    g_kbd_tail = (g_kbd_tail + 1) % KBD_BUF_SIZE;
+    return 1;
+}
+\end{lstlisting}
+
+\begin{designbox}
+为什么用环形缓冲区而非普通数组？
+
+\begin{enumerate}
+  \item \textbf{解耦生产者和消费者}：IRQ handler（生产者）在中断上下文执行，
+    必须尽快返回。Shell 主循环（消费者）在非中断上下文运行，可以慢慢处理。
+  \item \textbf{避免数据拷贝}：环形缓冲区通过 head/tail 指针管理读写位置，
+    不需要移动数组元素。
+  \item \textbf{线程安全}：单生产者 + 单消费者的环形缓冲区在不需要锁的情况下
+    就是线程安全的（原子的 head/tail 更新）。
+\end{enumerate}
+\end{designbox}
+
+\begin{thinkbox}
+\texttt{g\_kbd\_buf} 和 \texttt{g\_kbd\_head/tail} 为什么要声明为 \texttt{volatile}？
+
+因为它们在两个"执行流"中被访问：
+\begin{itemize}
+  \item IRQ handler（中断上下文）写 \texttt{g\_kbd\_head}
+  \item \texttt{keyboard\_getc}（主循环）读 \texttt{g\_kbd\_head}
+\end{itemize}
+没有 \texttt{volatile}，编译器可能把 \texttt{g\_kbd\_head} 缓存在寄存器中，
+导致主循环永远看到旧值——缓冲区"永远为空"。
+\end{thinkbox}
+
+\subsection{公开 API}
+
+\begin{lstlisting}[style=cstyle]
+// 阻塞等待一个字符（hlt 直到 IRQ 把字符放入缓冲区）
+char keyboard_getc(void) {
+    char c;
+    while (!keyboard_try_getc(&c)) {
+        __asm__ volatile("hlt");  // 等下一个中断
+    }
+    return c;
+}
+
+// 非阻塞尝试读取（0=无字符，1=读到一个）
+int keyboard_try_getc(char* out) {
+    return kbd_buf_get(out);
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么用 \texttt{hlt} 而非空循环？
+
+\texttt{hlt} 让 CPU 进入低功耗状态直到下一个中断。空循环（\texttt{while(1)\{\}}）
+让 CPU 100\% 占用，白白浪费电力和 QEMU 宿主机 CPU 资源。
+\end{whybox}
+
+\subsection{\texttt{keyboard\_init}：注册 + 开 IRQ}
+
+\begin{lstlisting}[style=cstyle]
+void keyboard_init(void) {
+    irq_install_handler(1, keyboard_irq1_handler);
+    pic_clear_mask(1);  // 允许 IRQ1 通过 PIC
+}
+\end{lstlisting}
+
+注意此时 EFLAGS.IF 仍然是 0（中断关闭）。IRQ handler 不会触发，
+直到 \texttt{kmain} 末尾执行 \texttt{\_\_asm\_\_ volatile("sti")}。
+
+% ============================================================================
+\section{完整中断链路图}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, rounded corners, minimum width=2.5cm, minimum height=0.8cm, font=\small},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  \node[block, fill=gray!10]   (key)  {键盘按键};
+  \node[block, fill=blue!10, right=1.5cm of key]  (pic)  {PIC (IRQ1)};
+  \node[block, fill=orange!10, right=1.5cm of pic] (cpu)  {CPU};
+  \node[block, fill=green!10, below=1cm of cpu]    (stub) {irq1 stub (asm)};
+  \node[block, fill=green!10, below=0.8cm of stub] (disp) {irq\_handler\_c};
+  \node[block, fill=cyan!10, below=0.8cm of disp]  (kbd)  {keyboard\_irq1\_handler};
+  \node[block, fill=yellow!10, below=0.8cm of kbd]  (buf)  {g\_kbd\_buf};
+  \node[block, fill=purple!10, right=2.5cm of buf]  (shell){Shell (hlt → getc)};
+
+  \draw[arr] (key)  -- (pic) node[midway, above, font=\scriptsize] {scancode};
+  \draw[arr] (pic)  -- (cpu) node[midway, above, font=\scriptsize] {向量 0x21};
+  \draw[arr] (cpu)  -- (stub) node[midway, right, font=\scriptsize] {IDT[0x21]};
+  \draw[arr] (stub) -- (disp);
+  \draw[arr] (disp) -- (kbd) node[midway, right, font=\scriptsize] {g\_irq\_handlers[1]};
+  \draw[arr] (kbd)  -- (buf) node[midway, right, font=\scriptsize] {kbd\_buf\_put};
+  \draw[arr] (buf)  -- (shell) node[midway, above, font=\scriptsize] {kbd\_buf\_get};
+  \draw[arr, dashed] (disp.east) -- ++(1.5,0) node[right, font=\scriptsize] {pic\_send\_eoi(1)};
+\end{tikzpicture}
+\caption{从键盘按键到 Shell 读取的完整中断链路}
+\end{figure}
+
+% ============================================================================
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+make iso && make run
+# 在 QEMU 窗口中按键，串口应看到字符回显
+# 按 Shift+a 应显示 'A'
+# 快速连续打字不应丢字符（除非超过 128 个未消费的字符）
+\end{lstlisting}
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+注释掉 \texttt{irq\_handler\_c} 中 \texttt{pic\_send\_eoi(irq)} 的调用。
+重新运行，第一次按键后再按键还有反应吗？恢复后试试只给 master 发 EOI
+（不给 slave），IRQ8--15 的设备是否受影响？
+\end{exercise}
+
+\begin{exercise}
+修改 \texttt{KBD\_BUF\_SIZE} 为 4（极小缓冲区）。快速连续打字 10 个字符，
+\texttt{keyboard\_getc} 最多能读到几个？改成 2 呢？
+思考：环形缓冲区的有效容量是 \texttt{size - 1} 还是 \texttt{size}？
+（提示：head == tail 表示空，那满的时候 head 和 tail 是什么关系？）
+\end{exercise}
+
+\begin{exercise}
+在键盘驱动中添加对 Caps Lock 的支持。Caps Lock 的 make code 是 \hex{3A}。
+它是一个"切换键"——按一次开启，再按一次关闭。
+提示：维护一个 \texttt{g\_caps\_lock} 状态，按下时 toggle。
+Caps Lock 只影响字母键的大小写，不影响数字和符号。
+\end{exercise}
+
+\begin{exercise}
+（挑战）当前 \texttt{0xE0} 前缀（方向键等）被直接忽略。
+实现方向键的处理：上箭头 (\hex{E0} \hex{48})、下箭头 (\hex{E0} \hex{50})、
+左箭头 (\hex{E0} \hex{4B})、右箭头 (\hex{E0} \hex{4D})。
+把它们翻译成 ANSI 转义序列（如 \texttt{\textbackslash x1b[A} 表示上箭头），
+放入键盘缓冲区。Shell 可以用这些序列实现光标移动。
+\end{exercise}
+
+% ============================================================================
+\section{本章小结}
+
+本章完成了硬件中断的完整链路：
+
+\begin{enumerate}
+  \item \textbf{PIC 初始化}：ICW1-4 序列完成 remap（IRQ → 向量 0x20+），默认 mask 全关
+  \item \textbf{IRQ 分发}：函数指针数组 + 统一 EOI
+  \item \textbf{键盘驱动}：scancode → Shift 状态机 → ASCII → 环形缓冲区
+  \item \textbf{生产者-消费者}：IRQ handler 写 head，主循环读 tail，\texttt{volatile} 保证可见性
+\end{enumerate}
+
+内核现在能接收用户输入了。下一章我们用这个能力构建交互式 Shell。

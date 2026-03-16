@@ -1,0 +1,103 @@
+% ============================================================================
+\chapter{x86 架构速查}
+\label{ch:appendix-x86-ref}
+% ============================================================================
+
+\section{寄存器}
+
+\subsection{通用寄存器（32 位）}
+
+\begin{longtable}{lll}
+  \toprule
+  \textbf{寄存器} & \textbf{惯用用途} & \textbf{调用约定} \\
+  \midrule
+  EAX & 累加器、返回值    & caller-saved \\
+  EBX & 基址             & callee-saved \\
+  ECX & 计数器           & caller-saved \\
+  EDX & 数据、I/O        & caller-saved \\
+  ESI & 源索引           & callee-saved \\
+  EDI & 目的索引         & callee-saved \\
+  EBP & 栈帧基指针       & callee-saved \\
+  ESP & 栈指针           & 特殊 \\
+  \bottomrule
+\end{longtable}
+
+\subsection{段寄存器}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{寄存器} & \textbf{用途} \\
+  \midrule
+  CS & 代码段选择子（隐含 CPL） \\
+  DS & 默认数据段 \\
+  SS & 栈段 \\
+  ES & 附加数据段 \\
+  FS / GS & 通用附加段（Linux 用 GS 做 per-CPU / TLS） \\
+  \bottomrule
+\end{longtable}
+
+\subsection{控制寄存器}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{寄存器} & \textbf{关键位} \\
+  \midrule
+  CR0 & bit 0 (PE): 保护模式 \\
+      & bit 31 (PG): 开启分页 \\
+  CR2 & Page Fault 时的故障虚拟地址 \\
+  CR3 & 页目录物理地址 \\
+  CR4 & bit 4 (PSE): 4MiB 大页支持 \\
+      & bit 7 (PGE): 全局页 \\
+  \bottomrule
+\end{longtable}
+
+\section{GDT 条目格式}
+
+% TODO: 8 字节条目的完整 bitfield 图
+
+\section{IDT 条目格式}
+
+% TODO: 8 字节中断门的完整 bitfield 图
+
+\section{PDE / PTE 格式}
+
+\begin{bitfield}
+  \bit{0}{P (Present) — 1=有效，0=访问触发 \#PF}
+  \bit{1}{R/W — 1=读写，0=只读}
+  \bit{2}{U/S — 1=用户态可访问，0=仅内核}
+  \bit{3}{PWT — 写透缓存策略}
+  \bit{4}{PCD — 禁用缓存}
+  \bit{5}{A (Accessed) — CPU 访问后自动置 1}
+  \bit{6}{D (Dirty) — CPU 写入后自动置 1（仅 PTE）}
+  \bit{7}{PS/PAT — PDE: 4MiB 大页; PTE: PAT}
+  \bit{8}{G (Global) — TLB 不随 CR3 切换而刷新}
+  \bit{9--11}{AVL — 软件可用位}
+  \bit{12--31}{页帧物理地址高 20 位}
+\end{bitfield}
+
+\section{Page Fault 错误码}
+
+\begin{bitfield}
+  \bit{0}{P — 0=页不存在，1=权限违规}
+  \bit{1}{W/R — 0=读操作，1=写操作}
+  \bit{2}{U/S — 0=内核态，1=用户态}
+  \bit{3}{RSVD — 页表条目保留位被置位}
+  \bit{4}{I/D — 取指令引起}
+\end{bitfield}
+
+\section{中断向量分配}
+
+\begin{longtable}{rll}
+  \toprule
+  \textbf{向量} & \textbf{名称} & \textbf{说明} \\
+  \midrule
+  0   & \#DE & 除零 \\
+  3   & \#BP & 断点（int3） \\
+  6   & \#UD & 无效操作码 \\
+  8   & \#DF & Double Fault \\
+  13  & \#GP & General Protection \\
+  14  & \#PF & Page Fault \\
+  32--47 & IRQ0--15 & 硬件中断（PIC remap 后） \\
+  128 & --- & 系统调用（int 0x80） \\
+  \bottomrule
+\end{longtable}

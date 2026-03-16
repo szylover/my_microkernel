@@ -1,0 +1,429 @@
+% ============================================================================
+\chapter{交互式 Shell}
+\label{ch:shell}
+% Stage 4 — 对应 2026-03-10 changelog
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 设计统一的 Console 输入抽象层（键盘 IRQ + 串口轮询）
+  \item 实现行编辑器：回显、退格（\texttt{\textbackslash b}）、回车
+  \item 实现命令解析器：空格分词 → \texttt{argc/argv}
+  \item 设计可扩展的命令注册表（\texttt{cmd\_t} 结构体 + 静态数组）
+  \item 实现第一批命令：\texttt{cls}、\texttt{shutdown}、\texttt{cmds}
+\end{itemize}
+
+% ============================================================================
+\section{架构设计}
+
+Shell 采用五层架构，各层通过清晰的函数接口解耦：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  layer/.style={draw, rounded corners, minimum width=9cm, minimum height=0.9cm, font=\small},
+  arr/.style={-{Stealth[length=3pt]}, thick},
+]
+  \node[layer, fill=gray!10]   (input)  at (0, 4) {输入层 \texttt{console.c} — keyboard\_try\_getc + serial\_try\_getc};
+  \node[layer, fill=blue!10]   (line)   at (0, 3) {行编辑 \texttt{shell\_readline()} — 回显 / Backspace / Enter};
+  \node[layer, fill=green!10]  (parse)  at (0, 2) {命令解析 \texttt{shell\_tokenize()} — 空格分词 → argv[]};
+  \node[layer, fill=orange!10] (disp)   at (0, 1) {命令分发 \texttt{shell\_dispatch()} — 遍历 g\_cmds[] 匹配 name};
+  \node[layer, fill=cyan!10]   (cmds)   at (0, 0) {命令实现 \texttt{cmds/*.c} — 每个命令一个独立编译单元};
+
+  \draw[arr] (input) -- (line);
+  \draw[arr] (line)  -- (parse);
+  \draw[arr] (parse) -- (disp);
+  \draw[arr] (disp)  -- (cmds);
+\end{tikzpicture}
+\caption{Shell 五层架构}
+\end{figure}
+
+\begin{thinkbox}
+为什么要把输入抽象成 Console 层？如果 Shell 直接调 \texttt{keyboard\_getc()}，
+将来要支持串口远程调试（QEMU \texttt{-serial stdio}）时需要改 shell.c。
+有了 Console 层，输入源的增减只改 console.c 一处。
+\end{thinkbox}
+
+% ============================================================================
+\section{Console 输入层：\texttt{console.c}}
+
+\begin{lstlisting}[style=cstyle]
+int console_try_getc(char* out) {
+    // 优先查键盘 IRQ 缓冲区（非阻塞）
+    if (keyboard_try_getc(out)) return 1;
+
+    // 其次查串口（轮询，非阻塞）
+    if (serial_try_getc(out)) {
+        if (*out == '\r') *out = '\n';  // 串口终端发 CR，归一化为 LF
+        return 1;
+    }
+    return 0;  // 无输入
+}
+
+char console_getc(void) {
+    for (;;) {
+        char c;
+        if (console_try_getc(&c)) return c;
+        __asm__ volatile("pause");  // 让出 CPU 一个周期
+    }
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么 \texttt{console\_getc} 用 \texttt{pause} 而非 \texttt{hlt}？
+
+\texttt{hlt} 会让 CPU 完全停止直到下一个中断。但 \texttt{serial\_try\_getc} 是
+轮询模式（不依赖中断），\texttt{hlt} 后如果没有键盘中断就永远不会被唤醒。
+\texttt{pause} 只是一个短暂提示（用于 spin-wait），CPU 仍然继续执行循环。
+
+更好的方案是在每次 \texttt{hlt} 前 check 一次串口，但当前简单实现已够用。
+\end{whybox}
+
+% ============================================================================
+\section{命令接口：\texttt{cmd.h}}
+
+\begin{lstlisting}[style=cstyle]
+typedef int (*cmd_fn_t)(int argc, char** argv);
+
+typedef struct {
+    const char* name;   // 命令名（如 "cls"）
+    const char* help;   // 帮助文本
+    cmd_fn_t fn;        // 处理函数
+} cmd_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  % cmd_t 结构
+  \node[memcell, minimum width=4cm, fill=blue!10, minimum height=0.7cm] (name) {name (const char*)};
+  \node[memcell, minimum width=4cm, fill=green!10, minimum height=0.7cm, above=0cm of name] (help) {help (const char*)};
+  \node[memcell, minimum width=4cm, fill=orange!10, minimum height=0.7cm, above=0cm of help] (fn) {fn (cmd\_fn\_t)};
+
+  \node[left=0.3cm of name, font=\small\bfseries] {cmd\_t};
+
+  % Pointers
+  \node[right=2cm of name, font=\ttfamily\small] (namestr) {"cls"};
+  \draw[pointer] (name.east) -- (namestr.west);
+
+  \node[right=2cm of fn, font=\ttfamily\small] (fnaddr) {cmd\_cls\_main()};
+  \draw[pointer] (fn.east) -- (fnaddr.west);
+\end{tikzpicture}
+\caption{\texttt{cmd\_t} 结构体的内存布局与指针指向}
+\end{figure}
+
+每个命令做成独立编译单元（一个 \texttt{.c} 文件），在文件末尾导出一个
+\texttt{const cmd\_t}：
+
+\begin{lstlisting}[style=cstyle]
+// cmd_cls.c
+static int cmd_cls_main(int argc, char** argv) {
+    (void)argc; (void)argv;
+    printk("\x1b[2J\x1b[H");  // ANSI 清屏 + 光标归位
+    return 0;
+}
+
+const cmd_t cmd_cls = {
+    .name = "cls",
+    .help = "Clear screen (serial ANSI)",
+    .fn   = cmd_cls_main,
+};
+\end{lstlisting}
+
+\begin{designbox}
+为什么用 \texttt{const cmd\_t}（全局常量）而非注册函数？
+
+\begin{enumerate}
+  \item 编译期确定：不需要运行时动态分配内存（此时堆还没初始化）
+  \item 链接器自动包含：只要 \texttt{.o} 文件被链接进来，\texttt{cmd\_t} 就存在
+  \item Shell 只需 \texttt{extern} 声明 + 加入数组即可
+\end{enumerate}
+\end{designbox}
+
+% ============================================================================
+\section{命令注册表与分发}
+
+\subsection{注册表：静态指针数组}
+
+\begin{lstlisting}[style=cstyle]
+// shell.c 中
+extern const cmd_t cmd_cls;
+extern const cmd_t cmd_shutdown;
+extern const cmd_t cmd_cmds;
+// ... 每加一个命令就加一行 extern ...
+
+static const cmd_t* g_cmds[] = {
+    &cmd_cls,
+    &cmd_shutdown,
+    &cmd_cmds,
+    &cmd_mmap,
+    &cmd_free,
+    &cmd_pmm,
+    &cmd_vmm,
+    &cmd_heap,
+    &cmd_vma,
+};
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  % g_cmds array
+  \foreach \i/\name in {0/cmd\_cls, 1/cmd\_shutdown, 2/cmd\_cmds, 3/cmd\_mmap, 4/{\ldots}} {
+    \node[memcell, minimum width=3cm, minimum height=0.5cm] (g\i) at (0, -\i*0.55) {};
+    \node[font=\tiny\ttfamily] at (g\i) {\name};
+    \node[memaddr, left=0.1cm of g\i, font=\tiny\ttfamily] {[\i]};
+  }
+  \node[font=\small\ttfamily, above=0.2cm of g0] {g\_cmds[]};
+
+  % cmd_t structures on the right
+  \node[draw, minimum width=2.5cm, fill=blue!10, right=2.5cm of g0, font=\tiny\ttfamily] (cls) {name="cls", fn={\ldots}};
+  \node[draw, minimum width=2.5cm, fill=orange!10, right=2.5cm of g1, font=\tiny\ttfamily] (shut) {name="shutdown", fn={\ldots}};
+
+  \draw[pointer] (g0.east) -- (cls.west);
+  \draw[pointer] (g1.east) -- (shut.west);
+\end{tikzpicture}
+\caption{\texttt{g\_cmds[]} 是指向各 \texttt{cmd\_t} 常量的指针数组}
+\end{figure}
+
+\subsection{分发逻辑}
+
+\begin{lstlisting}[style=cstyle]
+static void shell_dispatch(char* line) {
+    if (!line || !*line) return;
+
+    char* argv[16];
+    int argc = shell_tokenize(line, argv, 16);
+    if (argc <= 0) return;
+
+    // 遍历注册表，匹配 name
+    for (size_t i = 0; i < sizeof(g_cmds)/sizeof(g_cmds[0]); i++) {
+        if (streq(argv[0], g_cmds[i]->name)) {
+            g_cmds[i]->fn(argc, argv);
+            return;
+        }
+    }
+
+    printk("Unknown command: %s\n", argv[0]);
+}
+\end{lstlisting}
+
+\begin{thinkbox}
+当前遍历是 $O(n)$——对几十个命令完全够用。如果将来命令数量上千
+（不太可能在内核态），可以改为排序数组 + 二分查找或哈希表。
+但这是过度工程化——\term{YAGNI}（You Aren't Gonna Need It）。
+\end{thinkbox}
+
+% ============================================================================
+\section{行编辑器：\texttt{shell\_readline}}
+
+\begin{lstlisting}[style=cstyle]
+static size_t shell_readline(char* buf, size_t cap) {
+    size_t len = 0;
+    for (;;) {
+        char c = console_getc();  // 阻塞等待一个字符
+
+        if (c == '\n') {
+            printk("\n");
+            buf[len] = '\0';
+            return len;
+        }
+
+        // Backspace (0x08) 或 DEL (0x7F)
+        if (c == '\b' || (unsigned char)c == 0x7F) {
+            if (len > 0) {
+                len--;
+                printk("\b \b");  // 退格 + 空格覆盖 + 再退格
+            }
+            continue;
+        }
+
+        // 忽略其他控制字符（< 0x20）
+        if ((unsigned char)c < 0x20) continue;
+
+        // 可见字符：存入缓冲区 + 回显
+        if (len + 1 < cap) {
+            buf[len++] = c;
+            printk("%c", c);
+        }
+    }
+}
+\end{lstlisting}
+
+退格的三步序列 \texttt{\textbackslash b \textbackslash{} \textbackslash b} 详解：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.5cm]
+  \node[font=\ttfamily] (s0) {szy-kernel > helo};
+  \node[font=\ttfamily, below=0.3cm of s0] (s1) {szy-kernel > hel\textvisiblespace};
+  \node[font=\ttfamily, below=0.3cm of s1] (s2) {szy-kernel > hel};
+  \node[right=1cm of s0, font=\scriptsize\itshape] {按 Backspace 前};
+  \node[right=1cm of s1, font=\scriptsize\itshape] {\textbackslash b 退格 → 空格覆盖 'o'};
+  \node[right=1cm of s2, font=\scriptsize\itshape] {再 \textbackslash b 退格到正确位置};
+\end{tikzpicture}
+\caption{退格三步序列：\texttt{\textbackslash b} (退格) → \texttt{' '} (覆盖) → \texttt{\textbackslash b} (归位)}
+\end{figure}
+
+\subsection{命令分词：\texttt{shell\_tokenize}}
+
+\begin{lstlisting}[style=cstyle]
+static int shell_tokenize(char* line, char** argv, int argv_cap) {
+    int argc = 0;
+    char* p = line;
+    while (*p) {
+        while (*p && is_space(*p)) p++;  // 跳过空白
+        if (!*p) break;
+        if (argc >= argv_cap) break;
+        argv[argc++] = p;               // 记录 token 起始
+        while (*p && !is_space(*p)) p++; // 跳过非空白
+        if (*p) { *p = '\0'; p++; }     // 用 NUL 截断 token
+    }
+    return argc;
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0cm]
+  % 输入行
+  \foreach \i/\ch in {0/p, 1/m, 2/m, 3/\textvisiblespace, 4/a, 5/l, 6/l, 7/o, 8/c, 9/\textvisiblespace, 10/3, 11/\textbackslash 0} {
+    \node[memcell, minimum width=0.7cm, minimum height=0.6cm, font=\ttfamily\small] (c\i) at (\i*0.75, 0) {\ch};
+  }
+  \node[font=\small, above=0.4cm of c5] {\texttt{line[]} 内容};
+
+  % Tokenize 后
+  \foreach \i/\ch in {0/p, 1/m, 2/m, 3/\textbackslash 0, 4/a, 5/l, 6/l, 7/o, 8/c, 9/\textbackslash 0, 10/3, 11/\textbackslash 0} {
+    \node[memcell, minimum width=0.7cm, minimum height=0.6cm, font=\ttfamily\small] (d\i) at (\i*0.75, -1.5) {\ch};
+  }
+  \node[font=\small, above=0.4cm of d5] {tokenize 后（空格变 \textbackslash 0）};
+
+  % argv pointers
+  \draw[pointer, red] ([yshift=-0.4cm]d0.south) -- (d0.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[0]="pmm"};
+  \draw[pointer, blue] ([yshift=-0.4cm]d4.south) -- (d4.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[1]="alloc"};
+  \draw[pointer, green!50!black] ([yshift=-0.4cm]d10.south) -- (d10.south) node[below=0.5cm, font=\scriptsize\ttfamily] {argv[2]="3"};
+\end{tikzpicture}
+\caption{tokenize 将空格替换为 \texttt{\textbackslash 0}，argv[] 指向各 token 起始}
+\end{figure}
+
+\begin{warnbox}
+\texttt{shell\_tokenize} 会\textbf{修改}输入字符串（用 \texttt{\textbackslash 0} 替换空格）。
+这是 C 中常见的"零拷贝分词"技巧——不分配新内存，但调用者不能再使用原始字符串。
+\end{warnbox}
+
+% ============================================================================
+\section{主循环：\texttt{shell\_run}}
+
+\begin{lstlisting}[style=cstyle]
+void shell_run(void) {
+    printk("\nInteractive shell ready.\n");
+    char line[SHELL_LINE_MAX];  // 128 字节栈上缓冲区
+
+    for (;;) {
+        shell_print_prompt();                    // "szy-kernel > "
+        shell_readline(line, sizeof(line));       // 阻塞读一行
+        shell_dispatch(line);                     // 分词 + 匹配 + 执行
+    }
+}
+\end{lstlisting}
+
+% ============================================================================
+\section{命令实现示例}
+
+\subsection{\texttt{cmd\_cls}：清屏}
+
+\begin{lstlisting}[style=cstyle]
+printk("\x1b[2J\x1b[H");
+\end{lstlisting}
+
+\begin{itemize}
+  \item \texttt{\textbackslash x1b[2J}：ANSI 转义序列——清除整个屏幕
+  \item \texttt{\textbackslash x1b[H}：光标移到左上角 (1,1)
+\end{itemize}
+
+这只对支持 ANSI 的串口终端有效。QEMU \texttt{-serial stdio} 的宿主终端通常支持。
+
+\subsection{\texttt{cmd\_shutdown}：关机}
+
+\begin{lstlisting}[style=cstyle]
+outw(0x604, 0x2000);   // QEMU ACPI 关机
+outw(0xB004, 0x2000);  // Bochs 关机
+cpu_halt_forever();     // cli + hlt 循环
+\end{lstlisting}
+
+\begin{whybox}
+为什么要尝试两个不同的端口？因为 QEMU 和 Bochs 的 ACPI 关机端口不同。
+如果两个都无效（真实硬件），就退化为 \texttt{cli; hlt}——CPU 停止，
+电源不会关闭但系统不再响应。
+\end{whybox}
+
+% ============================================================================
+\section{添加新命令的完整流程}
+
+\begin{enumerate}
+  \item 创建 \texttt{src/kernel/cmds/cmd\_xxx.c}
+  \item 实现 handler 函数并导出：
+\begin{lstlisting}[style=cstyle]
+const cmd_t cmd_xxx = {
+    .name = "xxx", .help = "...", .fn = cmd_xxx_fn
+};
+\end{lstlisting}
+  \item 在 \texttt{shell.c} 中添加 \texttt{extern const cmd\_t cmd\_xxx;} 并加入 \texttt{g\_cmds[]}
+  \item 无需修改 Makefile——\texttt{kernel/cmds/*.c} 被自动发现编译
+\end{enumerate}
+
+% ============================================================================
+\section{验证}
+
+\begin{lstlisting}[style=shellstyle]
+szy-kernel > cmds
+Commands (9):
+cls       shutdown  cmds      mmap      free
+pmm       vmm       heap      vma
+szy-kernel > cls
+# 屏幕清空
+szy-kernel > shutdown
+Shutting down...
+# QEMU 窗口关闭
+\end{lstlisting}
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+添加一个 \texttt{echo} 命令，将 \texttt{argv[1..argc-1]} 用空格连接后打印。
+示例：\texttt{echo hello world} 输出 \texttt{hello world}。
+\end{exercise}
+
+\begin{exercise}
+当前 \texttt{shell\_readline} 的缓冲区是 128 字节。如果用户连续输入 200 个字符
+（不按回车），超出部分会怎样？修改为在超出时发出 \texttt{\textbackslash a}（BEL，蜂鸣器）提醒。
+\end{exercise}
+
+\begin{exercise}
+实现命令历史：用上箭头键（ANSI \texttt{\textbackslash x1b[A}）回显上一条命令。
+提示：维护 \texttt{history[8][128]} 环形数组。键盘驱动需要先支持方向键
+（ch05 的挑战练习）。
+\end{exercise}
+
+\begin{exercise}
+（挑战）让 \texttt{streq} 支持前缀匹配：输入 \texttt{shut} 自动匹配到
+\texttt{shutdown}（如果只有一个候选）。如果有多个候选，打印所有匹配项。
+这就是简单的 Tab 补全。
+\end{exercise}
+
+% ============================================================================
+\section{本章小结}
+
+Shell 的核心数据结构：
+
+\begin{enumerate}
+  \item \textbf{\texttt{cmd\_t}}：name + help + fn 函数指针，每个命令一个独立编译单元
+  \item \textbf{\texttt{g\_cmds[]}}：静态指针数组，编译期确定，遍历分发
+  \item \textbf{行缓冲}：栈上 128 字节，tokenize 原地修改（零拷贝）
+  \item \textbf{Console 层}：统一键盘 + 串口输入，屏蔽输入源差异
+\end{enumerate}
+
+Shell 是内核开发阶段最重要的调试工具——后续每实现一个子系统
+都会立即添加对应的调试命令。下一章进入内存管理：PMM（物理内存分配器）。

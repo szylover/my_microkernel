@@ -1,0 +1,75 @@
+% ============================================================================
+\chapter{工具链速查}
+\label{ch:appendix-tools}
+% ============================================================================
+
+\section{构建命令}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{命令} & \textbf{用途} \\
+  \midrule
+  \texttt{make iso}            & 编译内核 + 打包 GRUB ISO \\
+  \texttt{make run}            & QEMU 启动 ISO \\
+  \texttt{make debug}          & QEMU -S 等待 GDB（需 \texttt{DEBUG=1}） \\
+  \texttt{make gdb}            & 启动 GDB 并连接 QEMU \\
+  \texttt{make clean}          & 清理构建产物 \\
+  \texttt{make compdb}         & 生成 \texttt{compile\_commands.json} \\
+  \bottomrule
+\end{longtable}
+
+\section{QEMU 常用选项}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{选项} & \textbf{含义} \\
+  \midrule
+  \texttt{-serial stdio}    & 串口输出到终端 \\
+  \texttt{-m 256}           & 分配 256MiB 内存 \\
+  \texttt{-S}               & 启动时暂停 CPU \\
+  \texttt{-s}               & 开启 gdbstub（端口 1234） \\
+  \texttt{-no-reboot}       & Triple Fault 时不自动重启 \\
+  \texttt{-d int}           & 输出中断日志 \\
+  \bottomrule
+\end{longtable}
+
+\section{GDB 常用命令}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{命令} & \textbf{用途} \\
+  \midrule
+  \texttt{b kmain}            & 在 kmain 设断点 \\
+  \texttt{c}                  & 继续运行 \\
+  \texttt{n / s}              & 单步（不进入/进入函数） \\
+  \texttt{si / ni}            & 指令级单步 \\
+  \texttt{info reg}           & 查看寄存器 \\
+  \texttt{bt}                 & 调用栈回溯 \\
+  \texttt{x/10i \$eip}        & 反汇编当前位置 \\
+  \texttt{p/x var}            & 十六进制打印变量 \\
+  \texttt{x/32wx \$esp}       & 查看栈内存 \\
+  \bottomrule
+\end{longtable}
+
+\section{Shell 命令速查}
+
+\begin{longtable}{ll}
+  \toprule
+  \textbf{命令} & \textbf{用途} \\
+  \midrule
+  \texttt{cls}              & 清屏 \\
+  \texttt{cmds}             & 列出所有命令 \\
+  \texttt{free}             & 物理内存用量 \\
+  \texttt{mmap}             & Multiboot2 内存映射 \\
+  \texttt{pmm state}        & PMM 状态 \\
+  \texttt{pmm alloc N}      & 分配 N 个物理页 \\
+  \texttt{vmm state}        & VMM 状态 \\
+  \texttt{vmm lookup ADDR}  & 虚拟→物理地址翻译 \\
+  \texttt{heap status}      & 堆统计 \\
+  \texttt{heap test}        & 堆 selftest \\
+  \texttt{vma list}         & 列出所有 VMA \\
+  \texttt{vma find ADDR}    & 查找地址所属 VMA \\
+  \texttt{vma test}         & VMA selftest \\
+  \texttt{shutdown}         & 关机 \\
+  \bottomrule
+\end{longtable}

@@ -1,0 +1,484 @@
+% Stage 8 — Kernel Heap：kmalloc 与 kfree
+% ============================================================================
+\chapter{Kernel Heap：kmalloc 与 kfree}
+\label{ch:kmalloc}
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解内核为什么需要字节级堆分配器——PMM 只能以 4\,KiB 页为粒度
+  \item 掌握堆虚拟地址区域规划：\hex{E0000000}--\hex{F0000000}，256\,MiB
+  \item 理解 \texttt{heap\_ops\_t} 可插拔后端接口（与 \texttt{pmm\_ops\_t} 同一模式）
+  \item 实现 First-Fit 空闲链表：\texttt{block\_header\_t}、分配拆分、释放合并
+  \item 了解 Slab 分配器后端：固定大小 cache + bitmap
+  \item 实现 \texttt{kmalloc\_init}：映射物理页并初始化后端
+  \item 掌握 \texttt{kheap\_stats\_t} 统计信息的含义
+\end{itemize}
+
+% ============================================================================
+\section{背景知识：为什么需要内核堆？}
+
+PMM 以 4\,KiB 页为单位分配，VMM 的 \texttt{vmm\_alloc\_pages} 同样以页为粒度。
+但内核中大量数据结构远小于一页——进程控制块 128\,B、VMA 节点 32\,B、命令表项十几字节。
+若每个小对象都分配整页，内部碎片率高达 $1 - 128/4096 \approx 96.9\%$。
+
+\begin{whybox}
+为什么不直接用全局数组（静态分配）？
+
+静态数组在编译时就固定了容量，无法按运行时需求伸缩；为"以防万一"必须预留最大容量，浪费严重；
+每新增一种数据结构就要新增一个数组，代码耦合也越来越重。
+内核堆（\texttt{kmalloc}/\texttt{kfree}）就是给内核提供任意大小、动态生命周期的分配能力——
+类比用户态的 \texttt{malloc}/\texttt{free}。
+\end{whybox}
+
+% ============================================================================
+\section{堆的虚拟地址区域规划}
+
+内核堆需要一段专属连续虚拟地址。在第~\ref{ch:high-half}~章高半区布局基础上细分：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=7cm, font=\small, anchor=south west},
+  addr/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+]
+  \node[block, minimum height=1.6cm, fill=red!10] (dm) at (0, 0)
+    {\parbox{6.5cm}{\centering\textbf{直接映射区}\\
+     \texttt{virt = phys + 0xC0000000}}};
+  \node[block, minimum height=1.0cm, fill=yellow!15] (alloc) at (0, 1.6)
+    {\parbox{6.5cm}{\centering\textbf{VMM 动态分配区}\\
+     \texttt{vmm\_alloc\_pages} bump}};
+  \node[block, minimum height=1.8cm, fill=green!15] (heap) at (0, 2.6)
+    {\parbox{6.5cm}{\centering\textbf{内核堆}\\
+     \texttt{kmalloc}/\texttt{kfree}，初始 64\,KiB，按需 grow}};
+  \node[block, minimum height=0.8cm, fill=gray!10] (unmapped) at (0, 4.4)
+    {\parbox{6.5cm}{\centering 未映射 / 保留}};
+  \node[addr] at (-0.2, 0)    {\hex{C0000000}};
+  \node[addr] at (-0.2, 1.6)  {\hex{D0000000}};
+  \node[addr] at (-0.2, 2.6)  {\hex{E0000000}};
+  \node[addr] at (-0.2, 4.4)  {\hex{F0000000}};
+  \node[addr] at (-0.2, 5.2)  {\hex{FFFFFFFF}};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror}]
+    (7.2, 2.6) -- (7.2, 4.4) node[midway, right=8pt, font=\scriptsize] {256\,MiB};
+\end{tikzpicture}
+\caption{内核虚拟地址空间细分布局}
+\label{fig:kernel-vaddr-layout}
+\end{figure}
+
+\texttt{vmm.h} 中定义的三个宏：
+
+\begin{lstlisting}[style=cstyle]
+#define KHEAP_START     0xE0000000u
+#define KHEAP_MAX_SIZE  (256u * 1024u * 1024u)    /* 256 MiB */
+#define KHEAP_END       (KHEAP_START + KHEAP_MAX_SIZE)  /* 0xF0000000 */
+\end{lstlisting}
+
+\begin{designbox}
+堆区域必须和 \texttt{vmm\_alloc\_pages} 的地址空间分开。后者内部用 bump allocator
+（\texttt{g\_next\_vaddr} 单调递增），如果堆也用同一空间，两个分配器会互相踩踏。
+隔离到不同区间后各管各的，互不干扰。
+\end{designbox}
+
+% ============================================================================
+\section{可插拔后端：\texttt{heap\_ops\_t} 接口}
+
+与第~\ref{ch:pmm}~章的 \texttt{pmm\_ops\_t} 相同模式——接口与实现解耦：
+
+\begin{lstlisting}[style=cstyle]
+typedef struct heap_ops {
+    const char* name;
+    void  (*init)(void* start, size_t size);
+    void* (*alloc)(size_t size);
+    void  (*free)(void* ptr);
+    void  (*stats)(kheap_stats_t* out);
+} heap_ops_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+              minimum width=3.2cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[box, fill=blue!8]   (caller) at (0, 0)    {调用者 (VMA / Shell)};
+  \node[box, fill=yellow!12](api)    at (0, -1.3)  {\texttt{kmalloc()} / \texttt{kfree()}};
+  \node[box, fill=orange!12](disp)   at (0, -2.6)  {\texttt{kmalloc.c} dispatch};
+  \node[box, fill=green!12] (ff)     at (-2.8,-4.0){\texttt{heap\_first\_fit.c}};
+  \node[box, fill=green!12] (slab)   at (2.8,-4.0) {\texttt{heap\_slab.c}};
+  \draw[arr] (caller)--(api);
+  \draw[arr] (api)--(disp);
+  \draw[arr] (disp)--(ff);
+  \draw[arr] (disp)--(slab);
+\end{tikzpicture}
+\caption{\texttt{kmalloc} 可插拔后端调用链}
+\label{fig:kmalloc-dispatch}
+\end{figure}
+
+\texttt{kconfig.h} 编译期选择后端（\texttt{0}=first\_fit, \texttt{1}=slab），
+\texttt{kmain.c} 启动时注册并调用 \texttt{kmalloc\_init()}。
+
+\begin{thinkbox}
+"dispatch + 后端"模式在 Linux 内核中随处可见（VFS、I/O 调度器、协议栈）。
+如果不用函数指针表，而在每个调用点用 \texttt{\#if} 选择实现，会有什么问题？
+（提示：代码膨胀与维护成本）
+\end{thinkbox}
+
+% ============================================================================
+\section{First-Fit 空闲链表}
+
+\subsection{\texttt{block\_header\_t} 结构}
+
+First-Fit 后端把堆区域切成若干块，每块前面有小 header，所有块串成双向链表：
+
+\begin{lstlisting}[style=cstyle]
+typedef struct block_header {
+    size_t size;                   /* 用户数据区大小（不含 header） */
+    int is_free;                   /* 0=已分配, 1=空闲 */
+    struct block_header* next;
+    struct block_header* prev;
+} block_header_t;
+#define HEADER_SIZE  ((sizeof(block_header_t) + 7u) & ~7u)  /* 16B */
+#define ALIGN8(x)   (((x) + 7u) & ~7u)
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west},
+]
+  \node[font=\scriptsize, anchor=south] at (0.2, 0.9) {\texttt{block}};
+  \draw[-{Stealth[length=4pt]}, thick, blue!60!black] (0.2, 0.9) -- (0.2, 0.7);
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (0, 0) {\small size};
+  \node[cell, minimum width=1.4cm, fill=red!12]  at (1.6, 0) {\small free};
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (3.0, 0) {\small next};
+  \node[cell, minimum width=1.6cm, fill=red!12]  at (4.6, 0) {\small prev};
+  \node[cell, minimum width=4.2cm, fill=green!12] at (6.2, 0)
+    {\small 用户数据区};
+  \draw[{|}-{|}, thick] (0, -0.6) -- (6.2, -0.6);
+  \node[font=\scriptsize, below] at (3.1, -0.6) {HEADER\_SIZE = 16B};
+  \draw[{|}-{|}, thick] (6.2, -0.6) -- (10.4, -0.6);
+  \node[font=\scriptsize, below] at (8.3, -0.6) {\texttt{size} 字节};
+  \node[font=\scriptsize, anchor=south, text=green!40!black] at (6.4, 0.9)
+    {\texttt{kmalloc} 返回此处};
+  \draw[-{Stealth[length=4pt]}, thick, green!50!black] (6.4, 0.9) -- (6.4, 0.7);
+\end{tikzpicture}
+\caption{\texttt{block\_header\_t} 与用户数据区的内存布局}
+\label{fig:block-header-layout}
+\end{figure}
+
+\texttt{kmalloc} 返回 \texttt{block + HEADER\_SIZE}；\texttt{kfree} 时往回退 16 字节即找到 header。
+32 位下 $\texttt{sizeof} = 4{+}4{+}4{+}4 = 16$，天然 8 字节对齐。
+
+% ---------------------------------------------------------------------------
+\subsection{分配：遍历 + 拆分}
+
+\texttt{heap\_first\_fit\_alloc(size)} 步骤：
+① 对齐 \texttt{ALIGN8(size)}；
+② 从头遍历找第一个 \texttt{is\_free \&\& size >= need}；
+③ 若块比请求大得多（余 $>$ \texttt{HEADER\_SIZE + 8}）则拆分；
+④ \texttt{is\_free = 0}，返回数据区指针。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.65cm, font=\ttfamily\small, anchor=west}]
+  \node[font=\bfseries\small, anchor=west] at (-0.5, 1.2) {拆分前：};
+  \node[cell, minimum width=1.8cm, fill=red!12]  at (0, 0.5) {\small hdr};
+  \node[cell, minimum width=7cm, fill=green!12]   at (1.8, 0.5) {\small 大空闲块};
+  \node[font=\bfseries\small, anchor=west] at (-0.5, -0.3) {拆分后：};
+  \node[cell, minimum width=1.8cm, fill=red!12]   at (0, -1) {\small hdr};
+  \node[cell, minimum width=2.5cm, fill=orange!15] at (1.8, -1) {\small 已分配};
+  \node[cell, minimum width=1.8cm, fill=red!12]   at (4.3, -1) {\small new};
+  \node[cell, minimum width=2.7cm, fill=green!12]  at (6.1, -1) {\small 新空闲};
+  \draw[{|}-{|}, thick] (1.8, -1.9) -- (4.3, -1.9);
+  \node[font=\scriptsize, below] at (3.05, -1.9) {\texttt{size}};
+  \draw[{|}-{|}, thick] (6.1, -1.9) -- (8.8, -1.9);
+  \node[font=\scriptsize, below] at (7.45, -1.9) {remaining};
+\end{tikzpicture}
+\caption{First-Fit 分配时的块拆分}
+\label{fig:block-split}
+\end{figure}
+
+核心拆分代码：
+
+\begin{lstlisting}[style=cstyle]
+if (curr->size - size > HEADER_SIZE + 8) {
+    block_header_t* new_block =
+        (block_header_t*)((uint8_t*)curr + HEADER_SIZE + size);
+    new_block->size    = curr->size - size - HEADER_SIZE;
+    new_block->is_free = 1;
+    new_block->next = curr->next;  new_block->prev = curr;
+    if (curr->next) curr->next->prev = new_block;
+    curr->size = size;
+    curr->next = new_block;
+}
+curr->is_free = 0;
+return (void*)((uint8_t*)curr + HEADER_SIZE);
+\end{lstlisting}
+
+\begin{thinkbox}
+拆分阈值 \texttt{HEADER\_SIZE + 8} 的含义：剩余空间必须够放 header（16\,B）加最小数据（8\,B），
+否则拆出的碎片永远不可用。若改成 \texttt{HEADER\_SIZE + 1}，返回的指针将不满足 8 字节对齐——
+许多 CPU 指令（如 SSE）会因此触发异常。
+\end{thinkbox}
+
+% ---------------------------------------------------------------------------
+\subsection{释放与合并}
+
+\texttt{heap\_first\_fit\_free(ptr)} 步骤：
+① \texttt{block = ptr - HEADER\_SIZE}；
+② 范围检查；
+③ \texttt{is\_free = 1}；
+④ 向后合并（while \texttt{next} 也 free 就 \texttt{merge\_with\_next}）；
+⑤ 向前合并（若 \texttt{prev} 也 free 让其吞并自己）。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.65cm, font=\ttfamily\small, anchor=west}]
+  \node[font=\bfseries\small, anchor=west] at (-0.5, 1.2) {合并前：};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (0, 0.5) {\small hdr};
+  \node[cell, minimum width=2.2cm, fill=green!12]  at (1.4, 0.5) {\small FREE};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (3.6, 0.5) {\small hdr};
+  \node[cell, minimum width=2.2cm, fill=green!12]  at (5.0, 0.5) {\small FREE};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (7.2, 0.5) {\small hdr};
+  \node[cell, minimum width=1.4cm, fill=orange!15] at (8.6, 0.5) {\small USED};
+  \node[font=\bfseries\small, anchor=west] at (-0.5, -0.3) {合并后：};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (0, -1) {\small hdr};
+  \node[cell, minimum width=5.8cm, fill=green!12]  at (1.4, -1) {\small 合并后大块};
+  \node[cell, minimum width=1.4cm, fill=red!12]   at (7.2, -1) {\small hdr};
+  \node[cell, minimum width=1.4cm, fill=orange!15] at (8.6, -1) {\small USED};
+  \draw[-{Stealth[length=3pt]}, dashed, gray] (4.0, 0.15) -- (4.0, -0.65);
+  \node[font=\scriptsize\color{gray}] at (4.0, -0.25) {被吞并};
+\end{tikzpicture}
+\caption{相邻空闲块的合并}
+\label{fig:block-coalesce}
+\end{figure}
+
+\begin{lstlisting}[style=cstyle]
+static void merge_with_next(block_header_t* block) {
+    block_header_t* victim = block->next;
+    block->size += HEADER_SIZE + victim->size;
+    block->next  = victim->next;
+    if (victim->next) victim->next->prev = block;
+}
+\end{lstlisting}
+
+\begin{whybox}
+为什么需要双向链表？
+
+单向链表向后合并（吃 next）没问题，但向前合并需要从 block 找前驱——
+单向链表要 $O(n)$ 遍历。双向链表多花 4\,B 存 \texttt{prev}，换来
+$O(1)$ 向前合并，是经典的空间换时间。
+\end{whybox}
+
+% ============================================================================
+\section{堆的初始化与增长}
+
+\subsection{\texttt{kmalloc\_init}：映射初始物理页}
+
+\texttt{kmalloc\_init()} 在内核启动时调用：
+逐页从 PMM 分配物理页 $\to$ VMM 映射到 \hex{E0000000} $\to$ 调后端 \texttt{init}。
+
+\begin{lstlisting}[style=cstyle]
+void kmalloc_init(void) {
+    size_t initial_size = KHEAP_INITIAL_PAGES * VMM_PAGE_SIZE;
+    for (unsigned i = 0; i < KHEAP_INITIAL_PAGES; i++) {
+        uint32_t virt = KHEAP_START + i * VMM_PAGE_SIZE;
+        uint32_t phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+        vmm_map_page(virt, phys, PTE_PRESENT | PTE_WRITABLE);
+    }
+    g_heap_ops->init((void*)(uintptr_t)KHEAP_START, initial_size);
+}
+\end{lstlisting}
+
+初始页数由 \texttt{kconfig.h} 配置：\texttt{KCONFIG\_HEAP\_INITIAL\_PAGES = 16}（64\,KiB）。
+
+\subsection{\texttt{heap\_brk}：按需增长}
+
+First-Fit 后端用 \texttt{heap\_brk} 跟踪已提交上界：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.7cm, font=\small, anchor=west}]
+  \node[cell, minimum width=4.5cm, fill=green!12] at (0, 0)
+    {\parbox{4cm}{\centering 已提交\\（有物理页）}};
+  \node[cell, minimum width=4.5cm, fill=gray!10, pattern=north east lines,
+        pattern color=gray!30] at (4.5, 0)
+    {\parbox{4cm}{\centering 未映射\\（PTE=0）}};
+  \node[font=\ttfamily\scriptsize, below] at (0, -0.35) {heap\_start};
+  \node[font=\ttfamily\scriptsize, below, text=blue!60!black] at (4.5,-0.35) {heap\_brk};
+  \node[font=\ttfamily\scriptsize, below] at (9, -0.35) {heap\_end};
+  \draw[-{Stealth[length=4pt]}, thick, blue!60!black]
+    (4.5, -0.9) -- (5.8, -0.9) node[midway, below, font=\scriptsize] {grow};
+\end{tikzpicture}
+\caption{\texttt{heap\_brk}：已提交区域上界}
+\label{fig:heap-brk}
+\end{figure}
+
+分配找不到合适块时调 \texttt{heap\_grow(min\_bytes)}——从 PMM 拿页、VMM 映射、
+推进 \texttt{heap\_brk}，语义类似用户态 \texttt{sbrk()}。
+
+% ============================================================================
+\section{Slab 分配器概述}
+\label{sec:slab-overview}
+
+First-Fit 每次分配 $O(n)$ 遍历且易碎片化。\term{Slab 分配器}（源自 Solaris / Linux）
+针对这两个弱点：按固定大小预切 slot，相同大小 $O(1)$ 取。
+
+\subsection{7 级 Cache}
+
+\begin{center}
+\begin{tabular}{c c c l}
+\toprule
+编号 & 大小 & 每页 Slot 数 & 适用场景 \\
+\midrule
+0 & 32\,B  & $\approx 126$ & 小结构体、链表节点 \\
+1 & 64\,B  & $\approx 63$  & 字符串缓冲区 \\
+2 & 128\,B & $\approx 31$  & 进程控制块 \\
+3 & 256\,B & $\approx 15$  & 中型数据 \\
+4 & 512\,B & $\approx 7$   & 大结构体 \\
+5 & 1024\,B & 3            & 页级缓冲 \\
+6 & 2048\,B & 1            & 最大 cache \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{kmalloc(50)} $\to$ cache-64，内部碎片 = $14$\,B。
+
+\subsection{Slab 内存布局}
+
+每个 slab 占一页（4\,KiB），页头放 \texttt{slab\_header\_t}（含 128 位 bitmap）：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[cell/.style={draw, minimum height=0.7cm, font=\ttfamily\small, anchor=west}]
+  \node[cell, minimum width=2.2cm, fill=red!12]   at (0, 0) {\small slab\_hdr};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (2.2, 0) {\small obj[0]};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (3.6, 0) {\small obj[1]};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (5.0, 0) {\small obj[2]};
+  \node[font=\small] at (7.1, 0) {$\cdots$};
+  \node[cell, minimum width=1.4cm, fill=green!12]  at (7.6, 0) {\small obj[N]};
+  \draw[{|}-{|}, thick] (0, -0.6) -- (2.2, -0.6);
+  \node[font=\scriptsize, below] at (1.1, -0.6) {$\sim$40\,B};
+  \draw[{|}-{|}, thick] (0, 0.9) -- (9.0, 0.9);
+  \node[font=\scriptsize, above] at (4.5, 0.9) {一页 = 4096\,B};
+\end{tikzpicture}
+\caption{Slab 内存布局}
+\label{fig:slab-layout}
+\end{figure}
+
+分配：\texttt{bitmap\_find\_first\_set} $\to$ 清位 $\to$ 计算地址，$O(1)$。
+释放：\texttt{ptr \& \~{}0xFFF} 找到页头 header，算 slot index $\to$ 置位，$O(1)$。
+
+\begin{designbox}
+\texttt{slab\_header\_t} 放在页头而非单独分配的三个原因：
+① 避免鸡生蛋——slab 自己就是分配器，metadata 不能再 \texttt{kmalloc}；
+② \texttt{kfree} 时页对齐即得 header，$O(1)$；
+③ 每页只损失 $\sim$40\,B（$<1\%$）。
+\end{designbox}
+
+% ============================================================================
+\section{统计信息：\texttt{kheap\_stats\_t}}
+
+\begin{lstlisting}[style=cstyle]
+typedef struct kheap_stats {
+    size_t   heap_size;     /* 已提交区域总大小 */
+    size_t   used_bytes;    /* 已分配字节（含 header 开销） */
+    size_t   free_bytes;    /* 空闲字节 */
+    unsigned alloc_count;   /* 活跃分配数 */
+    unsigned free_count;    /* 空闲块数 */
+} kheap_stats_t;
+\end{lstlisting}
+
+注意 \texttt{used\_bytes + free\_bytes $\neq$ heap\_size}——差值是空闲块 header 的开销。
+\texttt{free\_count} 很大但 \texttt{free\_bytes} 很小说明碎片化严重。
+
+% ============================================================================
+\section{验证：\texttt{heap} 命令}
+
+Shell 输入 \texttt{heap} 查看堆状态：
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+> heap
+=== Kernel Heap Status ===
+  backend:     first_fit
+  heap size:   65536 bytes (64 KiB)
+  used:        0 bytes (0 allocations)
+  free:        65520 bytes (1 free blocks)
+\end{lstlisting}
+
+初始：整个 64\,KiB 是一个大空闲块（65536 $-$ 16 = 65520）。执行 \texttt{heap test}：
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+> heap test
+[heap] alloc: req=100 aligned=104
+[heap] alloc: split -> used 104 + free 65400 @ 0xE0000078
+[heap] alloc: return 0xE0000010
+test: alloc 100B -> 0xE0000010
+...
+[heap] free: merge forward ...
+test: free all -- OK
+\end{lstlisting}
+
+可验证：100\,B 对齐到 104（$\lceil 100/8 \rceil \times 8$）；
+返回地址 = \hex{E0000000} + 16；合并正确执行。
+
+% ============================================================================
+\section{初始化顺序}
+
+\begin{lstlisting}[style=cstyle]
+pmm_init(mmap);        /* 1. 物理内存管理器 */
+vmm_init();            /* 2. 虚拟内存 (页表) */
+vmm_unmap_identity();  /* 3. 拆除 identity mapping */
+kmalloc_init();        /* 4. 内核堆 — 依赖 PMM + VMM */
+vma_init();            /* 5. VMA — 依赖 kmalloc */
+\end{lstlisting}
+
+依赖链：PMM $\to$ VMM $\to$ kmalloc $\to$ VMA。
+VMA 在堆之后——因为 VMA 节点需要 \texttt{kmalloc} 分配。
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+\textbf{实现 Best-Fit 分配算法}
+
+复制 \texttt{heap\_first\_fit.c} 为 \texttt{heap\_best\_fit.c}，
+修改 \texttt{alloc}：遍历\textbf{整个}链表，找 \texttt{size} 差值最小的空闲块。
+在 \texttt{kconfig.h} 新增 \texttt{KCONFIG\_HEAP\_BACKEND == 2}。
+测试：反复分配 32B/128B/64B，释放 128B，再分配 100B——对比两种算法行为。
+
+思考：Best-Fit 一定减少碎片吗？在什么负载下反而更差？
+\end{exercise}
+
+\begin{exercise}
+\textbf{堆增长（\texttt{heap\_grow}）集成}
+
+当前 First-Fit 找不到块就返回 NULL。扩展它：
+① 调 \texttt{heap\_grow(size + HEADER\_SIZE)}；
+② 找链表最后一个块 last，算末尾 \texttt{last\_end}；
+③ 若 last 是 free 就扩 size，否则在 \texttt{last\_end} 建新空闲块；
+④ 递归重试分配。
+\end{exercise}
+
+\begin{exercise}
+\textbf{碎片率统计}
+
+给 \texttt{kheap\_stats\_t} 新增 \texttt{fragmentation} 字段：
+$$\text{fragmentation} = \left(1 - \frac{\max(\text{单块 free size})}
+  {\sum \text{free\_bytes}}\right) \times 100\%$$
+碎片率 = 0 表示所有空闲内存连续；趋近 100\% 表示碎片化严重。
+在 \texttt{heap} 命令中显示该指标。
+\end{exercise}
+
+\begin{exercise}
+\textbf{Slab 的 \texttt{kfree} 流程分析}
+
+阅读 \texttt{heap\_slab.c}，画出 \texttt{kfree} 完整流程图（标注数据结构）：
+\texttt{ptr \& \~{}0xFFF} → 读 \texttt{cache\_idx}/\texttt{obj\_size} →
+计算 slot index → \texttt{bitmap\_set\_bit} → 若从 full 变非满则移到 partial。
+
+\textbf{进阶}：当 slab 全空（\texttt{free\_count == capacity}）时，
+是否应把整页还给 PMM？好处和风险各是什么？
+\end{exercise}

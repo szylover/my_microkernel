@@ -1,0 +1,49 @@
+% ============================================================================
+\chapter{ELF 加载器}
+\label{ch:elf-loader}
+% Stage 11 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 ELF32 文件格式（ELF header、Program header、Section header）
+  \item 实现 ELF 加载器：解析 ELF header → 加载 \texttt{.text}/\texttt{.data} 到用户地址空间
+  \item 用 VMA 记录各段映射（代码段 r-x、数据段 rw-）
+\end{itemize}
+
+\section{背景知识：ELF 格式}
+
+% TODO:
+% - ELF header: e_ident (magic 0x7F ELF), e_type (ET_EXEC), e_entry, e_phoff
+% - Program Header: p_type (PT_LOAD), p_vaddr, p_filesz, p_memsz, p_flags
+% - 只需处理 PT_LOAD 段
+
+\subsection{ELF 加载流程}
+
+% TODO:
+% 1. 验证 ELF magic + e_type=ET_EXEC + e_machine=EM_386
+% 2. 遍历 Program Headers
+% 3. 对每个 PT_LOAD: 分配物理页 → 映射到 p_vaddr → 复制文件内容 → 注册 VMA
+% 4. 设置入口点 = e_entry
+
+\section{数据结构}
+
+% TODO: Elf32_Ehdr, Elf32_Phdr 结构体定义
+
+\section{实现详解}
+
+% TODO: elf_load() 函数逐步讲解
+
+\section{VMA 集成}
+
+% TODO: 每个 PT_LOAD 段注册为一个 VMA，权限从 p_flags 映射
+
+\section{验证}
+
+% TODO: 加载一个最小 ELF (用交叉编译器编译) → 跳转执行 → syscall exit
+
+\section{本章小结}
+
+ELF 加载器让内核能运行外部编译的程序。下一章实现系统调用，
+让用户态程序能请求内核服务。
