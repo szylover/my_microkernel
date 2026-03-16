@@ -1,0 +1,22 @@
+% ============================================================================
+\chapter{移植用户态 libc}
+\label{ch:libc}
+% 里程碑 F-4 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 移植 musl-libc（或精简子集）到 SZY-KERNEL
+  \item 提供标准 C 库函数：\texttt{printf}/\texttt{malloc}/\texttt{fopen}/\texttt{string.h}
+  \item 实现 C 运行时启动（\texttt{crt0.o}、\texttt{\_start} → \texttt{main}）
+  \item 验证：用户态程序能链接 libc 并正常运行
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - libc 在用户程序与内核之间的角色
+% - musl vs glibc vs newlib 对比
+% - syscall wrapper 的实现
+% - C 运行时启动流程（_start → __libc_start_main → main）

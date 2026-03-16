@@ -1,4 +1,9 @@
 
+## 2026-03-16 (Book: add Part 5–7 placeholder chapters)
+- `main.tex`：新增 Part 5 POSIX 兼容层（ch21–ch25）、Part 6 移植 GCC 与 Vim（ch26–ch29）、Part 7 网络（ch30–ch33），Part 4 补充 ch19 磁盘文件系统、ch20 设备文件。
+- 新增 15 个占位章节文件（ch19–ch33），每个包含本章目标和背景知识 TODO 框架。
+- `.github/copilot-instructions.md`：同步更新项目文件结构目录树。
+
 ## 2026-03-16 (Book restructure: split chapters + extract figures)
 - 长章节 ch02–ch11 按 `\section` 拆分为子文件，原 `.tex` 变为骨架文件（`\chapter` + `\input`），子文件存放在 `chapters/chNN-name/secNN-slug.tex`。
 - 60 个 TikZ 图片从章节源码提取到 `book/figures/chNN/figNN-slug.tex`，章节引用改为 `\input{figures/chNN/figNN-slug}`。

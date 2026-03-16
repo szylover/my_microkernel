@@ -1,0 +1,22 @@
+% ============================================================================
+\chapter{用户态 Shell}
+\label{ch:user-shell}
+% 里程碑 F-5 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现用户态 \texttt{/bin/sh}（替代内核内置 shell）
+  \item 支持环境变量、\texttt{PATH} 查找、命令行解析
+  \item 支持 job control：前台/后台进程、\texttt{Ctrl+C} 中断
+  \item 集成管道和重定向
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - 用户态 shell 与内核 shell 的区别
+% - fork + exec 执行外部命令
+% - 进程组与会话
+% - job control 基础

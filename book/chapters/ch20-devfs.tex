@@ -1,0 +1,20 @@
+% ============================================================================
+\chapter{设备文件}
+\label{ch:devfs}
+% 里程碑 E-4 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 \texttt{/dev/null}、\texttt{/dev/zero}、\texttt{/dev/console}、\texttt{/dev/serial} 等字符设备
+  \item 字符设备注册框架（主设备号 / 次设备号）
+  \item 通过 VFS 统一访问设备文件
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - Unix 设备模型（字符设备 / 块设备）
+% - 主设备号 / 次设备号
+% - Linux cdev 注册机制

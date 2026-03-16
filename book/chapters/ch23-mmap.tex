@@ -1,0 +1,21 @@
+% ============================================================================
+\chapter{用户态 mmap}
+\label{ch:mmap}
+% 里程碑 F-3 — 待实现
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 实现 \texttt{mmap}/\texttt{munmap} 系统调用
+  \item 支持匿名映射（\texttt{MAP\_ANONYMOUS}）和文件映射
+  \item 基于 VMA 管理用户态地址空间
+  \item 按需分页（demand paging）与 Page Fault 处理
+\end{itemize}
+
+\section{背景知识}
+
+% TODO:
+% - mmap 的用途：动态库加载、共享内存、大文件访问
+% - 匿名映射 vs 文件映射
+% - demand paging 与 copy-on-write

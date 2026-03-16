@@ -102,7 +102,15 @@ my_microkernel/
 │   │   ├── ch02-boot.tex          #     → \input{ch02-boot/sec*.tex}
 │   │   ├── ch02-boot/             #       per-section 子文件
 │   │   ├── …                      #     ch03–ch11 同理
-│   │   ├── ch12-tss-ring3.tex     #     以下为占位章节（短文件）
+│   │   ├── ch12-tss-ring3.tex     #     Part 3 进程与用户态（ch12–ch16 占位）
+│   │   ├── …
+│   │   ├── ch17-vfs.tex           #     Part 4 文件系统（ch17–ch20 占位）
+│   │   ├── …
+│   │   ├── ch21-signals.tex       #     Part 5 POSIX 兼容层（ch21–ch25 占位）
+│   │   ├── …
+│   │   ├── ch26-cross-toolchain.tex #   Part 6 移植 GCC 与 Vim（ch26–ch29 占位）
+│   │   ├── …
+│   │   ├── ch30-nic-driver.tex    #     Part 7 网络（ch30–ch33 占位）
 │   │   └── …
 │   └── figures/                   #   图片资源
 ├── docs/                          # 项目文档（面向人类）
