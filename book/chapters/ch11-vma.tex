@@ -13,7 +13,8 @@
   \item 掌握 VMA 权限标志（\texttt{VMA\_READ}/\texttt{WRITE}/\texttt{EXEC}）与 PTE 标志位的映射关系
   \item 理解 \texttt{vma.c} dispatch 层的转发逻辑
   \item 实现排序数组后端：二分查找 $O(\log n)$ find + 有序插入/删除
-  \item 了解红黑树后端的核心思想：5 条性质、旋转操作、$O(\log n)$ 保证（未来升级方向）
+  \item 实现红黑树后端：5 条性质、旋转操作、$O(\log n)$ find/add/remove
+  \item 实现 Maple Tree 后端：B+ tree 变体、高扇出缓存友好、节点分裂/上提
   \item 理解静态节点池的必要性（打破 kmalloc 循环依赖）
   \item 掌握 Page Fault 集成：三种诊断结果
   \item 理解引导阶段区域注册与 \texttt{vmm\_alloc\_pages} 的 VMA 自动跟踪
@@ -167,16 +168,19 @@ typedef struct vma_ops {
     {\texttt{vma\_add()} / \texttt{vma\_find()}};
   \node[box, fill=orange!12](disp)   at (0, -2.6)
     {\texttt{vma.c} dispatch};
-  \node[box, fill=green!12] (sa)     at (-3.0,-4.0)
-    {\texttt{vma\_sorted\_array.c}\\（本章实现）};
-  \node[box, fill=green!8, dashed] (rb) at (3.0,-4.0)
-    {\texttt{vma\_rbtree.c}\\（未来升级）};
+  \node[box, fill=green!12] (sa)     at (-4.0,-4.2)
+    {\texttt{vma\_sorted\_array.c}\\（排序数组）};
+  \node[box, fill=green!12] (rb)     at (0,-4.2)
+    {\texttt{vma\_rbtree.c}\\（红黑树）};
+  \node[box, fill=green!12] (mt)     at (4.0,-4.2)
+    {\texttt{vma\_maple.c}\\（Maple Tree）};
   \draw[arr] (caller)--(api);
   \draw[arr] (api)--(disp);
   \draw[arr] (disp)--(sa);
-  \draw[arr, dashed, gray] (disp)--(rb);
+  \draw[arr] (disp)--(rb);
+  \draw[arr] (disp)--(mt);
 \end{tikzpicture}
-\caption{\texttt{vma\_ops\_t} 可插拔后端调用链}
+\caption{\texttt{vma\_ops\_t} 可插拔后端调用链——三种后端通过 \texttt{kconfig.h} 选择}
 \label{fig:vma-dispatch}
 \end{figure}
 
@@ -517,33 +521,28 @@ static const vm_area_t* sa_find(uint32_t addr)
 当多进程引入 per-process VMA 后再切换红黑树，是更合理的渐进式开发策略。
 
 % ============================================================================
-\section{红黑树后端概述（未来升级方向）}
+\section{红黑树后端：\texttt{vma\_rbtree.c}}
 \label{sec:vma-rbtree}
 
 排序数组已经满足了早期内核的需求，但当进程管理引入后，VMA 数量会急剧增长。
 红黑树在所有单次操作上都保持 $O(\log n)$，是 Linux 内核历史上长期使用的方案
-（Linux 6.1 之后改用 maple tree，但红黑树仍是经典实现）。
-
-VMA 后端需要高效地支持三种操作：
+（Linux 2.4 $\sim$ 6.0，整整 20 年）。
 
 \begin{table}[H]
 \centering
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \toprule
-\textbf{操作} & \textbf{链表} & \textbf{排序数组} & \textbf{红黑树} \\
+\textbf{操作} & \textbf{链表} & \textbf{排序数组} & \textbf{红黑树} & \textbf{Maple Tree} \\
 \midrule
-\texttt{find}(addr)   & $O(n)$      & $O(\log n)$  & $O(\log n)$ \\
-\texttt{add}          & $O(n)$      & $O(n)$       & $O(\log n)$ \\
-\texttt{remove}       & $O(n)$      & $O(n)$       & $O(\log n)$ \\
-\texttt{dump}（遍历） & $O(n)$      & $O(n)$       & $O(n)$      \\
+\texttt{find}(addr)   & $O(n)$      & $O(\log n)$  & $O(\log n)$  & $O(\log_B n)$ \\
+\texttt{add}          & $O(n)$      & $O(n)$       & $O(\log n)$  & $O(\log_B n)$ \\
+\texttt{remove}       & $O(n)$      & $O(n)$       & $O(\log n)$  & $O(\log_B n)$ \\
+\texttt{dump}（遍历） & $O(n)$      & $O(n)$       & $O(n)$       & $O(n)$        \\
 \bottomrule
 \end{tabular}
-\caption{不同数据结构的 VMA 操作复杂度对比}
+\caption{不同数据结构的 VMA 操作复杂度对比（$B$ = B-tree 扇出度）}
 \label{tab:vma-complexity}
 \end{table}
-
-内核随进程增多，VMA 数量会快速增长（Linux 进程平均 65+ VMAs）。
-红黑树在所有单次操作上都保持 $O(\log n)$，是最优选择。
 
 \subsection{红黑树的 5 条性质}
 
@@ -561,6 +560,28 @@ VMA 后端需要高效地支持三种操作：
 性质 4 + 5 共同保证了树的高度不超过 $2\log_2(n+1)$，
 从而使查找、插入、删除都是 $O(\log n)$。
 
+\subsection{内部节点结构}
+
+每个红黑树节点嵌入一个 \texttt{vm\_area\_t} 公开视图，外加颜色位和三个指针：
+
+\codefile{src/kernel/mm/vma\_rbtree.c}
+\begin{lstlisting}[style=cstyle]
+#define RB_MAX_NODES 256
+#define RB_BLACK 0
+#define RB_RED   1
+
+typedef struct rb_node {
+    vm_area_t       area;   /* 公开视图（第一个字段） */
+    int             color;  /* RB_BLACK or RB_RED */
+    struct rb_node* parent;
+    struct rb_node* left;
+    struct rb_node* right;
+} rb_node_t;
+\end{lstlisting}
+
+树使用一个共享的 NIL 哨兵节点（颜色始终为黑）替代 NULL，
+消除了每次访问子指针前的判空检查，极大简化旋转和修复代码。
+
 \subsection{旋转操作}
 
 当插入或删除破坏了红黑性质时，需要通过\term{旋转}（rotation）恢复平衡。
@@ -576,7 +597,6 @@ VMA 后端需要高效地支持三种操作：
               font=\scriptsize},
   arr/.style={-{Stealth[length=5pt]}, very thick, blue!60!black},
 ]
-  % 左旋
   \node[fill=red!20] (x) at (0, 0) {$x$};
   \node[tri] (a) at (-1, -1.2) {$\alpha$};
   \node[fill=red!20] (y) at (1, -1.2) {$y$};
@@ -607,6 +627,73 @@ VMA 后端需要高效地支持三种操作：
 旋转只改变指针指向，不改变 BST 的中序遍历顺序——
 因此旋转前后所有 VMA 的地址排序仍然正确。
 
+\codefile{src/kernel/mm/vma\_rbtree.c}
+\begin{lstlisting}[style=cstyle]
+static void rotate_left(rb_node_t* x)
+{
+    rb_node_t* y = x->right;
+    x->right = y->left;
+    if (y->left != NIL)
+        y->left->parent = x;
+    y->parent = x->parent;
+    if (x->parent == NIL)
+        g_root = y;
+    else if (x == x->parent->left)
+        x->parent->left = y;
+    else
+        x->parent->right = y;
+    y->left = x;
+    x->parent = y;
+}
+\end{lstlisting}
+
+右旋 (\texttt{rotate\_right}) 是完全对称的镜像操作，交换 left/right 即可。
+
+\subsection{插入与修复}
+
+新节点默认为红色，BST 插入后可能违反性质 4（连续红节点）。
+修复分 3 种情况（加镜像共 6 种）：
+
+\begin{enumerate}
+  \item \textbf{叔节点为红}——父和叔变黑，祖父变红，向上递归。最坏 $O(\log n)$ 次重着色。
+  \item \textbf{叔节点为黑 + z 是内侧孩子}——旋转父节点，转为情况 3。
+  \item \textbf{叔节点为黑 + z 是外侧孩子}——旋转祖父 + 重着色，修复完成。
+\end{enumerate}
+
+最坏情况：$O(\log n)$ 次重着色 + 最多 2 次旋转。
+
+\subsection{删除与修复}
+
+删除一个黑色节点会破坏性质 5（黑高不等），修复分 4 种情况（加镜像共 8 种）。
+这是红黑树最复杂的部分，但最坏也只需 $O(\log n)$ 次重着色 + 最多 3 次旋转。
+
+\subsection{区间查找}
+
+BST 按 \texttt{start} 排序，但 VMA 是区间 \texttt{[start, end)}。
+查找算法从根下降，每步做三路判断：
+
+\codefile{src/kernel/mm/vma\_rbtree.c}
+\begin{lstlisting}[style=cstyle]
+static const vm_area_t* rb_find(uint32_t addr)
+{
+    rb_node_t* cur = g_root;
+    while (cur != NIL) {
+        if (addr < cur->area.start)
+            cur = cur->left;
+        else if (addr >= cur->area.end)
+            cur = cur->right;
+        else
+            return &cur->area;   /* 命中 */
+    }
+    return NULL;
+}
+\end{lstlisting}
+
+\subsection{中序遍历 dump}
+
+利用 parent 指针做迭代中序遍历（不递归，避免栈溢出风险），
+天然按地址升序输出。
+
 \begin{thinkbox}
 如果 VMA 后端改用简单的有序链表（插入时遍历找位置），
 在 VMA 数量为 $n=200$ 时，\texttt{find} 的最坏情况要遍历多少个节点？
@@ -615,6 +702,179 @@ VMA 后端需要高效地支持三种操作：
 在什么场景下链表反而比红黑树更合适？
 （提示：VMA 数量极少且变化频繁——旋转的常数开销）
 \end{thinkbox}
+
+% ============================================================================
+\section{Maple Tree 后端：\texttt{vma\_maple.c}}
+\label{sec:vma-maple}
+
+Linux 6.1（2022 年 12 月）用 Maple Tree 取代了沿用 20 年的红黑树来管理 VMA。
+我们实现了一个教学级的 B+ tree 变体，保留 Maple Tree 的核心设计理念。
+
+\begin{whybox}
+为什么 Linux 从红黑树换到 Maple Tree？
+
+\begin{enumerate}
+  \item \textbf{缓存友好}：B-tree 节点包含多个键值对（扇出度高），
+        一次缓存行加载可比较多个键，减少缓存 miss。
+        红黑树每个节点只有一个键，每次比较都可能 cache miss。
+  \item \textbf{RCU 安全}：Maple Tree 天然支持 Read-Copy-Update，
+        读者无需加锁即可遍历。红黑树的旋转在 RCU 下很难正确实现。
+  \item \textbf{区间原生支持}：以 \texttt{[start, end)} 区间为键，
+        不像红黑树只按 \texttt{start} 排序后再检查 \texttt{end}。
+  \item \textbf{减少指针追逐}：紧凑数组存储，指针数更少。
+\end{enumerate}
+\end{whybox}
+
+\subsection{节点结构}
+
+每个节点包含最多 9 个分割键（pivot）和 10 个子节点/数据槽位：
+
+\codefile{src/kernel/mm/vma\_maple.c}
+\begin{lstlisting}[style=cstyle]
+#define MAPLE_NODE_SLOTS    10
+#define MAPLE_MAX_PIVOTS    (MAPLE_NODE_SLOTS - 1)  /* 9 */
+
+typedef struct maple_node {
+    uint32_t      pivots[MAPLE_MAX_PIVOTS];
+    uint8_t       nr_entries;
+    uint8_t       is_leaf;
+    maple_node_t* parent;
+    union {
+        maple_node_t* children[MAPLE_NODE_SLOTS]; /* 内部节点 */
+        vm_area_t*    slots[MAPLE_NODE_SLOTS];    /* 叶节点 */
+    };
+} maple_node_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.7cm, minimum width=1.0cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  % Internal node
+  \node[font=\small\bfseries] at (-1.5, 0.3) {内部节点:};
+  \node[cell, fill=orange!15] (p0) at (0, 0) {P0};
+  \node[cell, fill=orange!15] (p1) at (1.0, 0) {P1};
+  \node[cell, fill=orange!15] (p2) at (2.0, 0) {$\cdots$};
+  \node[cell, fill=orange!15] (p8) at (3.0, 0) {P8};
+
+  \node[cell, fill=blue!10] (c0) at (0, -1.0) {C0};
+  \node[cell, fill=blue!10] (c1) at (1.0, -1.0) {C1};
+  \node[cell, fill=blue!10] (c2) at (2.0, -1.0) {$\cdots$};
+  \node[cell, fill=blue!10] (c9) at (3.0, -1.0) {C9};
+
+  \node[font=\scriptsize\color{gray}] at (4.5, 0) {9 pivots};
+  \node[font=\scriptsize\color{gray}] at (4.5, -1.0) {10 children};
+
+  % Leaf node
+  \node[font=\small\bfseries] at (-1.5, -2.5) {叶节点:};
+  \node[cell, fill=orange!15] at (0, -2.8) {P0};
+  \node[cell, fill=orange!15] at (1.0, -2.8) {P1};
+  \node[cell, fill=orange!15] at (2.0, -2.8) {$\cdots$};
+  \node[cell, fill=orange!15] at (3.0, -2.8) {P8};
+
+  \node[cell, fill=green!12] at (0, -3.8) {VMA};
+  \node[cell, fill=green!12] at (1.0, -3.8) {VMA};
+  \node[cell, fill=green!12] at (2.0, -3.8) {$\cdots$};
+  \node[cell, fill=green!12] at (3.0, -3.8) {VMA};
+
+  \node[font=\scriptsize\color{gray}] at (4.5, -2.8) {9 pivots};
+  \node[font=\scriptsize\color{gray}] at (4.5, -3.8) {10 VMA ptrs};
+\end{tikzpicture}
+\caption{Maple Tree 节点布局——内部节点存子指针，叶节点存 VMA 指针}
+\label{fig:maple-node}
+\end{figure}
+
+\begin{whybox}
+为什么扇出度选 10？
+
+Linux 的 \texttt{maple\_range\_64} 有 16 个 slot，每节点 256 字节（4 个缓存行）。
+我们的 32 位系统中，10 个 pivot + 10 个 child + 元数据 $\approx$ 96 字节（$<$ 2 个缓存行）。
+扇出度 10 意味着 256 个 VMA 只需树高 3（$10^3 = 1000 > 256$），
+每次查找最多 3 次节点访问，每次访问时同一节点的 pivot 在同一缓存行中。
+\end{whybox}
+
+\subsection{查找：从根下降到叶}
+
+与红黑树不同，Maple Tree 的查找直接沿着 B+ tree 结构下降到叶节点，
+然后在叶中线性扫描 $\leq 10$ 个条目：
+
+\codefile{src/kernel/mm/vma\_maple.c}
+\begin{lstlisting}[style=cstyle]
+static const vm_area_t* maple_find(uint32_t addr)
+{
+    maple_node_t* node = g_maple_root;
+    while (!node->is_leaf) {
+        unsigned idx = internal_find_child(node, addr);
+        node = node->children[idx];
+    }
+    for (unsigned i = 0; i < node->nr_entries; i++) {
+        vm_area_t* vma = node->slots[i];
+        if (vma && addr >= vma->start && addr < vma->end)
+            return vma;
+    }
+    return NULL;
+}
+\end{lstlisting}
+
+\subsection{插入：分裂上提}
+
+当叶节点满了（10 个条目），需要分裂：
+
+\begin{enumerate}
+  \item 分配新叶节点，把当前叶的后半部分移到新叶
+  \item 把中间键上提到父节点
+  \item 如果父节点也满了，递归分裂——这是 B-tree 增高的唯一方式
+\end{enumerate}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  cell/.style={draw, minimum height=0.6cm, minimum width=0.6cm,
+               font=\ttfamily\scriptsize, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, very thick, red!60!black},
+]
+  % Before split
+  \node[font=\small\bfseries] at (-1.5, 0) {分裂前:};
+  \foreach \i/\c in {0/K0,1/K1,2/K2,3/K3,4/K4,5/K5,6/K6,7/K7,8/K8,9/K9} {
+    \node[cell, fill=green!12] at (\i*0.7, 0) {\c};
+  }
+  \node[font=\scriptsize\color{red}] at (8.2, 0) {满！};
+
+  % After split
+  \node[font=\small\bfseries] at (-1.5, -1.5) {分裂后:};
+  \foreach \i/\c in {0/K0,1/K1,2/K2,3/K3,4/K4} {
+    \node[cell, fill=green!12] at (\i*0.7, -1.5) {\c};
+  }
+  \foreach \i/\c in {0/K5,1/K6,2/K7,3/K8,4/K9} {
+    \node[cell, fill=blue!12] at (5.0+\i*0.7, -1.5) {\c};
+  }
+
+  \node[cell, fill=orange!20] (up) at (3.5, -2.8) {K5};
+  \node[font=\scriptsize] at (4.5, -2.8) {$\uparrow$ 上提到父节点};
+
+  \draw[arr] (3.5, -1.1) -- (3.5, -2.5);
+\end{tikzpicture}
+\caption{Maple Tree 叶节点分裂——后半部分移到新节点，中间键上提}
+\label{fig:maple-split}
+\end{figure}
+
+\subsection{与红黑树的对比}
+
+\begin{designbox}
+两种后端的适用场景：
+\begin{itemize}
+  \item \textbf{红黑树}：通用自平衡 BST，实现经典，适合教学。
+        每个节点只存一个 VMA，指针追逐多，但代码逻辑清晰。
+  \item \textbf{Maple Tree}：面向现代 CPU 缓存层次优化。
+        每次节点访问比较多个键（同一缓存行），树更矮，总缓存 miss 更少。
+        代价是分裂/合并逻辑比旋转更复杂。
+\end{itemize}
+在 VMA 数量 $< 256$ 的内核启动阶段，三种后端的性能差异可忽略。
+选择哪个主要看代码风格偏好和教学目标。
+\end{designbox}
 
 % ============================================================================
 \section{静态节点池：打破循环依赖}
@@ -644,27 +904,43 @@ VMA 的 \texttt{add} 又要 \texttt{kmalloc} 分配红黑树节点——
 代价是 VMA 上限固定，但内核启动阶段区域数量很少，256 足够。
 \end{whybox}
 
-静态节点池的设计非常简单：
+静态节点池的实现使用空闲链表，实现 $O(1)$ 的分配和释放：
 
-\codefile{src/kernel/core/kmain.c}
+\codefile{src/kernel/mm/vma\_rbtree.c}
 \begin{lstlisting}[style=cstyle]
-#define VMA_MAX_NODES  256
+static rb_node_t  g_pool[RB_MAX_NODES];
+static rb_node_t* g_free_head;   /* 空闲链表头 */
 
-typedef struct rb_node {
-    vm_area_t  area;    /* 公开视图 */
-    int        color;   /* 0=BLACK, 1=RED */
-    struct rb_node* parent;
-    struct rb_node* left;
-    struct rb_node* right;
-} rb_node_t;
+static void pool_init(void)
+{
+    g_free_head = &g_pool[0];
+    for (unsigned i = 0; i < RB_MAX_NODES - 1; i++)
+        g_pool[i].right = &g_pool[i + 1];
+    g_pool[RB_MAX_NODES - 1].right = NULL;
+}
 
-/* 静态数组——不依赖 kmalloc */
-static rb_node_t node_pool[VMA_MAX_NODES];
-static unsigned  pool_used = 0;
+static rb_node_t* pool_alloc(void)
+{
+    if (!g_free_head) return NULL;
+    rb_node_t* n = g_free_head;
+    g_free_head = n->right;
+    n->color = RB_RED;   /* 新节点默认红色 */
+    n->parent = n->left = n->right = NIL;
+    return n;
+}
+
+static void pool_free(rb_node_t* n)
+{
+    n->right = g_free_head;
+    g_free_head = n;
+}
 \end{lstlisting}
 
-分配节点：\texttt{pool\_used < VMA\_MAX\_NODES ? \&node\_pool[pool\_used++] : NULL}。
-释放节点：标记为已回收（简单实现可放入 freelist；最简实现不回收）。
+用 \texttt{right} 指针串联空闲节点，省掉额外的 \texttt{next} 字段。
+分配时从头部取，释放时插回头部——均为 $O(1)$。
+
+Maple Tree 后端同理，使用独立的节点池（\texttt{maple\_node\_t g\_node\_pool[64]}）
+和 VMA 数据池（\texttt{vm\_area\_t g\_vma\_pool[256]}）。
 
 % ============================================================================
 \section{Page Fault 集成}
@@ -870,21 +1146,38 @@ void* vmm_alloc_pages(unsigned count) {
 \end{figure}
 
 % ============================================================================
+\section{后端切换：\texttt{kconfig.h}}
+
+三种后端已全部实现，通过 \texttt{kconfig.h} 的编译期开关选择：
+
+\codefile{src/include/kernel/kconfig.h}
+\begin{lstlisting}[style=cstyle]
+/*  0 = sorted-array  — 排序数组，简单稳定，早期默认
+ *  1 = rbtree         — 红黑树，O(log n) 全操作
+ *  2 = maple-tree     — B+ tree 变体，高扇出缓存友好
+ */
+#define KCONFIG_VMA_BACKEND  0
+\end{lstlisting}
+
+\texttt{kmain.c} 中根据宏值选择后端：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+#if KCONFIG_VMA_BACKEND == 0
+    vma_register_backend(vma_sorted_array_get_ops());
+#elif KCONFIG_VMA_BACKEND == 1
+    vma_register_backend(vma_rbtree_get_ops());
+#elif KCONFIG_VMA_BACKEND == 2
+    vma_register_backend(vma_maple_get_ops());
+#endif
+\end{lstlisting}
+
+修改 \texttt{KCONFIG\_VMA\_BACKEND} 后 \texttt{make iso}，
+用 \texttt{vma count} 命令确认当前加载的后端名称。
+\texttt{vma test} 自测试对所有三种后端均通过。
+
+% ============================================================================
 \section{思考与练习}
-
-\begin{exercise}
-\textbf{实现红黑树后端 \texttt{vma\_rbtree.c}}
-
-将排序数组后端升级为红黑树后端（满足 \texttt{vma\_ops\_t} 接口）：
-\begin{enumerate}
-  \item 使用静态数组 \texttt{node\_pool[256]}，每个节点包含 \texttt{vm\_area\_t}、颜色位和三个指针（parent/left/right）
-  \item \texttt{add}：BST 插入 + 红黑修复（处理叔节点为红/黑、旋转）
-  \item \texttt{find}：$O(\log n)$ 查找，与排序数组的二分查找复杂度相同
-  \item \texttt{remove}：BST 删除 + 红黑修复（最复杂的部分，6 种情况）
-\end{enumerate}
-在 \texttt{kconfig.h} 中添加 \texttt{VMA\_BACKEND} 选项，\texttt{0}=sorted-array, \texttt{1}=rbtree。
-用 \texttt{vma test} 验证通过，对比两种后端的代码量。
-\end{exercise}
 
 \begin{exercise}
 \textbf{\#PF handler 中集成 VMA 检查}

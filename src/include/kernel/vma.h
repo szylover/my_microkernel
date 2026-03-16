@@ -85,7 +85,8 @@ void vma_register_backend(const vma_ops_t* ops);
 
 /* 后端声明（具体实现在各自 .c 文件中） */
 const vma_ops_t* vma_sorted_array_get_ops(void);  /* 排序数组（早期简单实现） */
-const vma_ops_t* vma_rbtree_get_ops(void);         /* 红黑树（生产级，待实现） */
+const vma_ops_t* vma_rbtree_get_ops(void);         /* 红黑树（Linux 2.4~6.0） */
+const vma_ops_t* vma_maple_get_ops(void);          /* maple tree（Linux 6.1+） */
 
 /* ============================================================================
  * 公开 API
