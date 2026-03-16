@@ -1,60 +1,210 @@
 % ============================================================================
 \chapter{GDT：全局描述符表}
 \label{ch:gdt}
-% Stage 2a — 对应 2026-03-10 changelog（GDT 起步）
+% Stage 2a — 对应 2026-03-10 changelog
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 理解 x86 保护模式下的段式内存管理
+  \item 理解 x86 保护模式下的段式内存管理和段选择子
   \item 实现平坦内存模型的 GDT（Null + Kernel Code + Kernel Data）
-  \item 用 \texttt{lgdt} 加载 GDT 并刷新段寄存器
+  \item 用 \texttt{lgdt} 加载 GDT，用 far jump 和 \texttt{mov} 刷新所有段寄存器
 \end{itemize}
 
+% ============================================================================
 \section{背景知识：段式内存管理}
 
-% TODO: 实模式 segment:offset → 保护模式 selector → GDT
-% 为什么现代 OS 用"平坦段"绕过分段
+x86 的保护模式有两层地址翻译：
+
+\begin{enumerate}
+  \item \textbf{分段}：逻辑地址（segment:offset）→ 线性地址
+  \item \textbf{分页}：线性地址 → 物理地址（如果开启了 \reg{CR0}.PG）
+\end{enumerate}
+
+每个段寄存器（\reg{CS}/\reg{DS}/\reg{SS}/\reg{ES}/\reg{FS}/\reg{GS}）
+存储一个 16 位\term{段选择子}（selector），CPU 用它在 GDT 中查表，
+得到段的基址、大小和权限。
+
+\begin{whybox}
+现代操作系统都使用\term{平坦模型}（flat model）：所有段的 base=0、limit=4GiB，
+相当于"绕过"分段。这样线性地址 == 逻辑地址的 offset 部分，
+让分页成为唯一的地址翻译机制。
+但 GDT 仍然不能省略——CPU 要求保护模式下必须有有效的 GDT。
+\end{whybox}
+
+\subsection{段选择子格式}
+
+段选择子是 16 位值：
+
+\begin{bitfield}
+  \bit{0--1}{RPL (Requested Privilege Level)：请求的特权级（0=内核，3=用户）}
+  \bit{2}{TI (Table Indicator)：0=GDT，1=LDT}
+  \bit{3--15}{Index：GDT 中的描述符索引（第几个条目）}
+\end{bitfield}
+
+我们的选择子：
+\begin{itemize}
+  \item \hex{08} = index 1, TI=0, RPL=0 → GDT 第 1 项（内核代码段）
+  \item \hex{10} = index 2, TI=0, RPL=0 → GDT 第 2 项（内核数据段）
+\end{itemize}
 
 \subsection{GDT 条目格式（8 字节）}
 
-% TODO: 逐字段图示
-% base (32 bit, 拆成三段) / limit (20 bit, 拆成两段) / access byte / flags
-% 详细的 bitfield 表
+每个 GDT 条目（segment descriptor）是 8 字节，格式被拆成多个不连续的字段
+——这是 Intel 为了向后兼容 286 留下的历史包袱：
 
-\subsection{段选择子}
+\begin{lstlisting}[style=cstyle]
+typedef struct __attribute__((packed)) {
+    uint16_t limit_low;   // limit[0:15]
+    uint16_t base_low;    // base[0:15]
+    uint8_t  base_mid;    // base[16:23]
+    uint8_t  access;      // P | DPL(2) | S | Type(4)
+    uint8_t  gran;        // flags(4) | limit[16:19]
+    uint8_t  base_high;   // base[24:31]
+} gdt_entry_t;
+\end{lstlisting}
 
-% TODO: 16-bit selector = index(13) + TI(1) + RPL(2)
-% 0x08 = GDT[1], RPL=0 → 内核代码段
-% 0x10 = GDT[2], RPL=0 → 内核数据段
+\texttt{access} 字节各位含义：
 
-\section{数据结构：\texttt{gdt.h} 与 \texttt{gdt.c}}
+\begin{bitfield}
+  \bit{7}{P (Present) = 1：此描述符有效}
+  \bit{5--6}{DPL (Descriptor Privilege Level)：0=内核，3=用户}
+  \bit{4}{S = 1：代码/数据段（0=系统段如 TSS、LDT）}
+  \bit{3}{Executable：1=代码段，0=数据段}
+  \bit{2}{Direction/Conforming}
+  \bit{1}{Readable（代码段）/ Writable（数据段）}
+  \bit{0}{Accessed：CPU 访问后自动置 1}
+\end{bitfield}
 
-% TODO: gdt_entry_t (packed), gdtr_t, gdt_init()
+常用组合：
+\begin{itemize}
+  \item \hex{9A} = \texttt{10011010b} → P=1, DPL=0, S=1, 代码段, 可读
+  \item \hex{92} = \texttt{10010010b} → P=1, DPL=0, S=1, 数据段, 可写
+\end{itemize}
 
-\section{刷新段寄存器：\texttt{gdt\_flush.asm}}
+\texttt{gran} 字节的高 4 位是 flags：
 
-% TODO: lgdt → far jmp 0x08:flush → 设置 ds/es/fs/gs/ss = 0x10
-% 为什么需要 far jump（刷新隐藏的 CS 描述符缓存）
+\begin{bitfield}
+  \bit{7}{G (Granularity)：1=limit 单位为 4KiB（使得 20 位 limit 可表示 4GiB）}
+  \bit{6}{D/B：1=32 位段，0=16 位段}
+  \bit{5}{L：长模式标志（i386 下必须为 0）}
+  \bit{4}{AVL：软件可用位}
+\end{bitfield}
+
+% ============================================================================
+\section{实现详解}
+
+\subsection{\texttt{gdt\_init()}：填充三个描述符}
+
+\begin{lstlisting}[style=cstyle]
+void gdt_init(void) {
+    // 描述符 0：空描述符（CPU 硬性要求）
+    gdt_set_entry(0, 0, 0, 0, 0);
+
+    // 描述符 1：内核代码段
+    //   base=0, limit=0xFFFFF, G=1 -> 覆盖 4GiB
+    //   access=0x9A: P=1, DPL=0, code, readable
+    //   flags=0xC0: G=1, D/B=1 (32-bit)
+    gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0xC0);
+
+    // 描述符 2：内核数据段
+    //   access=0x92: P=1, DPL=0, data, writable
+    gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0xC0);
+
+    // GDTR: limit = sizeof(gdt) - 1, base = &gdt
+    gdtr.limit = sizeof(gdt) - 1;
+    gdtr.base  = (uint32_t)&gdt[0];
+
+    gdt_flush(&gdtr);
+}
+\end{lstlisting}
+
+\begin{designbox}
+为什么 GDT 第 0 项必须是空描述符？
+
+x86 规范规定 selector=0 是 null selector。如果代码不小心用了未初始化的段寄存器
+（值为 0），CPU 会触发 \#GP（General Protection Fault）而非悄悄使用错误的段。
+这是一种防御性设计。
+\end{designbox}
+
+\subsection{\texttt{gdt\_flush.asm}：刷新段寄存器}
+
+\begin{lstlisting}[style=nasmstyle]
+gdt_flush:
+    mov eax, [esp + 4]      ; eax = gdtr_ptr
+    lgdt [eax]              ; 加载 GDTR
+
+    ; far jump 刷新 CS 的 hidden cache
+    jmp 0x08:.flush_cs
+
+.flush_cs:
+    ; 刷新所有数据段寄存器
+    mov ax, 0x10            ; 0x10 = 内核数据段 selector
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, esp            ; SS 切换后的安全指令
+    ret
+\end{lstlisting}
 
 \begin{cpustate}
-\texttt{lgdt} 后 CPU 开始使用新的 GDT。
-\texttt{jmp 0x08:flush} 将 CS 切换到新的内核代码段。
-随后 \texttt{mov ds/es/ss, 0x10} 切换数据段。
-此后所有内存访问都经过新 GDT 的段描述符。
+\textbf{\texttt{lgdt} 之后}：GDTR 指向新的 GDT，但 \reg{CS}/\reg{DS}/\reg{SS} 的
+hidden cache 仍然缓存着旧 GDT 的描述符。CPU 不会自动更新。
+
+\textbf{\texttt{jmp 0x08:.flush\_cs} 之后}：\reg{CS} 的 hidden cache 更新为 GDT[1]
+（内核代码段）。
+\hex{08} = index 1 × 8 = GDT 中第 1 个描述符。
+
+\textbf{\texttt{mov ds, ax} 系列之后}：所有数据段寄存器指向 GDT[2]（内核数据段）。
+此后所有内存访问都通过新 GDT 的描述符。
 \end{cpustate}
 
+\begin{whybox}
+\texttt{lgdt} 为什么不自动刷新段寄存器？
+
+这是 x86 的设计：\texttt{lgdt} 只修改 GDTR 寄存器本身，不触碰 \reg{CS}/\reg{DS} 等。
+段寄存器的 hidden cache 只在显式加载（\texttt{mov ds}、far jump 等）时才更新。
+这意味着切换 GDT 后，旧的段描述符会一直"残留"在 hidden cache 中，
+直到你显式刷新每个段寄存器。
+
+刷新 \reg{CS} 不能用 \texttt{mov cs, ax}（这条指令不存在），
+必须通过 far jump（改变 \reg{CS}:offset）或 \texttt{iret}。
+\end{whybox}
+
+% ============================================================================
 \section{验证}
 
 \begin{lstlisting}[style=shellstyle]
 # 串口输出：
-# [init] gdt ok
+[init] gdt ok
 \end{lstlisting}
 
-如果 GDT 有误（如 base/limit 计算错误），CPU 会 Triple Fault 并重启。
+如果 GDT 有误（如 base/limit 填错、access byte 不对），CPU 可能会在
+far jump 时 Triple Fault。用 GDB 在 \texttt{gdt\_flush} 处设断点，
+单步执行 \texttt{lgdt} 和 \texttt{jmp 0x08:} 可以精确定位问题。
 
+\begin{lstlisting}[style=shellstyle]
+# GDB 调试：
+b gdt_flush
+c
+si          # lgdt
+si          # jmp 0x08:.flush_cs
+info reg    # 检查 CS=0x08, DS=0x10
+\end{lstlisting}
+
+% ============================================================================
 \section{本章小结}
 
-GDT 在平坦模型下看似"多此一举"，但它是 x86 保护模式的硬性要求，
-也是后续 TSS（Ring 3 切换）的基础。下一章我们设置 IDT 来处理异常。
+GDT 是 x86 保护模式的硬性要求。虽然在平坦模型下分段"看似没用"，
+但它提供了：
+
+\begin{itemize}
+  \item 代码段和数据段的区分（防止执行数据、写入代码）
+  \item DPL 特权级机制的基础（将来 Ring 3 用户态需要 DPL=3 的段）
+  \item TSS（Task State Segment）的依托（用于 Ring 0↔Ring 3 栈切换）
+\end{itemize}
+
+下一章我们设置 IDT（中断描述符表），让内核能处理 CPU 异常和硬件中断。
