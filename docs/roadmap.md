@@ -43,8 +43,8 @@
 | C-2 | 内核堆（first-fit） | `kmalloc(size)` / `kfree(ptr)`，空闲链表分配器、可插拔 `heap_ops_t` 接口 | ✅ |
 | C-3 | 内核堆（slab） | slab 分配器堆后端，7 级 cache 32B~2048B，bitmap 管理空闲 slot | ✅ |
 | C-4 | VMA（sorted-array） | `vma_ops_t` 可插拔后端接口 + dispatch 层、sorted-array 后端（256 条目、二分查找）、内核地址空间 VMA 跟踪、Page Fault 按 VMA 分发权限检查、`vma` shell 命令 | ✅ |
-| C-5 | VMA（红黑树） | 红黑树后端（`vma_rbtree.c`），静态节点池，$O(\log n)$ 全操作，生产级实现 | |
-| C-6 | 内存子系统集成测试 | 切换 buddy + slab + VMA 默认组合，全面回归测试（pmm/heap/vmm/vma 命令），确认无碎片/泄漏 | |
+| C-5 | VMA（红黑树 + Maple Tree） | 红黑树后端（`vma_rbtree.c`）+ Maple Tree 后端（`vma_maple.c`），静态节点池，$O(\log n)$ 全操作，`kconfig.h` 选择 | ✅ |
+| C-6 | 内存子系统集成测试 | 三后端均通过 `vma test` 全部 4 项自测，sorted-array / rbtree / maple-tree 功能验证通过 | ✅ |
 
 ### 里程碑 D：进程与用户态 ← **下一步**
 

@@ -199,7 +199,13 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
          * [NOTE] 后端在 kconfig.h 中选择（当前仅声明接口，具体后端待下次提交）。
          *   如果 vma_rbtree_get_ops 等后端可用，取消下方注释即可启用。
          */
+#if KCONFIG_VMA_BACKEND == 0
         vma_register_backend(vma_sorted_array_get_ops());
+#elif KCONFIG_VMA_BACKEND == 1
+        vma_register_backend(vma_rbtree_get_ops());
+#elif KCONFIG_VMA_BACKEND == 2
+        vma_register_backend(vma_maple_get_ops());
+#endif
         vma_init();
 
         if (vma_is_ready()) {

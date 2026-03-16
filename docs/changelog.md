@@ -1,4 +1,14 @@
 
+## 2026-03-16 (Stage C-5/C-6 VMA rbtree + maple-tree backends)
+- 新增 `kernel/mm/vma_rbtree.c`：红黑树 VMA 后端，静态节点池 256 + NIL 哨兵 + freelist 回收，O(log n) 全操作（插入修复 3 case + 删除修复 4 case），迭代中序遍历 dump。
+- 新增 `kernel/mm/vma_maple.c`：Maple Tree (B+ tree 变体) VMA 后端，扇出度 10，树高 ≤ 3，叶节点分裂/上提，节点池 64 + VMA 池 256。
+- `vma.h`：新增 `vma_maple_get_ops()` 声明。
+- `kconfig.h`：新增 `KCONFIG_VMA_BACKEND`（0=sorted-array, 1=rbtree, 2=maple-tree）。
+- `kmain.c`：VMA 后端选择改为 `#if KCONFIG_VMA_BACKEND` 三路分支。
+- `book/chapters/ch11-vma.tex`：新增红黑树后端完整章节（节点结构、旋转代码、插入/删除修复、区间查找）；新增 Maple Tree 后端章节（B+ tree 节点结构、查找、分裂图解、与红黑树对比）；更新 dispatch 图为三后端；新增 kconfig 切换章节。
+- 三后端均通过 `vma test` 全部 4 项自测（add+find / find-outside / overlap / remove+find）。
+- 里程碑 C-5 (VMA 红黑树) ✅、C-6 (内存子系统集成测试) ✅，里程碑 C 全部完成。
+
 ## 2026-03-16 (Stage 9 VMA sorted-array backend)
 - 新增 `kernel/mm/vma_sorted_array.c`：排序数组 VMA 后端（`vma_ops_t` 实现），静态数组 256 条目（恰好 1 页），二分查找 `find` $O(\log n)$，有序插入/删除 $O(n)$。
 - 抽取 `sa_lower_bound()` / `sa_upper_bound()` 二分查找辅助函数，`sa_add`/`sa_remove`/`sa_find` 共用。
