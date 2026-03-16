@@ -23,6 +23,38 @@
 \usepackage{longtable}
 \usepackage{tabularx}
 
+% --- 绘图（内存布局、数据结构、bitfield 图、指针关系） ---
+\usepackage{tikz}
+\usetikzlibrary{
+  positioning,    % 相对定位 (right=of, below=of)
+  calc,           % 坐标计算
+  arrows.meta,    % 箭头样式
+  decorations.pathreplacing,  % 花括号标注
+  fit,            % 包围框
+  shapes.multipart,  % 多段节点（struct field 图）
+}
+
+% 内存块样式
+\tikzset{
+  memcell/.style={
+    draw, minimum width=2cm, minimum height=0.6cm,
+    font=\ttfamily\small, anchor=west,
+  },
+  memaddr/.style={
+    font=\ttfamily\scriptsize\color{gray}, anchor=east,
+  },
+  pointer/.style={
+    -{Stealth[length=4pt]}, thick, blue!60!black,
+  },
+  bitcell/.style={
+    draw, minimum width=0.7cm, minimum height=0.6cm,
+    font=\ttfamily\small, anchor=west,
+  },
+  fieldlabel/.style={
+    font=\small\itshape, text=blue!50!black,
+  },
+}
+
 % --- 颜色与代码高亮 ---
 \usepackage{xcolor}
 \usepackage{listings}
