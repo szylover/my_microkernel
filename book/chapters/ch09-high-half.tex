@@ -7,48 +7,67 @@
 \section{本章目标}
 
 \begin{itemize}
-  \item 将内核映射到虚拟地址 \hex{C0000000}+（高半区）
-  \item 拆除低地址 Identity Mapping，为用户态腾出 0--3GiB 空间
-  \item 所有指针从物理地址切换到虚拟地址
+  \item 理解 High-Half Kernel 的地址空间划分（用户 0--3GiB / 内核 3--4GiB）
+  \item 拆除低地址 Identity Mapping，释放 0--\hex{BFFFFFFF} 给将来的用户态
+  \item 将所有物理地址引用转为虚拟地址（\texttt{PHYS\_TO\_VIRT}）
 \end{itemize}
 
-\section{背景知识：High-Half Kernel 架构}
-
-% TODO:
-% - 地址空间划分：0x00000000-0xBFFFFFFF (用户) / 0xC0000000-0xFFFFFFFF (内核)
-% - 直接映射区: virt = phys + 0xC0000000
-% - PHYS_TO_VIRT / VIRT_TO_PHYS 宏
+\section{背景知识}
 
 \begin{whybox}
-为什么要 High-Half？让每个用户进程都有完整的 0--3GiB 虚拟地址空间，
-同时内核在所有进程的页表中都占据相同的高地址区域。
-切换进程时只需换低 3GiB 的映射，内核部分不变。
+为什么要 High-Half Kernel？
+
+让每个用户进程都有完整的 0--3GiB 虚拟地址空间。
+内核在所有进程的页表中都占据 \hex{C0000000}--\hex{FFFFFFFF}。
+切换进程时只需换低 3GiB 的映射，内核部分不变——减少 TLB flush 开销。
 \end{whybox}
 
-\section{链接脚本改动}
+\subsection{直接映射区}
 
-% TODO: linker.ld 中 . += KERNEL_VIRT_BASE 的含义
-% 物理加载地址 vs 虚拟链接地址
+内核的\term{直接映射区}是一段简单的线性映射：$\text{virt} = \text{phys} + \hex{C0000000}$。
 
-\section{Boot 阶段的临时映射}
+\begin{lstlisting}[style=cstyle]
+#define PHYS_TO_VIRT(paddr) ((void*)((uint32_t)(paddr) + 0xC0000000u))
+#define VIRT_TO_PHYS(vaddr) ((uint32_t)(vaddr) - 0xC0000000u)
+\end{lstlisting}
 
-% TODO: boot.asm 用 PSE 4MiB 大页同时建立 identity + high-half 映射
-% 为什么需要两份：切换 CR3 后 EIP 还在低地址，需要 identity 继续执行
-
-\section{vmm\_init 中的双重映射}
-
-% TODO: 逐页建立 identity + high-half → 切换 CR3 → 验证
+\begin{thinkbox}
+\texttt{PHYS\_TO\_VIRT} 只适用于直接映射区内的地址。如果给它传一个
+内核堆的虚拟地址（\hex{E0000000}），结果会是什么？这个结果有物理意义吗？
+\end{thinkbox}
 
 \section{拆除 Identity Mapping}
 
-% TODO: vmm_unmap_identity() 清除 PD[0..767]
-% 所有低地址访问变成 Page Fault
-% PMM 指针切换到 PHYS_TO_VIRT
+\begin{lstlisting}[style=cstyle]
+void vmm_unmap_identity(void) {
+    uint32_t first_kernel_pde = 768;  // 0xC0000000 >> 22
+    for (uint32_t i = 0; i < first_kernel_pde; i++) {
+        if (g_kernel_pd.entries[i] & PDE_PRESENT) {
+            g_kernel_pd.entries[i] = 0;
+        }
+    }
+    vmm_load_page_directory(VIRT_TO_PHYS(&g_kernel_pd));  // 刷新 TLB
+}
+\end{lstlisting}
 
 \begin{warnbox}
-拆除 identity mapping 前，必须确保所有指针（PMM bitmap、Multiboot2 info 等）
-都已转为虚拟地址（\texttt{PHYS\_TO\_VIRT}）。否则立即 Page Fault。
+拆除前必须确保\textbf{所有}指向低地址的指针都已转为虚拟地址：
+\begin{itemize}
+  \item PMM 内部的 bitmap 指针
+  \item \texttt{g\_mb2\_info}（Multiboot2 info 物理地址 → 虚拟地址）
+  \item 任何在 \texttt{pmm\_init} 期间存储的物理地址
+\end{itemize}
+漏一个就 Page Fault。
 \end{warnbox}
+
+\begin{cpustate}
+拆除后：
+\begin{itemize}
+  \item PD[0..767] 全部清零
+  \item 访问 \hex{00000000}--\hex{BFFFFFFF} 会立即触发 \#PF
+  \item \reg{CR3} 重新加载，TLB 完全刷新
+\end{itemize}
+\end{cpustate}
 
 \section{验证}
 
@@ -59,7 +78,27 @@ szy-kernel > vmm lookup 0xC0100000
 virt 0xC0100000 -> phys 0x00100000  [P RW S]
 \end{lstlisting}
 
+\section{思考与练习}
+
+\begin{exercise}
+在 \texttt{vmm\_unmap\_identity} 的调用\textbf{之前}，故意执行
+\texttt{uint32\_t x = *(uint32\_t*)0x00100000;} 读一下低地址。能读到值吗？
+然后在拆除\textbf{之后}再读，观察 \#PF 输出的错误码 bits。
+\end{exercise}
+
+\begin{exercise}
+在 \texttt{kmain} 中，尝试在 \texttt{vmm\_unmap\_identity} 之前\textbf{不}将
+\texttt{g\_mb2\_info} 转为虚拟地址。然后运行 \texttt{mmap} 命令。
+发生了什么？\#PF 的 CR2 是什么地址？
+\end{exercise}
+
+\begin{exercise}
+拆除 identity mapping 后，VGA 文本显存在 \hex{B8000} 不再可访问。
+但我们通过串口输出不受影响。思考：如果将来要支持 VGA console，
+应该把 VGA 显存映射到高半区的哪个虚拟地址？
+\end{exercise}
+
 \section{本章小结}
 
-内核现在安全地运行在高半区。低地址空间已清空，等待将来的用户态进程。
-下一章实现内核堆（kmalloc），让内核能做字节级的动态内存分配。
+内核安全地运行在高半区。低地址空间已为将来的用户态进程准备好。
+下一章实现内核堆——让内核能做字节级的动态内存分配。
