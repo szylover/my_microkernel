@@ -1,4 +1,18 @@
 
+## 2026-03-16 (book fix + README)
+- 修复 `book/chapters/ch07-pmm.tex` 第 390 行损坏内容（上次编辑残留 JSON 元数据和双反斜杠）。
+- 修复 `book/chapters/ch08-vmm.tex`：TikZ 样式名 `step` 与内置关键字冲突，改为 `flowstep`；TikZ 节点多行文本添加 `align=center`。
+- `book/preamble.tex`：新增 `patterns` 和 `shapes.geometric` TikZ 库，解决后续章节编译错误。
+- `book/preamble.tex`：代码框 `frame=single` 改为 `frame=l`（左侧竖线），跨页不再出现不封闭矩形。
+- `book/preamble.tex`：行号样式从 `\tiny\color{gray}` 改为 `\scriptsize\color{black!40}`，更清晰。
+- `book/preamble.tex`：新增 `\codefile{}` 命令，用于在代码块前标注源文件路径。
+- `book/main.tex`：添加 `\raggedbottom`，解决代码密集页面间距被异常拉大的问题。
+- `book/main.tex`：封面改为 O'Reilly 风格（红色标题色带 + 留白 + 底部作者）。
+- 为 ch02–ch11 共 98 处代码块添加 `\codefile{}` 源文件路径标注。
+- 以上修复使 book PDF 两遍编译成功（153 页），目录正常生成。
+- `README.md`：新增「配套书籍」段落（章节总览表 + PDF 构建命令）。
+- 新增 `LICENSE`：MIT 许可证。
+
 ## 2026-03-16
 - 新增 `include/kernel/vma.h`：VMA 可插拔后端接口（`vma_ops_t` 函数指针表 + `vm_area_t` 描述结构 + 权限标志），和 pmm_ops_t/heap_ops_t 同一套模式。
 - 新增 `kernel/mm/vma.c`：VMA dispatch 层，通过 `g_vma_ops` 转发到注册的后端。

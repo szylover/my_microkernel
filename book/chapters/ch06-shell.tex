@@ -48,6 +48,7 @@ Shell 采用五层架构，各层通过清晰的函数接口解耦：
 % ============================================================================
 \section{Console 输入层：\texttt{console.c}}
 
+\codefile{src/kernel/core/console.c}
 \begin{lstlisting}[style=cstyle]
 int console_try_getc(char* out) {
     // 优先查键盘 IRQ 缓冲区（非阻塞）
@@ -83,6 +84,7 @@ char console_getc(void) {
 % ============================================================================
 \section{命令接口：\texttt{cmd.h}}
 
+\codefile{src/include/kernel/cmd.h}
 \begin{lstlisting}[style=cstyle]
 typedef int (*cmd_fn_t)(int argc, char** argv);
 
@@ -116,6 +118,7 @@ typedef struct {
 每个命令做成独立编译单元（一个 \texttt{.c} 文件），在文件末尾导出一个
 \texttt{const cmd\_t}：
 
+\codefile{src/kernel/cmds/cmd\_cls.c}
 \begin{lstlisting}[style=cstyle]
 // cmd_cls.c
 static int cmd_cls_main(int argc, char** argv) {
@@ -146,6 +149,7 @@ const cmd_t cmd_cls = {
 
 \subsection{注册表：静态指针数组}
 
+\codefile{src/kernel/core/shell.c}
 \begin{lstlisting}[style=cstyle]
 // shell.c 中
 extern const cmd_t cmd_cls;
@@ -189,6 +193,7 @@ static const cmd_t* g_cmds[] = {
 
 \subsection{分发逻辑}
 
+\codefile{src/kernel/core/shell.c}
 \begin{lstlisting}[style=cstyle]
 static void shell_dispatch(char* line) {
     if (!line || !*line) return;
@@ -218,6 +223,7 @@ static void shell_dispatch(char* line) {
 % ============================================================================
 \section{行编辑器：\texttt{shell\_readline}}
 
+\codefile{src/kernel/core/shell.c}
 \begin{lstlisting}[style=cstyle]
 static size_t shell_readline(char* buf, size_t cap) {
     size_t len = 0;
@@ -268,6 +274,7 @@ static size_t shell_readline(char* buf, size_t cap) {
 
 \subsection{命令分词：\texttt{shell\_tokenize}}
 
+\codefile{src/kernel/core/shell.c}
 \begin{lstlisting}[style=cstyle]
 static int shell_tokenize(char* line, char** argv, int argv_cap) {
     int argc = 0;
@@ -315,6 +322,7 @@ static int shell_tokenize(char* line, char** argv, int argv_cap) {
 % ============================================================================
 \section{主循环：\texttt{shell\_run}}
 
+\codefile{src/kernel/core/shell.c}
 \begin{lstlisting}[style=cstyle]
 void shell_run(void) {
     printk("\nInteractive shell ready.\n");
@@ -333,6 +341,7 @@ void shell_run(void) {
 
 \subsection{\texttt{cmd\_cls}：清屏}
 
+\codefile{src/kernel/cmds/cmd\_cls.c}
 \begin{lstlisting}[style=cstyle]
 printk("\x1b[2J\x1b[H");
 \end{lstlisting}
@@ -346,6 +355,7 @@ printk("\x1b[2J\x1b[H");
 
 \subsection{\texttt{cmd\_shutdown}：关机}
 
+\codefile{src/kernel/cmds/cmd\_shutdown.c}
 \begin{lstlisting}[style=cstyle]
 outw(0x604, 0x2000);   // QEMU ACPI 关机
 outw(0xB004, 0x2000);  // Bochs 关机

@@ -98,6 +98,7 @@ High-Half Kernel 的经典划分方式是：
 直接映射区的大小取决于物理内存的总量（但不超过 1\,GiB，否则会占满整个内核地址空间）。
 我们的 \texttt{vmm\_init()} 在建立映射时会计算这个范围：
 
+\codefile{src/kernel/mm/vmm.c}
 \begin{lstlisting}[style=cstyle, caption={直接映射范围计算（vmm.c 节选）}]
 uint32_t map_end = kernel_end;
 
@@ -121,6 +122,7 @@ if (map_end > 0x40000000u)
 
 在 \texttt{vmm.h} 中定义了两个核心转换宏：
 
+\codefile{src/include/kernel/vmm.h}
 \begin{lstlisting}[style=cstyle, caption={地址转换宏（vmm.h）}]
 #define KERNEL_VIRT_OFFSET  0xC0000000u
 
@@ -153,6 +155,7 @@ if (map_end > 0x40000000u)
 建立临时映射。这里我们详细分析为什么需要\textbf{同时}建立 identity mapping 和
 high-half mapping。
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle, caption={boot.asm：构建双重 PSE 映射}]
 ; PSE PDE: [31:22]=phys_base | PS(bit7) | RW(bit1) | P(bit0)
 ;   flags = 0x83
@@ -201,6 +204,7 @@ Page Fault → Double Fault → Triple Fault → 重启。
 
 开启分页的关键指令序列：
 
+\codefile{src/boot/boot.asm}
 \begin{lstlisting}[style=nasmstyle, caption={boot.asm：开启分页并跳转到 high-half}]
 ; 加载页目录物理地址到 CR3
 mov eax, boot_pd
@@ -265,6 +269,7 @@ jmp eax
 GRUB 传入的 Multiboot2 info 指针是物理地址（由 \texttt{boot.asm} 从 \reg{EBX} 保存）。
 在 \texttt{vmm\_init()} 建立 high-half mapping 之后，需要将其转换：
 
+\codefile{src/kernel/core/kmain.c}
 \begin{lstlisting}[style=cstyle, caption={kmain.c：转换 Multiboot2 指针}]
 /* vmm_init 之后、vmm_unmap_identity 之前 */
 g_mb2_info = (const void*)PHYS_TO_VIRT(
@@ -299,6 +304,7 @@ PMM bitmap 后端在 \texttt{pmm\_init()} 时将 bitmap 放置在物理内存中
 
 一切指针转换完毕后，调用 \texttt{vmm\_unmap\_identity()} 拆除低地址映射：
 
+\codefile{src/kernel/mm/vmm.c}
 \begin{lstlisting}[style=cstyle, caption={vmm\_unmap\_identity() 完整实现}]
 void vmm_unmap_identity(void) {
     /*
@@ -404,6 +410,7 @@ VGA text buffer 位于物理地址 \hex{B8000}。拆除 identity mapping 后，
 
 我们来看 \texttt{kmain.c} 中与本章相关的关键代码片段：
 
+\codefile{src/kernel/core/kmain.c}
 \begin{lstlisting}[style=cstyle, caption={kmain.c：high-half 切换的完整流程}]
 /* Stage 2: 物理内存管理器 */
 pmm_init();
