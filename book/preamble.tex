@@ -154,3 +154,29 @@
   breakable,
   #1
 }
+
+% --- 思考题与练习 ---
+
+% 计数器（按章重置）
+\newcounter{thinknum}[chapter]
+\newcounter{exercisenum}[chapter]
+
+% 思考题（穿插在正文中的小问题，引导读者停下来想一想）
+\newtcolorbox{thinkbox}[1][]{
+  colback=purple!3,
+  colframe=purple!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{thinknum}思考 \thechapter.\thethinknum},
+  breakable,
+  #1
+}
+
+% 动手练习（章末的实操题目）
+\newtcolorbox{exercise}[1][]{
+  colback=cyan!3,
+  colframe=cyan!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{exercisenum}练习 \thechapter.\theexercisenum},
+  breakable,
+  #1
+}

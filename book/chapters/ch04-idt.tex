@@ -179,6 +179,12 @@ void isr_handler_c(const regs_t* r) {
 如果直接返回会无限触发同一异常。
 \end{designbox}
 
+\begin{thinkbox}
+异常分为 fault、trap、abort 三类。\texttt{int3} 是 trap（EIP 指向下一条指令），
+而 Page Fault 是 fault（EIP 指向故障指令）。为什么 Page Fault 要设计成 fault
+而非 trap？提示：想想将来做按需分页（demand paging）时，handler 需要做什么。
+\end{thinkbox}
+
 \subsection{Page Fault Handler}
 
 Page Fault 需要额外读取 \reg{CR2}（故障虚拟地址）并解码错误码：
@@ -227,6 +233,26 @@ int3 returned, IDT works!
 
 如果看不到 \texttt{int3 returned}，说明 \texttt{iret} 有问题——检查 stub 的
 栈布局是否和 \texttt{regs\_t} 一致。
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+在 \texttt{kmain} 中触发一次除零异常（\texttt{\_\_asm\_\_ volatile("int \$0");}）。
+观察串口输出：向量号是多少？EIP 指向哪里？和 \texttt{int3} 的行为有什么不同？
+\end{exercise}
+
+\begin{exercise}
+故意把 \texttt{isr\_common\_stub} 中 \texttt{pushad} 和 \texttt{push ds/es/fs/gs}
+的顺序对调。重新运行并触发 \texttt{int3}，观察 C handler 打印的 \reg{EIP} 值。
+它还正确吗？为什么？这个实验帮你理解 \texttt{regs\_t} 布局的重要性。
+\end{exercise}
+
+\begin{exercise}
+把 IDT 中所有异常的 \texttt{type\_attr} 从 \hex{8E}（Interrupt Gate）改为
+\hex{8F}（Trap Gate）。运行后在 shell 中按键，观察键盘是否还能正常工作。
+思考：两种 gate 在中断嵌套方面有何不同？
+\end{exercise}
 
 % ============================================================================
 \section{本章小结}

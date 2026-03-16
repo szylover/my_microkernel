@@ -125,6 +125,12 @@ VGA 显存（\hex{B8000}）、ROM（\hex{F0000}--\hex{FFFFF}）等占据。
 但所有符号（函数地址、全局变量）都按 \hex{C0100000}+ 解析。
 开启分页后，高半区映射会把 \hex{C0100000} 翻译到 \hex{00100000}。
 
+\begin{thinkbox}
+如果链接脚本中没有 \texttt{. += KERNEL\_VIRT\_BASE} 这行，所有内核符号都链接在
+物理地址 \hex{00100000}+ 处。此时 boot.asm 中的 \texttt{mov eax, \_start\_high}
+会加载什么地址？跳转后会发生什么？
+\end{thinkbox}
+
 % ============================================================================
 \section{引导汇编 \texttt{boot.asm}}
 
@@ -216,6 +222,12 @@ mov cr0, eax
 或地址没 4KiB 对齐），CPU 会立即 Triple Fault 并重启。
 调试时可以用 QEMU 的 \texttt{-no-reboot -d int} 选项查看异常日志。
 \end{warnbox}
+
+\begin{thinkbox}
+开启分页的那一条指令（\texttt{mov cr0, eax}）后，下一条指令的取指还用的是
+物理地址。如果我们没有建立 identity mapping（PD[0..255]），只建了高半区映射，
+会发生什么？为什么需要两套映射同时存在？
+\end{thinkbox}
 
 \subsection{跳转到高半区}
 
@@ -363,6 +375,27 @@ cd src && make iso && make run
 
 如果 QEMU 窗口空白然后重启，多半是分页设置有误——用 \texttt{-no-reboot -d int}
 看 Triple Fault 的原因。
+
+% ============================================================================
+\section{思考与练习}
+
+\begin{exercise}
+修改 \texttt{serial\_init()} 中的除数，将波特率从 38400 改为 115200
+（除数 = 1）。重新编译运行，观察串口输出是否正常。思考：如果 QEMU 端和
+内核端波特率不匹配会怎样？
+\end{exercise}
+
+\begin{exercise}
+在 \texttt{boot.asm} 中把 PSE 映射从 256 个（1GiB）改为只映射 4 个（16MiB）。
+重新运行，如果你的 QEMU 配置了 \texttt{-m 256}（256MiB 内存），
+后续 PMM 初始化时会出什么问题？
+\end{exercise}
+
+\begin{exercise}
+在 \texttt{printk} 中添加一个新的格式说明符 \texttt{\%b}，以二进制格式
+打印 \texttt{uint32\_t}。例如 \texttt{printk("\%b", 0x83)} 输出
+\texttt{10000011}。提示：参考 \texttt{fmt\_u32\_hex} 的实现。
+\end{exercise}
 
 % ============================================================================
 \section{本章小结}
