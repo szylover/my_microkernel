@@ -1,21 +1,64 @@
 % ============================================================================
 \chapter{移植 GCC}
 \label{ch:port-gcc}
-% 里程碑 G-2 — 待实现
+% Stage G-6 ~ G-7
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
+  \item 分析 GCC 运行时依赖（syscall 子集 + libc 函数 + 文件系统需求）
   \item 让 GCC 能在 SZY-KERNEL 上编译并运行简单 C 程序
-  \item 实现 GCC 所需的系统调用子集（\texttt{fork}/\texttt{exec}/\texttt{waitpid}/\texttt{open}/\texttt{read}/\texttt{write}/\texttt{stat}）
-  \item 验证自举：在 OS 上编译 hello world 并执行
+  \item 验证自举：在 OS 上用 GCC 编译 hello world 并执行
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：GCC 运行时依赖}
+\label{sec:gcc-deps}
+% ============================================================================
 
 % TODO:
-% - GCC 运行时依赖分析
-% - 移植清单：libc、文件系统、进程管理
-% - Canadian cross-compilation
-% - 自举测试策略
+% - GCC 运行时需要的系统调用：
+%     进程：fork, exec, waitpid, exit, getpid
+%     文件：open, read, write, close, stat, lseek, unlink
+%     内存：brk, mmap, munmap
+%     其他：dup2, pipe, fcntl, ioctl
+% - GCC 需要的 libc 函数：stdio, stdlib, string, ctype, errno, signal
+% - 文件系统需求：
+%     /tmp/ 临时文件（预处理器 cpp 输出 → 编译器 cc1 输入）
+%     头文件路径 $SYSROOT/usr/include/
+%     库路径 $SYSROOT/usr/lib/
+% - Canadian cross 构建方案（在 build=Linux 上编译 host=target=szy 的 GCC）
+
+% ============================================================================
+\section{移植步骤}
+\label{sec:gcc-port}
+% ============================================================================
+
+% TODO:
+% - 1. 准备 SZY-KERNEL syscall + libc 满足 GCC 依赖
+% - 2. 在宿主机 Canadian cross 构建 i686-szy-gcc（运行在 SZY-KERNEL 上）：
+%     --build=x86_64-linux-gnu --host=i686-szy --target=i686-szy
+% - 3. 修补 GCC 源码：
+%     gcc/config.sub + config.guess 识别 *-szy
+%     gcc/config/szy.h 定义 OS 特有宏
+%     libgcc 移植（__muldi3 等辅助函数）
+% - 4. 把编译好的 gcc + cc1 + as + ld 打包到 initrd 或磁盘
+% - 5. 在 SZY-KERNEL 上运行 gcc hello.c -o hello
+
+% ============================================================================
+\section{验证}
+\label{sec:gcc-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：gcc hello.c -o hello → 生成 ELF → ./hello → "Hello World"
+% - 测试 2：编译一个需要头文件和 libc 的程序（printf, malloc）
+% - 测试 3（自举终极验证）：用 SZY 上的 GCC 编译 GCC 自身的一个子集
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+在 SZY-KERNEL 上运行 GCC 是自举的里程碑——OS 能编译自己的程序。
+下一章移植 Vim，让用户能在 OS 上交互式编辑代码。

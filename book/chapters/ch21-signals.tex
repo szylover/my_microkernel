@@ -1,20 +1,96 @@
 % ============================================================================
 \chapter{信号}
 \label{ch:signals}
-% 里程碑 F-1 — 待实现
+% Stage F-1 ~ F-2
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 POSIX 信号机制：\texttt{SIGINT}/\texttt{SIGTERM}/\texttt{SIGKILL}
-  \item 信号投递（pending → delivery）与默认处理
-  \item 用户态信号处理函数（\texttt{sigaction}）
+  \item 理解信号的本质：进程间异步通知机制
+  \item 掌握信号生命周期：产生 → 挂起（pending）→ 投递（delivery）→ 处理
+  \item 实现 per-process 信号表（31 个标准信号 + pending/blocked 位图）
+  \item 实现信号投递机制 + 内核态→用户态信号跳板（signal trampoline）
+  \item 实现 \texttt{sigaction} 系统调用（用户自定义信号处理函数）
+  \item 验证 \texttt{Ctrl+C} → \texttt{SIGINT} → 终止前台进程
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：信号机制}
+\label{sec:sig-concept}
+% ============================================================================
 
 % TODO:
-% - 信号是什么：异步通知机制
-% - 信号的生命周期：产生 → 挂起 → 投递 → 处理
-% - 内核态 → 用户态信号跳板（signal trampoline）
+% - 信号 = 软件中断：通知进程发生了某个事件
+% - 与硬件中断对比：硬件中断通知 CPU，信号通知进程
+% - 信号来源：
+%     内核产生：除零(SIGFPE)、非法地址(SIGSEGV)、子进程退出(SIGCHLD)
+%     用户产生：Ctrl+C(SIGINT)、Ctrl+Z(SIGSTOP)、kill 命令(SIGTERM)
+% - 31 个标准信号表（SIGHUP=1, SIGINT=2, SIGKILL=9, SIGSEGV=11, ...）
+% - 默认动作分类：
+%     terminate：终止进程（SIGINT, SIGTERM, SIGKILL）
+%     ignore：忽略（SIGCHLD, SIGURG）
+%     stop：暂停进程（SIGSTOP, SIGTSTP）
+%     core：终止 + 核心转储（SIGSEGV, SIGFPE, SIGABRT）
+% - 不可捕获/忽略的信号：SIGKILL(9)、SIGSTOP(19)
+% - 图：信号完整生命周期流程
+
+\subsection{信号在 PCB 中的表示}
+
+% TODO:
+% - task_struct 新增字段：
+%     uint32_t sig_pending;    // 挂起信号位图（bit N = 信号 N+1）
+%     uint32_t sig_blocked;    // 屏蔽信号位图
+%     struct sigaction sig_handlers[32]; // 每个信号的处理方式
+% - struct sigaction { void (*handler)(int); uint32_t flags; uint32_t mask; }
+% - 特殊 handler 值：SIG_DFL（默认）、SIG_IGN（忽略）
+
+% ============================================================================
+\section{信号投递与跳板}
+\label{sec:sig-delivery}
+% ============================================================================
+
+% TODO:
+% - 投递时机：进程从内核态返回用户态之前（syscall return / IRQ return）
+%     check: if (current->sig_pending & ~current->sig_blocked)
+% - 投递流程（用户自定义 handler 的情况）：
+%     1. 在用户栈上构造 signal frame：
+%        保存原始 EIP/ESP/EFLAGS（中断前的用户态寄存器）
+%     2. 设置 EIP = handler 地址
+%     3. 在用户栈上放置 trampoline 返回地址
+%     4. iret 到用户态 → 执行 handler(signum)
+%     5. handler 返回 → 跳到 trampoline → int 0x80 sys_sigreturn
+%     6. sys_sigreturn 恢复原始寄存器 → 用户程序继续执行
+% - signal trampoline（几条汇编指令，内核映射到固定用户页）
+% - [WHY] trampoline 是必要的：handler 是普通 C 函数，返回后需要恢复内核保存的上下文
+
+% ============================================================================
+\section{系统调用}
+\label{sec:sig-syscall}
+% ============================================================================
+
+% TODO:
+% - sys_sigaction(signum, &act, &oldact)：注册/查询信号处理器
+% - sys_kill(pid, signum)：向进程发送信号
+% - sys_sigreturn()：信号处理完毕后恢复上下文（不直接暴露给用户）
+% - sys_sigprocmask(how, &set, &oldset)：修改信号屏蔽字
+
+% ============================================================================
+\section{验证}
+\label{sec:sig-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：Ctrl+C → 键盘驱动发 SIGINT → 前台进程被终止
+% - 测试 2：sigaction 注册自定义 handler → 收到信号后打印消息 → 继续运行
+% - 测试 3：SIGKILL 无法被捕获/忽略 → 进程无条件终止
+% - 测试 4：sigprocmask 屏蔽 SIGINT → 信号挂起 → 解除屏蔽后立刻投递
+% - shell 命令：kill <pid> <sig> / signal test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+信号机制为进程提供了异步通知能力。通过 pending/blocked 位图 + signal trampoline，
+内核能安全地在用户态执行信号处理函数并恢复原始上下文。
+下一章实现管道和 I/O 重定向，构建进程间通信的基础设施。

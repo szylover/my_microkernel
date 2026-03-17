@@ -1,20 +1,91 @@
 % ============================================================================
 \chapter{管道与重定向}
 \label{ch:pipe}
-% 里程碑 F-2 — 待实现
+% Stage F-3 ~ F-4
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 \texttt{pipe()} 系统调用：内核环形缓冲区
+  \item 理解 Unix 管道原理与进程间通信（IPC）分类
+  \item 设计可插拔 \texttt{ipc\_ops\_t} 接口（匿名管道/命名管道/共享内存可扩展）
+  \item 实现匿名管道后端（内核环形缓冲区 + 阻塞读写）
   \item 实现 \texttt{dup2()} 文件描述符复制
-  \item Shell 支持管道 \texttt{|} 和重定向 \texttt{>}
+  \item Shell 集成管道 \texttt{|} 和重定向 \texttt{>}
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：进程间通信}
+\label{sec:pipe-concept}
+% ============================================================================
 
 % TODO:
-% - Unix 管道原理（匿名管道 / 命名管道）
-% - 环形缓冲区实现
-% - dup2 与文件描述符重定向
+% - IPC 分类概述：
+%     管道（无名/有名）、消息队列、共享内存、信号、Socket
+% - 管道是最简单的 IPC：单向字节流，通过 fd 读写
+% - 匿名管道（pipe）：父子进程间共享（fork 后继承 fd）
+%     pipe(fds) → fds[0]=读端, fds[1]=写端
+% - 命名管道（FIFO）：通过文件系统路径访问（mkfifo），不限于父子
+% - 管道的 VFS 集成：管道也是 file 对象，读写通过 fd
+% - 图：两个进程通过管道通信（进程A write → buffer → 进程B read）
+
+\subsection{dup2 与 I/O 重定向}
+
+% TODO:
+% - dup2(oldfd, newfd) 语义：让 newfd 指向 oldfd 同一个 file 对象
+% - Shell 重定向实现：
+%     cmd > file  →  open(file) → dup2(fd, 1) → exec(cmd)
+%     cmd < file  →  open(file) → dup2(fd, 0) → exec(cmd)
+% - Shell 管道实现：
+%     cmd1 | cmd2  →  pipe(fds) → fork → 子1: dup2(fds[1],1) → 子2: dup2(fds[0],0)
+
+% ============================================================================
+\section{可插拔接口：\texttt{ipc\_ops\_t}}
+\label{sec:pipe-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct ipc_ops {
+%         const char* name;                          // "pipe"
+%         int (*create)(struct file* read_end, struct file* write_end);
+%         int (*read)(struct file* f, void* buf, size_t count);
+%         int (*write)(struct file* f, const void* buf, size_t count);
+%         int (*close)(struct file* f);
+%     } ipc_ops_t;
+% - 为什么可插拔：未来可扩展 shared memory、message queue 等 IPC
+
+% ============================================================================
+\section{匿名管道后端}
+\label{sec:pipe-impl}
+% ============================================================================
+
+% TODO:
+% - 内核环形缓冲区：
+%     struct pipe_buf { char data[PIPE_SIZE]; uint32_t read_pos, write_pos, count; }
+%     PIPE_SIZE = 4096（一页）
+% - write：如果 buffer 满 → 阻塞写端进程（BLOCKED）→ 等待读端读取
+% - read：如果 buffer 空 → 阻塞读端进程 → 等待写端写入
+% - EOF：所有写端关闭后 → read 返回 0
+% - SIGPIPE：所有读端关闭后 → write 收到 SIGPIPE
+% - dup2 实现：fd_table[newfd] = fd_table[oldfd]; refcount++
+
+% ============================================================================
+\section{验证}
+\label{sec:pipe-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：pipe → fork → 父 write → 子 read → 匹配
+% - 测试 2：dup2(fd, 1) → write(1, ...) → 输出到 fd 指向的文件
+% - 测试 3：Shell 管道 echo "hello" | cat → 输出 hello
+% - 测试 4：Shell 重定向 echo "data" > /tmp/test → 文件内容正确
+% - shell 命令：pipe test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+管道通过可插拔 \texttt{ipc\_ops\_t} 接口实现进程间单向通信。
+配合 \texttt{dup2} 的 fd 重定向能力，Shell 获得了管道 \texttt{|} 和重定向 \texttt{>} 的支持。
+下一章实现 \texttt{mmap}，让用户态能直接映射内存和文件到地址空间。

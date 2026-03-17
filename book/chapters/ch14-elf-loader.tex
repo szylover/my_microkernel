@@ -1,0 +1,142 @@
+% ============================================================================
+\chapter{ELF 加载器}
+\label{ch:elf-loader}
+% Stage D-5 ~ D-6
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解可执行文件格式的作用与分类
+  \item 深入掌握 ELF32 文件格式（ELF header、Program header、PT\_LOAD 段）
+  \item 设计可插拔 \texttt{loader\_ops\_t} 接口，支持未来扩展其他格式
+  \item 实现 ELF32 加载器后端：解析 → 映射 → VMA 注册
+  \item 验证从内存加载最小 ELF 并跳转执行
+\end{itemize}
+
+% ============================================================================
+\section{概念：可执行文件与加载}
+\label{sec:elf-concept}
+% ============================================================================
+
+% TODO:
+% - 为什么需要标准化的可执行文件格式（不同程序共享统一的加载流程）
+% - 常见格式对比：
+%     ELF (Unix/Linux) — 本项目重点
+%     PE (Windows)
+%     Mach-O (macOS)
+%     a.out (Unix 早期，已淘汰）
+%     flat binary（无元数据，最简单但无法重定位）
+% - ELF 的两种视图：
+%     链接视图 (Section Header) — 编译器/链接器关心
+%     执行视图 (Program Header) — 加载器关心 ← 我们只需要这个
+% - 加载的本质：读取文件 → 在地址空间中创建映射 → 设置入口点
+
+\subsection{ELF32 结构详解}
+
+% TODO:
+% - ELF Header (Elf32_Ehdr, 52 bytes):
+%     e_ident[16]: 魔数 (0x7F 'E' 'L' 'F'), class(32/64), endian, version
+%     e_type:      ET_EXEC(2) 可执行 / ET_DYN(3) 共享库
+%     e_machine:   EM_386(3) = i386
+%     e_entry:     入口点虚拟地址
+%     e_phoff:     Program Header 表偏移
+%     e_phentsize: 每个 PH 的大小 (32 bytes)
+%     e_phnum:     PH 数量
+% - [BITFIELDS] ELF header 结构体逐字段图（含偏移量）
+%
+% - Program Header (Elf32_Phdr, 32 bytes):
+%     p_type:   PT_LOAD(1) = 需要加载到内存的段
+%     p_offset: 段在文件中的偏移
+%     p_vaddr:  段加载到的虚拟地址
+%     p_filesz: 段在文件中的大小
+%     p_memsz:  段在内存中的大小（>= filesz, 多出部分补零 = .bss）
+%     p_flags:  PF_R(4) | PF_W(2) | PF_X(1)
+%     p_align:  段对齐要求
+% - 图：ELF 文件布局 + 内存映射对照
+
+% ============================================================================
+\section{可插拔接口：\texttt{loader\_ops\_t}}
+\label{sec:elf-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计（与 pmm_ops_t 同一模式）：
+%     typedef struct loader_ops {
+%         const char* name;                      // "elf32"
+%         int  (*validate)(const void* data, size_t size);  // 验证格式
+%         int  (*load)(const void* data, size_t size,
+%                      uint32_t page_dir);       // 加载到地址空间
+%         uint32_t (*get_entry)(const void* data); // 获取入口地址
+%     } loader_ops_t;
+% - dispatch 层：loader.c 持有 g_loader_ops 全局指针
+%     loader_register_backend() → 注册
+%     loader_load(data, size, pd) → 验证 + 加载 + 返回 entry
+% - 为什么可插拔：未来可能支持 flat binary、a.out 等格式
+% - kconfig.h: #define KCONFIG_LOADER_BACKEND 0  // 0=elf32
+
+% ============================================================================
+\section{ELF32 加载器后端}
+\label{sec:elf-backend}
+% ============================================================================
+
+% TODO:
+% - 验证阶段 (elf32_validate):
+%     1. 检查 e_ident[0..3] == 0x7F 'E' 'L' 'F'
+%     2. 检查 e_ident[4] == ELFCLASS32 (32位)
+%     3. 检查 e_ident[5] == ELFDATA2LSB (小端)
+%     4. 检查 e_type == ET_EXEC (可执行)
+%     5. 检查 e_machine == EM_386 (i386)
+%     → 任一失败返回 -ENOEXEC
+%
+% - 加载阶段 (elf32_load):
+%     遍历 Program Header 表（e_phoff + i * e_phentsize）:
+%     对每个 p_type == PT_LOAD 的段：
+%       1. 计算需要的页数 = ALIGN_UP(p_memsz, 4096) / 4096
+%       2. 分配物理页 pmm_alloc_page() × N
+%       3. 映射到 p_vaddr: vmm_map(p_vaddr, phys, PTE_USER | flags)
+%       4. 复制文件内容: memcpy(p_vaddr, data+p_offset, p_filesz)
+%       5. 零填充 .bss 区域: memset(p_vaddr+p_filesz, 0, p_memsz-p_filesz)
+%       6. 注册 VMA: vma_add(p_vaddr, p_vaddr+p_memsz, vma_flags, "elf:text"/".data")
+%     → 权限映射: PF_R→VMA_READ, PF_W→VMA_WRITE, PF_X→VMA_EXEC
+%
+% - 入口点 (elf32_get_entry):
+%     return ehdr->e_entry;
+
+% ============================================================================
+\section{数据结构}
+\label{sec:elf-structs}
+% ============================================================================
+
+% TODO:
+% - Elf32_Ehdr 结构体定义（include/kernel/elf.h）
+% - Elf32_Phdr 结构体定义
+% - ELF 常量定义：ET_EXEC, EM_386, PT_LOAD, PF_R/W/X
+% - 用户地址空间布局约定：
+%     0x08048000 ~ 0x40000000  用户代码/数据（传统 Linux 起点）
+%     0x40000000 ~ 0xBFFF0000  用户堆/mmap 区
+%     0xBFFF0000 ~ 0xC0000000  用户栈（向下增长）
+%     0xC0000000 ~ 0xFFFFFFFF  内核空间（用户不可访问）
+
+% ============================================================================
+\section{验证}
+\label{sec:elf-verify}
+% ============================================================================
+
+% TODO:
+% - 最小测试 ELF 程序（交叉编译）：
+%     void _start(void) {
+%         // inline asm: write(1, "ELF loaded!\n", 12); exit(0);
+%     }
+%     编译: i686-elf-gcc -nostdlib -static -o hello hello.c
+% - 加载流程：将 ELF 嵌入内核（或 multiboot module）→ loader_load() → iret 到 e_entry
+% - 验证点：串口输出 "ELF loaded!" → exit(0) 回到内核
+% - shell 命令：elf test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+ELF 加载器通过可插拔 \texttt{loader\_ops\_t} 接口，将文件格式解析与内核加载逻辑解耦。
+ELF32 后端完成了从文件到地址空间的映射，配合 VMA 记录各段的权限。
+下一章实现进程管理——让每个程序拥有独立的 PCB、页表和 VMA 树。

@@ -1,20 +1,86 @@
 % ============================================================================
-\chapter{设备文件}
+\chapter{字符设备}
 \label{ch:devfs}
-% 里程碑 E-4 — 待实现
+% Stage E-8 ~ E-10
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 \texttt{/dev/null}、\texttt{/dev/zero}、\texttt{/dev/console}、\texttt{/dev/serial} 等字符设备
-  \item 字符设备注册框架（主设备号 / 次设备号）
+  \item 理解 Unix 设备模型（主设备号 / 次设备号）
+  \item 设计可插拔 \texttt{chardev\_ops\_t} 接口 + cdev 注册框架
+  \item 实现基础字符设备：\texttt{/dev/null}、\texttt{/dev/zero}、\texttt{/dev/serial}、\texttt{/dev/console}
   \item 通过 VFS 统一访问设备文件
+  \item 里程碑 E 集成测试
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：Unix 设备模型}
+\label{sec:devfs-concept}
+% ============================================================================
 
 % TODO:
-% - Unix 设备模型（字符设备 / 块设备）
-% - 主设备号 / 次设备号
-% - Linux cdev 注册机制
+% - Unix 设备文件：/dev/ 下的特殊文件，read/write 直接操作硬件
+% - 设备编号：
+%     主设备号（major）：标识驱动程序（如 1=mem, 4=tty, 5=serial）
+%     次设备号（minor）：标识驱动内的具体设备（如 serial0, serial1）
+% - 字符设备 vs 块设备（已在上章讨论）
+% - 本章只实现字符设备；块设备已在 blkdev_ops_t 中处理
+
+% ============================================================================
+\section{可插拔接口：\texttt{chardev\_ops\_t}}
+\label{sec:devfs-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct chardev_ops {
+%         const char* name;
+%         int (*open)(uint32_t minor);
+%         int (*read)(uint32_t minor, void* buf, size_t count);
+%         int (*write)(uint32_t minor, const void* buf, size_t count);
+%         int (*ioctl)(uint32_t minor, uint32_t cmd, void* arg);
+%         int (*close)(uint32_t minor);
+%     } chardev_ops_t;
+% - cdev 注册表：chardev_register(major, &ops)
+% - VFS 集成：当 inode.mode 为 S_IFCHR 时 → 通过 major 查找 chardev_ops
+% - 设备文件创建：devfs_mknod("/dev/null", S_IFCHR, MAJOR_MEM, MINOR_NULL)
+
+% ============================================================================
+\section{基础字符设备实现}
+\label{sec:devfs-devices}
+% ============================================================================
+
+% TODO:
+% - /dev/null (major=1, minor=3)：
+%     read: 总是返回 0（EOF）
+%     write: 丢弃所有数据，返回 count（成功）
+% - /dev/zero (major=1, minor=5)：
+%     read: 用 0 填充 buf，返回 count
+%     write: 同 /dev/null
+% - /dev/serial (major=5, minor=0)：
+%     read: 从 COM1 UART 读取（阻塞直到有数据）
+%     write: 写入 COM1 UART（现有 serial_write 封装）
+% - /dev/console (major=4, minor=0)：
+%     read: 从键盘环形缓冲区读取
+%     write: 输出到串口 + VGA（如有）
+
+% ============================================================================
+\section{验证}
+\label{sec:devfs-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：write("/dev/null", data, 100) → 返回 100，数据丢弃
+% - 测试 2：read("/dev/zero", buf, 4096) → buf 全为 0
+% - 测试 3：write("/dev/serial", "hello", 5) → 串口输出
+% - 里程碑 E 集成：open → read/write → stat → readdir → close 全路径
+% - shell 命令：fs test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+字符设备通过可插拔 \texttt{chardev\_ops\_t} 接口纳入 VFS ``一切皆文件''体系。
+至此里程碑 E（文件系统）全部完成：VFS 抽象层 + ramfs/initrd + ext2 磁盘 + 字符设备 四层递进。
+下一部分进入 POSIX 兼容层——信号、管道、mmap、libc 和用户态 Shell。

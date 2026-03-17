@@ -1,56 +1,186 @@
 % ============================================================================
 \chapter{进程管理}
 \label{ch:process}
-% Stage 13 — 待实现
+% Stage D-7 ~ D-8
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 设计进程控制块（PCB / \texttt{task\_struct}）
-  \item 每个进程拥有独立的页表和 VMA 树
-  \item 实现 \texttt{fork}（COW + VMA 复制）、\texttt{exec}、\texttt{waitpid}
+  \item 理解进程的本质：独立地址空间 + 执行上下文 + 资源集合
+  \item 设计进程控制块（PCB / \texttt{task\_struct}）数据结构
+  \item 实现 per-process 页目录与 VMA 树（内核共享、用户独立）
+  \item 实现进程状态机：CREATED → READY → RUNNING → BLOCKED → ZOMBIE
+  \item 实现 \texttt{fork}（COW + VMA 复制）、\texttt{exec}、\texttt{exit}、\texttt{waitpid}
+  \item 验证父子进程完整生命周期
 \end{itemize}
 
-\section{背景知识：进程抽象}
+% ============================================================================
+\section{概念：进程抽象}
+\label{sec:proc-concept}
+% ============================================================================
 
 % TODO:
-% - 进程 = 独立地址空间 + 执行上下文 + 资源集合
-% - PCB 记录进程所有状态：寄存器快照、页目录、VMA 列表、PID、状态
+% - 什么是进程：程序的运行实例
+%     程序 = 静态的代码和数据（磁盘上的 ELF 文件）
+%     进程 = 程序 + 运行时状态（寄存器、内存、打开的文件、PID…）
+% - 进程的三大核心组成：
+%     1. 地址空间：独立的页目录 → 进程间内存隔离
+%     2. 执行上下文：CPU 寄存器快照（EIP/ESP/EAX… + CR3）
+%     3. 资源集合：打开的文件描述符、信号处理器、PID、父子关系
+% - 图：进程抽象模型（地址空间 + 寄存器 + 资源 → PCB）
+% - 进程 vs 线程的区别（线程共享地址空间，进程独立）
+%   本阶段只实现进程，线程是后续扩展
 
-\section{PCB 数据结构}
+\subsection{进程状态机}
 
-% TODO: task_struct 各字段详解
-% pid, state, page_directory, vma_root, kernel_stack, regs, parent, children
+% TODO:
+% - 五状态模型图：
+%     CREATED → READY → RUNNING → BLOCKED → ZOMBIE
+%     RUNNING → READY（时间片用完 / 被抢占）
+%     RUNNING → BLOCKED（等待 I/O / waitpid）
+%     BLOCKED → READY（I/O 完成 / 子进程退出）
+%     RUNNING → ZOMBIE（exit 后等待父进程回收）
+% - 每个状态的含义与转换条件
+% - 图：状态转换图（带箭头和触发事件标注）
 
+\subsection{进程树与 PID}
+
+% TODO:
+% - Unix 进程树：init(PID=1) 是所有进程的祖先
+% - PID 分配策略（简单递增 / bitmap / 回绕）
+% - 父子关系：parent 指针 + children 链表
+% - 孤儿进程收养（reparent to init）
+
+% ============================================================================
+\section{PCB 数据结构：\texttt{task\_struct}}
+\label{sec:proc-pcb}
+% ============================================================================
+
+% TODO:
+% - task_struct 完整字段设计：
+%     uint32_t pid;                // 进程 ID
+%     uint32_t state;              // TASK_RUNNING / READY / BLOCKED / ZOMBIE
+%     uint32_t* page_directory;    // CR3 值（物理地址）
+%     uint32_t kernel_stack;       // 内核栈顶（TSS.ESP0 需要）
+%     registers_t regs;            // 上下文快照
+%     int exit_code;               // exit() 的返回值
+%     struct task_struct* parent;  // 父进程
+%     struct list_head children;   // 子进程链表
+%     struct list_head siblings;   // 兄弟链表（挂在 parent.children 上）
+%     struct list_head run_queue;  // 就绪队列链表节点
+% - 进程表：全局数组 task_table[MAX_PROCS] 或链表
+% - idle 进程（PID=0）：无进程可运行时执行 hlt
+
+% ============================================================================
 \section{进程地址空间}
+\label{sec:proc-address-space}
+% ============================================================================
 
 % TODO:
-% - 每个进程独立的页目录（内核部分共享，用户部分独立）
-% - VMA 树记录用户态内存区域
+% - 每个进程拥有独立的页目录（Page Directory）
+% - 内核部分共享：PD[768..1023] 直接复制内核页目录的对应条目
+%   [WHY] 中断/syscall 进入内核后，所有进程看到相同的内核空间
+% - 用户部分独立：PD[0..767] 每个进程独立映射
+% - 创建新进程地址空间的步骤：
+%     1. pmm_alloc_page() 分配新页目录
+%     2. 清零用户部分 PD[0..767]
+%     3. 复制内核部分 PD[768..1023]
 % - CR3 切换 = 地址空间切换
+%   [CPU STATE] 写入 CR3 后，TLB 全部刷新，CPU 开始用新页表翻译地址
+% - 图：两个进程的地址空间并排对比（用户部分不同，内核部分相同）
 
+% ============================================================================
 \section{fork：进程复制}
+\label{sec:proc-fork}
+% ============================================================================
 
 % TODO:
-% - 复制 PCB
-% - 复制 VMA 树
-% - COW (Copy-On-Write): 共享物理页、标记只读 → Page Fault 时再复制
-% - 返回值：父进程得到子 PID，子进程得到 0
+% - fork() 语义：创建当前进程的副本
+%     父进程返回子 PID（>0）
+%     子进程返回 0
+%     两者继续从 fork() 的下一条指令执行
+%
+% - fork 实现步骤：
+%     1. 分配新 PID
+%     2. 分配新 task_struct（从进程表）
+%     3. 复制父进程 PCB → 子进程
+%     4. 创建新页目录（复制内核部分）
+%     5. COW (Copy-On-Write) 处理用户页：
+%         a. 遍历父进程所有 VMA
+%         b. 对每个已映射的用户页：
+%            - 将父和子的 PTE 都标记为只读（去掉 PTE_WRITABLE）
+%            - 增加物理页的引用计数
+%         c. 复制 VMA 到子进程
+%     6. 设置子进程返回值（regs.eax = 0）
+%     7. 加入就绪队列
+%
+% - COW Page Fault 处理：
+%     当 fork 后的进程写一个 COW 页 → #PF（write to read-only）
+%     → PF handler 检查：如果该页 refcount > 1：
+%       1. 分配新物理页
+%       2. 复制旧页内容
+%       3. 映射新物理页（PTE_WRITABLE）
+%       4. 旧页 refcount--
+%     → 如果 refcount == 1：直接加回 PTE_WRITABLE
+%
+% - [WHY] COW 的意义：fork 后经常紧接 exec，避免无意义的全量复制
 
+% ============================================================================
 \section{exec：加载新程序}
+\label{sec:proc-exec}
+% ============================================================================
 
-% TODO: 清空用户地址空间 → ELF 加载 → 重设入口点
+% TODO:
+% - exec() 语义：用新程序替换当前进程的地址空间
+%     PID 不变、打开的文件不变（除非 CLOEXEC）
+%     代码/数据/栈全部替换
+%
+% - exec 实现步骤：
+%     1. 清空当前进程的所有用户 VMA
+%     2. 释放所有用户物理页
+%     3. 清空用户页表（PD[0..767] 对应的 PT 全部释放）
+%     4. 调用 loader_load() 加载新 ELF
+%     5. 分配新用户栈（固定位置如 0xBFFFF000）
+%     6. 设置入口点 regs.eip = e_entry
+%     7. 返回用户态（iret）
 
-\section{waitpid：等待子进程}
+% ============================================================================
+\section{exit + waitpid：进程终止与回收}
+\label{sec:proc-exit-wait}
+% ============================================================================
 
-% TODO: 阻塞/非阻塞等待、回收子进程资源
+% TODO:
+% - sys_exit(code)：
+%     1. 标记 state = ZOMBIE
+%     2. 保存 exit_code
+%     3. 释放用户地址空间（但保留 task_struct 供 waitpid 读取）
+%     4. 唤醒阻塞的父进程
+%     5. 收养子进程（reparent to init）
+%     6. 调用 schedule() 切走
+%
+% - sys_waitpid(pid, &status, options)：
+%     1. 查找匹配的子进程（pid=-1 表示任意子进程）
+%     2. 如果子进程已 ZOMBIE → 读取 exit_code → 释放 task_struct → 返回
+%     3. 如果子进程还在运行 → 阻塞自己 → schedule()
+%     4. 被唤醒后重新检查
 
+% ============================================================================
 \section{验证}
+\label{sec:proc-verify}
+% ============================================================================
 
-% TODO: fork → 子进程 exec 新程序 → 父进程 waitpid
+% TODO:
+% - 测试 1：fork → 父子各输出自己的 PID → 串口看到两组输出
+% - 测试 2：fork → 子进程 exec 新程序 → 父进程 waitpid → 打印退出码
+% - 测试 3：COW 验证 → fork 后写变量 → 父子看到不同值 → #PF 触发复制
+% - 测试 4：多次 fork → 多个子进程 → waitpid 逐个回收
+% - shell 命令：proc list / proc test
 
+% ============================================================================
 \section{本章小结}
+% ============================================================================
 
-进程管理让内核能同时运行多个独立程序。下一章实现调度器，
-让这些进程分时共享 CPU。
+进程管理让内核能同时承载多个独立程序。每个进程拥有独立的 PCB、页目录和 VMA 树。
+\texttt{fork}（COW）、\texttt{exec}、\texttt{exit}、\texttt{waitpid} 四件套
+构成了 Unix 进程模型的核心。下一章实现调度器，让这些进程分时共享 CPU。

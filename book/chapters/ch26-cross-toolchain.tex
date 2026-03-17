@@ -1,21 +1,83 @@
 % ============================================================================
 \chapter{交叉编译工具链}
 \label{ch:cross-toolchain}
-% 里程碑 G-1 — 待实现
+% Stage G-1 ~ G-2
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 在宿主机上构建 \texttt{i686-szy-gcc} 交叉编译器
-  \item 构建配套的 binutils（\texttt{as}、\texttt{ld}、\texttt{objdump}）
+  \item 理解交叉编译原理与 GCC 构建三元组（build / host / target）
+  \item 定义 \texttt{i686-szy} 目标平台（OS target triplet）
+  \item 在宿主机上构建 \texttt{i686-szy-gcc} + binutils 交叉编译器
   \item 配置 sysroot，使交叉编译器能找到 SZY-KERNEL 的头文件和 libc
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：交叉编译}
+\label{sec:cross-concept}
+% ============================================================================
 
 % TODO:
-% - 什么是交叉编译（cross-compilation）
-% - GCC 构建三元组（build / host / target）
-% - sysroot 与头文件安装
-% - 构建步骤：binutils → GCC（bootstrap） → libc → GCC（完整）
+% - 交叉编译 = 在一个平台（build/host）上编译另一个平台（target）的代码
+%     本地编译：x86_64-linux → x86_64-linux（编译自己能运行的）
+%     交叉编译：x86_64-linux → i686-szy（在 Linux 上编译 SZY-KERNEL 能运行的）
+% - GCC 构建三元组：
+%     build：运行编译过程的机器
+%     host：编译出来的 GCC 在哪运行
+%     target：GCC 生成的代码在哪运行
+% - 三种场景：
+%     本地（build=host=target）：普通 gcc
+%     交叉（build=host≠target）：i686-szy-gcc
+%     Canadian（build≠host, host≠target）：在 Linux 上编译 Windows→ARM 的 GCC
+% - sysroot 机制：--sysroot=/path → 头文件从 sysroot/usr/include/ 查找
+
+% ============================================================================
+\section{定义 i686-szy 目标}
+\label{sec:cross-target}
+% ============================================================================
+
+% TODO:
+% - config.sub / config.guess 中添加 *-szy* 识别
+% - 目标三元组：i686-szy（或 i686-pc-szy）
+% - sysroot 目录结构：
+%     sysroot/
+%     ├── usr/include/    → SZY-KERNEL 暴露的用户态头文件（syscall_nr.h, stdio.h, ...）
+%     └── usr/lib/        → libc.a, crt0.o, libgcc.a
+
+% ============================================================================
+\section{构建步骤}
+\label{sec:cross-build}
+% ============================================================================
+
+% TODO:
+% - 第一步：构建 binutils（as, ld, objdump, ar, ...）
+%     ./configure --target=i686-szy --prefix=$TOOLCHAIN --with-sysroot=$SYSROOT
+%     make && make install
+% - 第二步：GCC bootstrap（仅 C 编译器，无 libc 头文件）
+%     ./configure --target=i686-szy --prefix=$TOOLCHAIN --without-headers \
+%                 --enable-languages=c --disable-shared --disable-threads
+%     make all-gcc all-target-libgcc && make install-gcc install-target-libgcc
+% - 第三步：安装 libc 头文件到 sysroot
+%     cp include/*.h $SYSROOT/usr/include/
+% - 第四步：构建精简 libc → libc.a + crt0.o → 安装到 sysroot
+% - 第五步：GCC 完整构建（有头文件 + libc，能编译完整 C 程序）
+%     重新 configure（有 --with-sysroot）→ make → install
+
+% ============================================================================
+\section{验证}
+\label{sec:cross-verify}
+% ============================================================================
+
+% TODO:
+% - i686-szy-gcc -o hello hello.c → 生成 ELF32 i386 可执行文件
+% - file hello → "ELF 32-bit LSB executable, Intel 80386"
+% - 加载到 QEMU SZY-KERNEL → exec("/hello") → 串口输出 "Hello from SZY!"
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+交叉编译工具链是移植 GCC 和 Vim 的前提。\texttt{i686-szy-gcc} 让我们能在宿主机上
+编译 SZY-KERNEL 的用户态程序。下一章实现终端子系统（termios + PTY），
+为 Vim 等交互式程序提供终端环境。

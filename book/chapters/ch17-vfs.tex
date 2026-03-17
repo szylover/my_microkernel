@@ -1,44 +1,110 @@
 % ============================================================================
 \chapter{VFS：虚拟文件系统}
 \label{ch:vfs}
-% Stage 15 — 待实现
+% Stage E-1 ~ E-3
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 设计 VFS 抽象层：统一 \texttt{open}/\texttt{read}/\texttt{write}/\texttt{close} 接口
-  \item 实现文件描述符表（per-process fd table）
-  \item 为后续具体文件系统（ramfs、FAT32）提供挂载框架
+  \item 理解 Unix ``一切皆文件'' 哲学与 VFS 的意义
+  \item 设计可插拔 \texttt{fs\_ops\_t} 接口，解耦文件系统实现
+  \item 实现 VFS dispatch 层（superblock/inode/dentry/file 四大对象）
+  \item 实现 per-process 文件描述符表（fd table）
+  \item 集成系统调用：\texttt{sys\_open}/\texttt{sys\_read}/\texttt{sys\_write}/\texttt{sys\_close}/\texttt{sys\_stat}
 \end{itemize}
 
-\section{背景知识：为什么需要 VFS}
+% ============================================================================
+\section{概念：为什么需要 VFS}
+\label{sec:vfs-concept}
+% ============================================================================
 
 % TODO:
 % - Unix 哲学："一切皆文件"
-% - 不同文件系统（ext2, FAT, procfs）共享相同 API
-% - Linux VFS 四大对象: superblock, inode, dentry, file
+%     磁盘文件、设备、管道、socket 都通过 open/read/write/close 统一访问
+% - 问题：不同文件系统（ext2, FAT32, ramfs, procfs）内部结构完全不同
+%     如何让用户程序用相同的 API 访问所有文件系统？
+% - 答案：VFS（Virtual File System）抽象层
+%     → 与 pmm_ops_t / heap_ops_t 相同的可插拔思想，只是粒度更大
+% - Linux VFS 四大核心对象：
+%     1. superblock：描述一个已挂载文件系统的元数据
+%     2. inode：描述一个文件/目录（权限、大小、数据块位置）
+%     3. dentry：目录项缓存（路径名 → inode 的映射）
+%     4. file：一次打开操作的实例（inode + 当前偏移量）
+% - 图：VFS 层次图（用户 → syscall → VFS dispatch → 具体 FS 后端）
+% - 我们简化 Linux VFS：精简 superblock + inode + file，dentry 用路径查找替代
 
-\section{VFS 数据结构}
+\subsection{文件描述符}
 
 % TODO:
-% - vfs_ops_t: mount/open/read/write/close/stat/readdir
-% - vnode (inode 简化版)
-% - file descriptor → vnode + offset
+% - fd = 整数索引，per-process，指向内核 file 结构
+% - fd 0 = stdin, fd 1 = stdout, fd 2 = stderr（Unix 约定）
+% - fd_table[MAX_FD]：数组，每项指向 struct file（含 inode + offset + flags）
+% - open() 返回最小可用 fd，close() 释放
+% - fork() 时复制 fd_table（共享 file 对象 → 共享 offset）
 
-\section{文件描述符表}
+% ============================================================================
+\section{可插拔接口：\texttt{fs\_ops\_t}}
+\label{sec:vfs-interface}
+% ============================================================================
 
-% TODO: 每个进程 fd_table[MAX_FD]，fd 0/1/2 = stdin/stdout/stderr
+% TODO:
+% - 接口设计（与 pmm_ops_t 同一模式）：
+%     typedef struct fs_ops {
+%         const char* name;                      // "ramfs", "ext2"
+%         int (*mount)(struct superblock* sb);    // 挂载（读取元数据）
+%         int (*open)(struct inode* dir, const char* name, struct file* f);
+%         int (*read)(struct file* f, void* buf, size_t count);
+%         int (*write)(struct file* f, const void* buf, size_t count);
+%         int (*close)(struct file* f);
+%         int (*stat)(struct inode* inode, struct stat* st);
+%         int (*readdir)(struct inode* dir, struct dirent* entries, size_t max);
+%     } fs_ops_t;
+% - dispatch 层：vfs.c 通过 superblock->fs_ops 转发
+% - 注册机制：vfs_register_fs("ramfs", ramfs_get_ops())
+% - 挂载机制：vfs_mount("/", "ramfs", ...) → 创建 superblock → 调 fs_ops->mount()
+% - 路径解析：vfs_lookup("/usr/bin/hello") → 逐级 readdir 查找
 
+% ============================================================================
+\section{核心数据结构}
+\label{sec:vfs-structs}
+% ============================================================================
+
+% TODO:
+% - struct superblock { fs_ops_t* ops; void* private; ... }
+% - struct inode { uint32_t ino; uint32_t size; uint32_t mode; superblock* sb; ... }
+% - struct file { inode* inode; uint32_t offset; uint32_t flags; ... }
+% - struct dirent { uint32_t ino; char name[MAX_NAME]; uint8_t type; }
+% - struct stat { uint32_t size; uint32_t mode; ... }（精简版）
+
+% ============================================================================
 \section{系统调用集成}
+\label{sec:vfs-syscall}
+% ============================================================================
 
-% TODO: sys_open, sys_read, sys_write, sys_close 通过 VFS 分发
+% TODO:
+% - sys_open(path, flags) → vfs_lookup(path) → fs_ops->open() → 分配 fd
+% - sys_read(fd, buf, count) → fd_table[fd]->inode->sb->ops->read()
+% - sys_write(fd, buf, count) → 同理
+% - sys_close(fd) → fs_ops->close() → 释放 fd
+% - sys_stat(path, &st) → vfs_lookup → fs_ops->stat()
+% - 安全检查：buf 指针在用户空间内、fd 有效、权限检查
 
+% ============================================================================
 \section{验证}
+\label{sec:vfs-verify}
+% ============================================================================
 
-% TODO: open("/dev/serial") → write → 串口输出
+% TODO:
+% - 测试 1：open("/dev/serial") → write("hello") → 串口输出
+% - 测试 2：fd 分配/释放（open × 3 → close 中间 → open 复用最小 fd）
+% - 测试 3：stat 返回正确的文件大小
+% - shell 命令：vfs test
 
+% ============================================================================
 \section{本章小结}
+% ============================================================================
 
-VFS 是文件系统的"可插拔接口"。下一章实现第一个具体文件系统 ramfs，
-让用户程序能读取打包在内核镜像中的文件。
+VFS 通过可插拔 \texttt{fs\_ops\_t} 接口，让不同文件系统共享统一的
+\texttt{open}/\texttt{read}/\texttt{write}/\texttt{close} API。
+下一章实现第一个具体文件系统后端——ramfs，让用户程序能读取打包在内核镜像中的文件。

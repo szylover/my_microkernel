@@ -1,22 +1,102 @@
 % ============================================================================
 \chapter{用户态 Shell}
 \label{ch:user-shell}
-% 里程碑 F-5 — 待实现
+% Stage F-10 ~ F-12
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现用户态 \texttt{/bin/sh}（替代内核内置 shell）
+  \item 理解用户态 shell 与内核内置 shell 的本质区别
+  \item 实现用户态 \texttt{/bin/sh}（\texttt{fork+exec} 命令执行模型）
   \item 支持环境变量、\texttt{PATH} 查找、命令行解析
-  \item 支持 job control：前台/后台进程、\texttt{Ctrl+C} 中断
-  \item 集成管道和重定向
+  \item 支持 job control：前台/后台进程、\texttt{Ctrl+C}/\texttt{Ctrl+Z} 信号转发
+  \item 集成管道 \texttt{|} 和重定向 \texttt{>}
+  \item 里程碑 F 集成测试
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：用户态 Shell}
+\label{sec:ush-concept}
+% ============================================================================
 
 % TODO:
-% - 用户态 shell 与内核 shell 的区别
-% - fork + exec 执行外部命令
-% - 进程组与会话
-% - job control 基础
+% - 内核 shell（当前阶段）vs 用户态 shell（目标）：
+%     内核 shell：运行在 Ring 0，直接调用内核函数，不需要 syscall
+%     用户态 shell：运行在 Ring 3，和普通程序一样通过 syscall 访问内核
+%     为什么要切换：安全隔离 + 用户可替换 + 真正的 Unix 风格
+% - Shell 的核心循环：
+%     while (1) {
+%         print_prompt();
+%         read_line(cmd);
+%         tokens = tokenize(cmd);
+%         if (builtin(tokens)) execute_builtin();
+%         else { pid = fork(); if (pid==0) exec(tokens[0], tokens); else wait(); }
+%     }
+% - 进程组 (Process Group)：
+%     一条管道的所有进程属于同一个进程组
+%     Shell 把前台进程组设为终端的 foreground pgrp
+% - 会话 (Session)：
+%     login → 创建新 session → shell 是 session leader
+
+% ============================================================================
+\section{命令行解析}
+\label{sec:ush-parser}
+% ============================================================================
+
+% TODO:
+% - Tokenizer：按空格/引号分割，识别特殊 token（|, >, <, >>, &, ;）
+% - 内置命令（不 fork，直接在 shell 进程中执行）：
+%     cd：chdir() 改变当前目录
+%     export：设置环境变量
+%     exit：退出 shell
+%     jobs：列出后台进程
+% - 外部命令执行：
+%     1. 在 PATH 中查找可执行文件
+%     2. fork() → 子进程 exec(path, argv)
+%     3. 父进程 waitpid（前台）或记录 job（后台 &）
+
+% ============================================================================
+\section{环境变量与 PATH}
+\label{sec:ush-env}
+% ============================================================================
+
+% TODO:
+% - envp：exec 继承的环境变量（key=value 字符串数组）
+% - PATH 查找：遍历 PATH 各目录 → stat(dir/cmd) → 找到则 exec
+% - export VAR=value：修改 envp 数组
+% - 特殊变量：HOME, PATH, PWD, PS1
+
+% ============================================================================
+\section{Job Control}
+\label{sec:ush-job}
+% ============================================================================
+
+% TODO:
+% - 前台进程组：shell 调 tcsetpgrp(fd, pgrp) 让终端将 SIGINT/SIGTSTP 发给前台组
+% - Ctrl+C → SIGINT → 前台进程组所有进程被终止
+% - Ctrl+Z → SIGTSTP → 前台进程组暂停 → shell 获得控制权
+% - bg：让暂停的 job 在后台继续运行（发 SIGCONT）
+% - fg：将后台 job 拉到前台
+
+% ============================================================================
+\section{验证}
+\label{sec:ush-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：/bin/sh 启动 → 显示提示符 → 输入 echo hello → 输出 hello
+% - 测试 2：ls | grep foo → 管道正常工作
+% - 测试 3：echo data > /tmp/file → cat /tmp/file → 重定向正确
+% - 测试 4：Ctrl+C 终止前台进程 → shell 不退出
+% - 测试 5：sleep 100 & → jobs → kill %1 → 后台 job 管理
+% - 里程碑 F 集成测试：信号 + 管道 + mmap + libc + sh 全路径
+% - shell 命令：posix test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+用户态 Shell 替代了内核内置 shell，成为用户与操作系统交互的真正入口。
+\texttt{fork+exec} 命令执行模型、环境变量、PATH 查找、job control 构成了完整的交互体验。
+至此里程碑 F（POSIX 兼容层）全部完成。下一部分搭建交叉编译工具链，向移植 GCC 与 Vim 进发。

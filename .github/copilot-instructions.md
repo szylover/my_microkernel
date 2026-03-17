@@ -102,16 +102,28 @@ my_microkernel/
 │   │   ├── ch02-boot.tex          #     → \input{ch02-boot/sec*.tex}
 │   │   ├── ch02-boot/             #       per-section 子文件
 │   │   ├── …                      #     ch03–ch11 同理
-│   │   ├── ch12-tss-ring3.tex     #     Part 3 进程与用户态（ch12–ch16 占位）
-│   │   ├── …
-│   │   ├── ch17-vfs.tex           #     Part 4 文件系统（ch17–ch20 占位）
-│   │   ├── …
-│   │   ├── ch21-signals.tex       #     Part 5 POSIX 兼容层（ch21–ch25 占位）
-│   │   ├── …
-│   │   ├── ch26-cross-toolchain.tex #   Part 6 移植 GCC 与 Vim（ch26–ch29 占位）
-│   │   ├── …
-│   │   ├── ch30-nic-driver.tex    #     Part 7 网络（ch30–ch33 占位）
-│   │   └── …
+│   │   ├── ch12-tss-ring3.tex     #     Part 3 进程与用户态
+│   │   ├── ch13-syscall.tex       #       系统调用（syscall_ops_t 可插拔）
+│   │   ├── ch14-elf-loader.tex    #       ELF 加载器（loader_ops_t 可插拔）
+│   │   ├── ch15-process.tex       #       进程管理（PCB/fork/exec/waitpid）
+│   │   ├── ch16-scheduler.tex     #       调度器（sched_ops_t 可插拔）
+│   │   ├── ch17-vfs.tex           #     Part 4 文件系统（fs_ops_t 可插拔）
+│   │   ├── ch18-ramfs.tex         #       ramfs + initrd
+│   │   ├── ch19-diskfs.tex        #       块设备（blkdev_ops_t）+ ext2
+│   │   ├── ch20-devfs.tex         #       字符设备（chardev_ops_t）
+│   │   ├── ch21-signals.tex       #     Part 5 POSIX 兼容层
+│   │   ├── ch22-pipe.tex          #       管道（ipc_ops_t 可插拔）+ 重定向
+│   │   ├── ch23-mmap.tex          #       mmap + VMA 集成
+│   │   ├── ch24-libc.tex          #       精简 libc
+│   │   ├── ch25-user-shell.tex    #       用户态 /bin/sh
+│   │   ├── ch26-cross-toolchain.tex #   Part 6 移植 GCC 与 Vim
+│   │   ├── ch27-terminal.tex      #       终端子系统（tty_ops_t 可插拔）
+│   │   ├── ch28-port-gcc.tex      #       移植 GCC
+│   │   ├── ch29-port-vim.tex      #       移植 Vim
+│   │   ├── ch30-nic-driver.tex    #     Part 7 网络（netdev_ops_t 可插拔）
+│   │   ├── ch31-tcpip.tex         #       TCP/IP（proto_ops_t 可插拔）
+│   │   ├── ch32-socket.tex        #       Socket API（socket_ops_t 可插拔）
+│   │   └── ch33-net-tools.tex     #       ping + wget
 │   └── figures/                   #   图片资源
 ├── docs/                          # 项目文档（面向人类）
 │   ├── changelog.md               #   变更日志

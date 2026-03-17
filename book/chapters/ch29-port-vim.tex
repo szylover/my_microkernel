@@ -1,20 +1,63 @@
 % ============================================================================
 \chapter{移植 Vim}
 \label{ch:port-vim}
-% 里程碑 G-4 — 待实现
+% Stage G-8 ~ G-9
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 让 Vim 能在 SZY-KERNEL 上运行
-  \item 满足 Vim 的依赖：termios、PTY、libc、文件系统
-  \item 验证：打开文件、编辑、保存、退出的完整流程
+  \item 分析 Vim 运行时依赖（termios / PTY / libc / 文件系统 / 信号 / mmap）
+  \item 确定最小功能集编译选项（\texttt{--with-features=tiny}）
+  \item 在 SZY-KERNEL 上编译并运行 Vim
+  \item 验证完整流程：\texttt{vim test.c} → 编辑 → \texttt{:wq} → 文件保存成功
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：Vim 依赖分析}
+\label{sec:vim-deps}
+% ============================================================================
 
 % TODO:
-% - Vim 的运行时依赖分析
-% - ncurses / terminfo 的角色
-% - 移植策略：先 tiny 配置，逐步开启功能
+% - Vim 运行时依赖清单：
+%     终端：termios（raw 模式 + 回显控制）、PTY（可选）
+%     转义序列：VT100 光标控制、颜色、清屏
+%     libc：stdio, stdlib, string, ctype, signal, setjmp, regex
+%     文件系统：open/read/write/close/stat/mkdir/unlink
+%     内存：mmap（可选，用于大文件）、malloc/free
+%     信号：SIGWINCH（窗口大小变化）、SIGINT、SIGTERM
+% - ncurses / terminfo 的角色：
+%     Vim 通过 terminfo 查询终端能力（颜色数、光标控制序列）
+%     可以用 --with-tlib=curses 或自带精简版
+% - 最小配置：--with-features=tiny 禁用多窗口、语法高亮、脚本引擎
+
+% ============================================================================
+\section{移植步骤}
+\label{sec:vim-port}
+% ============================================================================
+
+% TODO:
+% - 1. 用 i686-szy-gcc Canadian cross 编译 Vim
+% - 2. configure 补丁：识别 szy OS、禁用不支持的功能检测
+% - 3. 精简 terminfo：只提供 VT100 基础描述
+% - 4. 打包 vim 二进制 + 最小 runtime 到 initrd/磁盘
+% - 5. 在 SZY-KERNEL 上运行 vim
+
+% ============================================================================
+\section{验证}
+\label{sec:vim-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：vim → 启动 → 显示欢迎屏幕（VT100 渲染正确）
+% - 测试 2：i → 输入文本 → Esc → :w test.txt → 文件保存成功
+% - 测试 3：vim test.txt → 看到之前保存的内容 → :q 退出
+% - 测试 4：方向键/hjkl 移动光标正常
+% - 终极验证：用 Vim 编辑 hello.c → 用 GCC 编译 → 运行成功
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+在 SZY-KERNEL 上运行 Vim 标志着里程碑 G 完成——OS 既能编译程序（GCC），又能编辑代码（Vim）。
+下一部分进入网络——实现网卡驱动、TCP/IP 协议栈和 Socket API，让 OS 连接外部世界。
