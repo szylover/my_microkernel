@@ -5,6 +5,7 @@
 /* arch: CPU 初始化 */
 #include "gdt.h"
 #include "idt.h"
+#include "tss.h"
 #include "pic.h"
 
 /* core: 内存管理 */
@@ -144,6 +145,15 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
 
     idt_init();
     printk("[init] idt ok\n");
+
+    /*
+     * TSS 初始化（必须在 GDT 和 IDT 之后）
+     *
+     * [WHY] TSS 依赖 GDT（需要在 GDT[5] 写入 TSS 描述符）。
+     *   IDT 必须已安装，这样 Ring 3 触发异常时能正确分发。
+     *   初始化后 CPU 就具备了 Ring 3 → Ring 0 的切换能力。
+     */
+    tss_init();
 
     printk("[mb2] magic=%08x\n", mb2_magic);
 

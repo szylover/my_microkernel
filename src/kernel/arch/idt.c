@@ -127,6 +127,14 @@ typedef struct regs {
     uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax;
     uint32_t int_no, err_code;
     uint32_t eip, cs, eflags;
+    /*
+     * [CPU STATE] 跨特权级中断时（Ring 3 → Ring 0）：
+     *   CPU 额外压入 user_esp 和 user_ss（在 eflags 之上）。
+     *   这两个字段在同特权级中断时**不存在**于栈上，
+     *   但结构体里声明了也无害——同特权级时不会读到这里。
+     *   通过 CS.RPL (cs & 0x3) 判断是否来自 Ring 3。
+     */
+    uint32_t user_esp, user_ss;
 } regs_t;
 
 static const char* exception_name(uint32_t v) {
@@ -277,6 +285,19 @@ void isr_handler_c(const regs_t* r) {
         r->err_code,
         r->eip
     );
+
+    /*
+     * 检测异常是否来自 Ring 3（用户态）
+     *
+     * [WHY] CS 的低 2 位 = RPL = 异常发生时的 CPL。
+     *   如果 CS.RPL=3，说明异常来自用户态代码。
+     *   此时 CPU 自动压入了 user_esp/user_ss（跨特权级帧）。
+     */
+    if ((r->cs & 0x3) == 3) {
+        printk("[isr] Fault from Ring 3 (user mode)\n");
+        printk("[isr] User CS=0x%04x  SS=0x%04x  ESP=0x%08x\n",
+               r->cs, r->user_ss, r->user_esp);
+    }
 
     /*
      * 对 breakpoint（int3）我们允许返回，这样可以用它做"自检"。

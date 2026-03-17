@@ -223,6 +223,21 @@ int vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags) {
     }
 
     /*
+     * [WHY] PDE 的 U/S 位也需要匹配
+     *
+     * x86 两级页表的权限检查是"与"逻辑：
+     *   用户态访问一个页 → 需要 PDE.U/S=1 AND PTE.U/S=1
+     *   如果 PDE.U/S=0，即使 PTE.U/S=1，用户态也会触发 #PF
+     *
+     * vmm_ensure_page_table() 创建新 PDE 时只设了 PRESENT|WRITABLE，
+     * 没有 USER。这里补上：当 flags 包含 PTE_USER 时，PDE 也加上 PDE_USER。
+     * 用 |= 追加（不覆盖已有标志），不影响同一页表下的内核映射。
+     */
+    if (flags & PTE_USER) {
+        g_kernel_pd.entries[pdi] |= PDE_USER;
+    }
+
+    /*
      * 写入 PTE：高 20 位 = phys 的页帧地址，低位 = flags
      *
      * [BITFIELDS] 常见组合：
