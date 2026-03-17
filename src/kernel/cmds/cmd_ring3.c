@@ -35,17 +35,18 @@
 #define USER_STACK_TOP   (USER_STACK_VADDR + VMM_PAGE_SIZE)
 
 /*
- * 用户态测试代码（机器码）
+ * 用户态测试代码（在 user_test_code.asm 中用汇编指令定义）
  *
- * 机器码等价汇编：
- *   0xF4  ; hlt — Ring 3 执行此指令会触发 #GP
- *   0xEB  ; jmp rel8
- *   0xFE  ; -2 (infinite loop fallback, 不应到达)
+ * [WHY] 用真正的汇编而非手写机器码，可读性更好：
+ *   user_panic_start:
+ *       hlt           ; Ring 3 执行此指令 → #GP
+ *       jmp $         ; 安全网
+ *   user_panic_end:
+ *
+ * C 通过 extern 引用这两个标签，计算大小并复制到用户地址空间。
  */
-static const uint8_t user_test_code[] = {
-    0xF4,             /* hlt — Ring 3 执行此指令触发 #GP */
-    0xEB, 0xFE        /* jmp $ — 无穷循环（安全网） */
-};
+extern const uint8_t user_panic_start[];
+extern const uint8_t user_panic_end[];
 
 static void kmemcpy(void* dst, const void* src, uint32_t n) {
     uint8_t* d = (uint8_t*)dst;
@@ -95,10 +96,10 @@ static int ring3_panic(void) {
     printk("[ring3] stack page: virt=0x%08x phys=0x%08x (top=0x%08x)\n",
            USER_STACK_VADDR, stack_phys, USER_STACK_TOP);
 
-    /* 3. 将测试机器码复制到用户代码页 */
-    kmemcpy((void*)USER_CODE_VADDR, user_test_code, sizeof(user_test_code));
-    printk("[ring3] test code copied (%u bytes): HLT instruction\n",
-           (unsigned)sizeof(user_test_code));
+    /* 3. 将测试汇编代码复制到用户代码页 */
+    uint32_t code_size = (uint32_t)(user_panic_end - user_panic_start);
+    kmemcpy((void*)USER_CODE_VADDR, user_panic_start, code_size);
+    printk("[ring3] test code copied (%u bytes): HLT instruction\n", code_size);
 
     /* 4. 注册 VMA 区域（供 Page Fault handler 诊断） */
     if (vma_is_ready()) {
