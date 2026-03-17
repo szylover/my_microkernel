@@ -58,7 +58,12 @@ typedef struct __attribute__((packed)) {
  * bit 4: AVL(Available) 给软件自用
  */
 
-static gdt_entry_t gdt[3];
+/*
+ * GDT 条目数量：
+ *   [0] null  [1] kernel code  [2] kernel data
+ *   [3] user code  [4] user data  [5] TSS
+ */
+static gdt_entry_t gdt[6];
 static gdtr_t gdtr;
 
 /* 汇编实现：lgdt + far jump 刷新 CS + reload DS/SS/... */
@@ -113,6 +118,51 @@ void gdt_init(void) {
     );
 
     /*
+     * descriptor 3：用户代码段  (selector = 0x18, 加上 RPL=3 → 0x1B)
+     *
+     * [WHY] Ring 3 代码需要运行在 DPL=3 的段中。
+     *   与内核代码段的唯一区别：
+     *   access 中 DPL 从 0 改为 3 (bits 6-5 = 11b)
+     *
+     * [BITFIELDS] access = 0xFA = 11111010b
+     *   P=1      描述符有效
+     *   DPL=3    用户态特权级
+     *   S=1      代码/数据段（非系统段）
+     *   Type=1010  可执行 + 可读
+     */
+    gdt_set_entry(
+        3,
+        0x00000000,
+        0x000FFFFF,
+        0xFA, /* access: present, ring3, code, readable */
+        0xC0  /* flags: G=1, D/B=1 (32-bit) */
+    );
+
+    /*
+     * descriptor 4：用户数据段  (selector = 0x20, 加上 RPL=3 → 0x23)
+     *
+     * [WHY] Ring 3 代码的 DS/SS/ES 需要用 DPL=3 的数据段。
+     *   与内核数据段的唯一区别：DPL = 3
+     *
+     * [BITFIELDS] access = 0xF2 = 11110010b
+     *   P=1, DPL=3, S=1, Type=0010 (data, writable)
+     */
+    gdt_set_entry(
+        4,
+        0x00000000,
+        0x000FFFFF,
+        0xF2, /* access: present, ring3, data, writable */
+        0xC0
+    );
+
+    /*
+     * descriptor 5：TSS 占位
+     * 此处先设为空，tss_init() 会通过 gdt_set_tss_entry() 填写
+     * 实际的 base（TSS 结构体地址）和 limit（sizeof(tss)-1）。
+     */
+    gdt_set_entry(5, 0, 0, 0, 0);
+
+    /*
      * GDTR（lgdt 指令的操作数）:
      * - limit = sizeof(GDT) - 1
      * - base  = GDT 的线性地址
@@ -127,4 +177,33 @@ void gdt_init(void) {
      * 3) 必须重新加载 DS/ES/SS/FS/GS，才能让它们的 hidden cache 指向新描述符。
      */
     gdt_flush(&gdtr);
+}
+
+/*
+ * gdt_set_tss_entry — 在 GDT[5] 写入 TSS 描述符
+ *
+ * [WHY] TSS 描述符是"系统段"描述符（S=0），和代码/数据段（S=1）格式不同。
+ *   type = 0x89 表示 "32-bit TSS (Available)"
+ *
+ * [BITFIELDS] TSS 描述符 access 字节：
+ *   bit 7   : P=1       (描述符有效)
+ *   bit 6-5 : DPL=0     (只有内核能 ltr)
+ *   bit 4   : S=0       (系统段，非代码/数据)
+ *   bit 3-0 : type=1001 (32-bit TSS Available)
+ *   合并: 0x89 = 10001001b
+ *
+ * [BITFIELDS] flags 字节（gran 高 4 位）：
+ *   G=0   (粒度为字节，TSS limit 通常 < 4KiB)
+ *   D/B=0 (TSS 描述符中无意义)
+ *   L=0, AVL=0
+ *   合并: 0x00
+ */
+void gdt_set_tss_entry(uint32_t base, uint32_t limit) {
+    gdt_set_entry(
+        5,
+        base,
+        limit,
+        0x89, /* access: P=1, DPL=0, S=0, type=1001 (32-bit TSS Available) */
+        0x00  /* flags: G=0, D/B=0 */
+    );
 }

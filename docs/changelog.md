@@ -1,4 +1,20 @@
 
+## 2026-03-17 (Stage D-1: TSS + Ring 3)
+- 新增 `src/include/arch/tss.h`：TSS 结构体定义（104 字节）+ 段选择子枚举 (`SEL_USER_CODE=0x1B` / `SEL_USER_DATA=0x23` / `SEL_TSS=0x28`) + API 声明 (`tss_init` / `tss_set_kernel_stack` / `jump_to_ring3`)。
+- 新增 `src/kernel/arch/tss.c`：TSS 初始化（清零 + SS0:ESP0 + iomap_base + GDT[5] TSS 描述符 + `ltr` 加载）；`tss_set_kernel_stack()` 为将来进程切换预留。
+- 新增 `src/kernel/arch/tss_flush.asm`：`jump_to_ring3` 汇编实现（切换 DS/ES/FS/GS → 构造 iret 帧 → `iret` 到 Ring 3）。
+- 新增 `src/kernel/cmds/cmd_ring3.c`：`ring3 panic` shell 命令（分配用户代码页+栈页、复制 HLT 指令、iret 跳转 Ring 3、触发 #GP）。
+- `src/include/arch/gdt.h`：新增 `GDT_USER_CODE_SEL` (0x1B) / `GDT_USER_DATA_SEL` (0x23) / `GDT_TSS_SEL` (0x28) 选择子枚举 + `gdt_set_tss_entry()` 声明。
+- `src/kernel/arch/gdt.c`：GDT 从 3 项扩展到 6 项（新增 User Code DPL=3 / User Data DPL=3 / TSS 占位）+ `gdt_set_tss_entry()` 实现（type=0x89, DPL=0）。
+- `src/kernel/arch/idt.c`：`regs_t` 新增 `user_esp`/`user_ss` 字段（跨特权级中断帧）+ ISR 检测 Ring 3 异常并打印用户态 CS/SS/ESP。
+- `src/kernel/mm/vmm.c`：`vmm_map_page()` 新增 PDE_USER 标志传播（修复两级页表"与"逻辑——PDE.US 和 PTE.US 同时=1 才允许用户态访问）。
+- `src/kernel/core/kmain.c`：添加 `tss_init()` 调用（在 gdt_init + idt_init 之后）。
+- `src/kernel/core/shell.c`：注册 `ring3` 命令。
+- `src/boot/boot.asm`：导出 `stack_top` 符号供 TSS 引用内核栈顶。
+- `book/chapters/ch12-tss-ring3.tex`：完整章节（9 个 section）——特权级模型 / TSS 结构 / GDT 扩展 / TSS 初始化 / iret 跳转 / PDE_USER 传播 / 验证 / 练习。
+- 新增 `book/figures/ch12/` 4 张 TikZ 图（保护环、TSS 布局、GDT 扩展、iret 帧）。
+- 验证通过：`ring3 panic` 触发 #GP，ISR 报告 Ring 3 来源 (CS=0x1B, SS=0x23)；所有已有测试 (pmm/heap/vma) 回归通过。
+
 ## 2026-03-17 (Roadmap D–H refactor + book chapters restructure)
 - `docs/roadmap.md`：里程碑 D–H 从 20 个粗粒度 stage 细化为 55 个递进 stage，统一"概念→可插拔接口→多后端实现"模式。新增 11 个可插拔接口设计（`syscall_ops_t`/`loader_ops_t`/`sched_ops_t`/`fs_ops_t`/`blkdev_ops_t`/`chardev_ops_t`/`ipc_ops_t`/`tty_ops_t`/`netdev_ops_t`/`proto_ops_t`/`socket_ops_t`），每个里程碑按 α/β/γ/δ/ε/ζ 子阶段分组。
 - `book/chapters/ch13-syscall.tex`（原 ch13-elf-loader.tex）：系统调用章节调整为 ch13（先于 ELF），新增 `syscall_ops_t` 可插拔接口 + int 0x80/sysenter 双后端结构。

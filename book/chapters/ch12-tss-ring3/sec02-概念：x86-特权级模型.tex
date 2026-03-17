@@ -1,0 +1,109 @@
+% ============================================================================
+\section{概念：x86 特权级模型}
+\label{sec:tss-privilege}
+% ============================================================================
+
+x86 保护模式提供 4 级保护环（Ring 0 -- Ring 3），实现硬件级别的权限隔离。
+实际上大多数操作系统只用两级：
+
+\begin{itemize}
+  \item \textbf{Ring 0}（内核态）：可执行所有指令，访问所有内存、I/O 端口
+  \item \textbf{Ring 3}（用户态）：只能访问标记为 User 的页，不能执行特权指令（如 \texttt{hlt}、\texttt{lgdt}、\texttt{mov cr0}）
+\end{itemize}
+
+\begin{whybox}
+为什么需要特权分离？
+\begin{enumerate}
+  \item \textbf{故障隔离}：用户程序的 bug（空指针、越界写）不会破坏内核数据结构。
+  \item \textbf{安全性}：恶意程序无法直接操作硬件（磁盘、网卡），必须通过系统调用请求内核服务。
+  \item \textbf{最小特权原则}：每个组件只拥有完成工作所需的最低权限。
+\end{enumerate}
+\end{whybox}
+
+\input{figures/ch12/fig01-protection-rings}
+
+% ----------------------------------------------------------------------------
+\subsection{CPL、DPL、RPL 三级权限检查}
+\label{sec:tss-cpl-dpl-rpl}
+% ----------------------------------------------------------------------------
+
+x86 有三个相关的特权级字段，理解它们的关系是掌握保护模式的关键：
+
+\begin{description}
+  \item[CPL（Current Privilege Level）]
+    当前正在执行的代码的特权级。
+    存在 \textbf{CS 段寄存器的低 2 位}。
+    CPU 每次取指令时都会检查 CPL。
+
+  \item[DPL（Descriptor Privilege Level）]
+    段描述符或门描述符中声明的"目标权限级别"。
+    表示"要访问这个段/门，调用方至少需要这个特权级"。
+
+  \item[RPL（Requested Privilege Level）]
+    段选择子的低 2 位。表示"调用方声称自己的权限"。
+    RPL 的作用是防止内核代表用户态去访问不该访问的资源。
+\end{description}
+
+\noindent 访问检查规则：
+
+\[
+  \max(\text{CPL}, \text{RPL}) \le \text{DPL}
+\]
+
+即 CPL 和 RPL 中更低特权的那个（数值更大），不能超过目标的 DPL。
+
+\begin{thinkbox}
+为什么需要 RPL？如果只有 CPL 和 DPL 两级检查，存在什么安全隐患？
+
+\emph{提示：考虑用户态通过系统调用请求内核读取一个段。如果没有 RPL，
+内核（CPL=0）代替用户去读数据段时，DPL 检查会通过——即使用户本身无权访问。
+RPL 让内核可以"以用户身份"去做权限检查。}
+\end{thinkbox}
+
+% ----------------------------------------------------------------------------
+\subsection{特权级切换的硬件机制}
+\label{sec:tss-hw-switch}
+% ----------------------------------------------------------------------------
+
+特权级切换有两个方向，机制完全不同：
+
+\subsubsection{Ring 3 → Ring 0（向上切换——中断/异常/系统调用）}
+
+当 CPU 在 Ring 3 执行时遇到中断、异常或 \texttt{int} 指令，会自动执行以下步骤：
+
+\begin{enumerate}
+  \item 从 TSS 读取目标特权级的 SS:ESP（即 \texttt{SS0:ESP0}）
+  \item 切换到内核栈：加载 SS0 到 SS，ESP0 到 ESP
+  \item 将旧的 SS、ESP、EFLAGS、CS、EIP 依次压入\textbf{内核栈}
+  \item 如果异常带错误码（如 \#GP、\#PF），额外压入 error code
+  \item 从 IDT 门描述符加载新的 CS:EIP（跳转到中断处理程序）
+\end{enumerate}
+
+\begin{cpustate}
+Ring 3 → Ring 0 切换后：
+\begin{itemize}
+  \item CPL 从 3 变为 0
+  \item SS:ESP 从用户栈切换到 TSS.SS0:ESP0 指向的内核栈
+  \item 旧的用户态上下文已安全保存在内核栈上
+  \item EFLAGS.IF 被 interrupt gate 自动清零（禁止嵌套中断）
+\end{itemize}
+\end{cpustate}
+
+\subsubsection{Ring 0 → Ring 3（向下切换——\texttt{iret}）}
+
+\texttt{iret} 原本用于"从中断返回"。它从栈上弹出保存的 EIP/CS/EFLAGS。
+如果检测到目标 CS 的 RPL（低 2 位）大于当前 CPL，说明要"返回到更低特权级"，
+CPU 会额外弹出 ESP 和 SS：
+
+\begin{enumerate}
+  \item 弹出 EIP → 设为新的指令指针
+  \item 弹出 CS → 设为新的代码段（RPL=3 → CPL 变为 3）
+  \item 弹出 EFLAGS → 恢复标志寄存器
+  \item 弹出 ESP → 设为新的栈指针
+  \item 弹出 SS → 设为新的栈段
+\end{enumerate}
+
+\begin{warnbox}
+x86 没有"直接降级到 Ring 3"的指令。\texttt{iret} 是唯一的"向下切换"方式。
+我们的技巧是在 Ring 0 手动构造一个"假的中断返回帧"，让 CPU 以为自己在从 Ring 3 的中断中返回。
+\end{warnbox}

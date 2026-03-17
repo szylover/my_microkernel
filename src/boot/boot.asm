@@ -201,6 +201,7 @@ section .bss
 align 4096
 stack_bottom:
     resb 16384
+global stack_top       ; D-1: 导出给 tss.c，TSS.esp0 需要引用内核栈顶
 stack_top:
 
 ; Mark stack as non-executable (silences ld warning about missing .note.GNU-stack)

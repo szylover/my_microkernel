@@ -1,0 +1,79 @@
+% ============================================================================
+\section{TSS 的作用与结构}
+\label{sec:tss-struct}
+% ============================================================================
+
+Task State Segment（TSS）是 x86 保护模式中的一个特殊数据结构，
+大小为 104 字节。它的原始设计目的是支持\term{硬件任务切换}——
+CPU 可以自动保存/恢复所有寄存器到 TSS 中，实现任务切换。
+
+但现代操作系统（Linux、Windows、macOS）都不用硬件任务切换，
+而是用\term{软件任务切换}（手动保存/恢复寄存器）。原因是：
+
+\begin{itemize}
+  \item 硬件任务切换速度慢（保存/恢复全部寄存器），且不灵活
+  \item 软件任务切换可以只保存必要的寄存器，性能更好
+  \item 软件方式更可控，便于实现 COW fork 等高级功能
+\end{itemize}
+
+但即使不用硬件任务切换，TSS 仍然\textbf{不可或缺}——
+CPU 做特权级切换（Ring 3 → Ring 0）时，\textbf{必须}从 TSS 读取
+\texttt{SS0:ESP0} 来获取内核栈位置。这是硬件的硬性要求，无法绕过。
+
+\begin{designbox}
+我们的策略：整个系统只维护一个 TSS 实例，只使用其中两个字段：
+\begin{itemize}
+  \item \texttt{ss0} = \hex{10}（内核数据段选择子）—— 固定不变
+  \item \texttt{esp0} = 内核栈顶 —— 将来做进程切换时更新为当前进程的内核栈
+\end{itemize}
+其余 100 字节全部保持 0。
+\end{designbox}
+
+% ----------------------------------------------------------------------------
+\subsection{TSS 结构体定义}
+% ----------------------------------------------------------------------------
+
+\codefile{src/include/arch/tss.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct __attribute__((packed)) {
+    uint32_t prev_tss;  /* 0x00  链接到前一个 TSS（不用） */
+    uint32_t esp0;      /* 0x04  ★ Ring 0 栈指针 */
+    uint32_t ss0;       /* 0x08  ★ Ring 0 栈段选择子 */
+    uint32_t esp1;      /* 0x0C  Ring 1（不用） */
+    uint32_t ss1;       /* 0x10 */
+    uint32_t esp2;      /* 0x14  Ring 2（不用） */
+    uint32_t ss2;       /* 0x18 */
+    uint32_t cr3;       /* 0x1C  页目录（不用） */
+    uint32_t eip;       /* 0x20 */
+    uint32_t eflags;    /* 0x24 */
+    uint32_t eax, ecx, edx, ebx;      /* 0x28-0x34 */
+    uint32_t esp, ebp, esi, edi;      /* 0x38-0x44 */
+    uint32_t es, cs, ss, ds, fs, gs;  /* 0x48-0x5C */
+    uint32_t ldt;       /* 0x60  LDT 选择子（不用） */
+    uint16_t trap;      /* 0x64  调试陷阱标志（不用） */
+    uint16_t iomap_base;/* 0x66  I/O 位图偏移 */
+} tss_t;  /* 总计 104 字节 = 0x68 */
+\end{lstlisting}
+
+其中标注 ★ 的 \texttt{esp0} 和 \texttt{ss0} 是我们唯一需要关心的两个字段。
+
+\input{figures/ch12/fig02-tss-layout}
+
+% ----------------------------------------------------------------------------
+\subsection{TSS 描述符在 GDT 中的格式}
+\label{sec:tss-gdt-descriptor}
+% ----------------------------------------------------------------------------
+
+TSS 描述符是一个\term{系统段描述符}（S 位 = 0），与代码/数据段描述符（S = 1）格式不同。
+关键字段：
+
+\begin{bitfield}
+  \bit{0-3}{Type = 1001b → 32-bit TSS (Available)。被 \texttt{ltr} 加载后自动变为 1011b (Busy)}
+  \bit{4}{S = 0 → 系统段（非代码/数据）}
+  \bit{5-6}{DPL = 0 → 只有 Ring 0 能执行 \texttt{ltr} 指令}
+  \bit{7}{P = 1 → 描述符有效}
+\end{bitfield}
+
+\noindent 合并后 access byte = \texttt{0x89} = \texttt{10001001b}。
+
+flags 字节（gran 高 4 位）：G=0（粒度为字节，TSS 通常 < 4KiB），D/B=0（TSS 描述符中无意义），L=0，AVL=0。合并后 flags = \texttt{0x00}。

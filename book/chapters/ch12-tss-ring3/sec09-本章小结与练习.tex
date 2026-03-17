@@ -1,0 +1,86 @@
+% ============================================================================
+\section{本章小结与练习}
+% ============================================================================
+
+\subsection{本章小结}
+
+本章完成了从 Ring 0 到 Ring 3 的完整通路：
+
+\begin{enumerate}
+  \item \textbf{GDT 扩展}：新增 User Code（\hex{1B}）、User Data（\hex{23}）和 TSS（\hex{28}）三个描述符
+  \item \textbf{TSS 初始化}：设置 SS0:ESP0，让 CPU 知道"回到 Ring 0 时用哪个栈"
+  \item \textbf{\texttt{ltr} 加载}：告诉 CPU TSS 描述符在 GDT 中的位置
+  \item \textbf{\texttt{iret} 跳转}：构造假的中断返回帧，从 Ring 0 切换到 Ring 3
+  \item \textbf{PDE\_USER 传播}：修复两级页表的"与"逻辑，确保用户页可访问
+  \item \textbf{ISR 增强}：检测跨特权级异常，打印用户态 CS/SS/ESP
+\end{enumerate}
+
+目前用户态代码无法请求内核服务——执行任何特权操作都会 \#GP。
+下一章实现\textbf{系统调用机制}（\texttt{syscall\_ops\_t}），
+在 Ring 3 和 Ring 0 之间建立受控通信通道。
+
+% ============================================================================
+\subsection{新增文件清单}
+% ============================================================================
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{文件} & \textbf{说明} \\
+\midrule
+\texttt{src/include/arch/tss.h}        & TSS 结构体 + 段选择子枚举 + API 声明 \\
+\texttt{src/kernel/arch/tss.c}         & TSS 初始化 + \texttt{ltr} + \texttt{tss\_set\_kernel\_stack} \\
+\texttt{src/kernel/arch/tss\_flush.asm} & \texttt{jump\_to\_ring3} 汇编（iret 帧构造） \\
+\texttt{src/kernel/cmds/cmd\_ring3.c}   & \texttt{ring3 test} shell 命令 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{修改文件清单}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{文件} & \textbf{变更} \\
+\midrule
+\texttt{src/include/arch/gdt.h}    & 新增 User Code/Data/TSS 选择子枚举 + \texttt{gdt\_set\_tss\_entry} 声明 \\
+\texttt{src/kernel/arch/gdt.c}     & GDT 扩展到 6 项 + \texttt{gdt\_set\_tss\_entry()} 实现 \\
+\texttt{src/kernel/arch/idt.c}     & \texttt{regs\_t} 添加 \texttt{user\_esp/user\_ss} + Ring 3 异常检测 \\
+\texttt{src/kernel/mm/vmm.c}       & \texttt{vmm\_map\_page} 添加 PDE\_USER 传播 \\
+\texttt{src/kernel/core/kmain.c}   & 添加 \texttt{tss\_init()} 调用 \\
+\texttt{src/kernel/core/shell.c}   & 注册 \texttt{ring3} 命令 \\
+\texttt{src/boot/boot.asm}         & 导出 \texttt{stack\_top} 符号 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================================
+\subsection{练习}
+% ============================================================================
+
+\begin{exercise}[title={练习 1：Ring 3 读取内核地址}]
+修改 \texttt{user\_test\_code}，把 HLT 替换为读取内核地址 \hex{C0100000} 的指令：
+\begin{lstlisting}[style=nasmstyle]
+mov eax, [0xC0100000]  ; 尝试读取内核页
+\end{lstlisting}
+预期会触发什么异常？错误码的各位分别是什么含义？
+\end{exercise}
+
+\begin{exercise}[title={练习 2：Ring 3 写用户栈}]
+修改 \texttt{user\_test\_code}，先往用户栈 push 一个值，再执行 HLT：
+\begin{lstlisting}[style=nasmstyle]
+push 0x12345678   ; 往用户栈写入
+hlt               ; 然后触发 #GP
+\end{lstlisting}
+验证 push 不会触发异常（栈页有 PTE\_WRITABLE），只有 HLT 才会 \#GP。
+\end{exercise}
+
+\begin{exercise}[title={练习 3：\texttt{iomap\_base} 实验}]
+将 \texttt{tss.iomap\_base} 从 \texttt{sizeof(tss\_t)} 改为 0，
+再从 Ring 3 执行 \texttt{in al, 0x60}（读 PS/2 键盘端口）。
+观察行为变化：是否仍然触发 \#GP？理解 I/O 权限位图的作用。
+
+\emph{提示：\texttt{iomap\_base} = 0 意味着 I/O 位图从 TSS 偏移 0 开始，
+但那不是有效的位图（是 \texttt{prev\_tss} 字段），
+所以行为取决于该内存位置的值。}
+\end{exercise}

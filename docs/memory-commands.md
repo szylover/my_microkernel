@@ -14,6 +14,7 @@
 | `vmm ...` | VMM 虚拟内存管理：页表查询/映射/取消映射/故障测试 |
 | `heap ...` | 内核堆调试：kmalloc/kfree 状态/分配/释放/selftest |
 | `vma ...` | VMA 虚拟内存区域：列表/查找/计数/selftest |
+| `ring3 ...` | Ring 3 用户态测试：panic（HLT→#GP） |
 
 ---
 

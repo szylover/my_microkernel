@@ -1,0 +1,87 @@
+% ============================================================================
+\section{TSS 初始化}
+\label{sec:tss-init}
+% ============================================================================
+
+\texttt{tss\_init()} 做 4 件事：清零、设置 SS0:ESP0、写 GDT 描述符、加载 TR。
+
+\codefile{src/kernel/arch/tss.c}
+\begin{lstlisting}[style=cstyle]
+static tss_t g_tss;
+extern uint32_t stack_top;  /* boot.asm 中的内核栈顶 */
+
+void tss_init(void) {
+    /* 1. 清零 TSS（所有不用的字段 = 0） */
+    kmemset(&g_tss, 0, sizeof(g_tss));
+
+    /* 2. 设置 Ring 0 栈段选择子 */
+    g_tss.ss0 = GDT_KERNEL_DATA_SEL;  /* 0x10 */
+
+    /* 3. 设置 Ring 0 栈顶指针 */
+    g_tss.esp0 = (uint32_t)(uintptr_t)&stack_top;
+
+    /* 4. I/O 位图偏移 = sizeof(tss)，表示没有 I/O 位图
+     *    → Ring 3 执行 IN/OUT 指令会触发 #GP */
+    g_tss.iomap_base = sizeof(tss_t);
+
+    /* 5. 在 GDT[5] 写入 TSS 描述符 */
+    gdt_set_tss_entry((uint32_t)(uintptr_t)&g_tss,
+                       sizeof(tss_t) - 1);  /* limit = 103 */
+
+    /* 6. ltr 加载到 TR 寄存器 */
+    ltr(GDT_TSS_SEL);  /* 0x28 */
+}
+\end{lstlisting}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{ltr} 指令封装}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+static inline void ltr(uint16_t sel) {
+    __asm__ volatile("ltr %0" : : "r"(sel));
+}
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{ltr 0x28} 执行后：
+\begin{itemize}
+  \item TR 寄存器指向 GDT[5] 的 TSS 描述符
+  \item CPU 内部缓存 TSS 的基址和 limit
+  \item GDT[5] 的 type 自动从 \texttt{0x89}（Available）变为 \texttt{0x8B}（Busy）
+  \item 之后发生 Ring 3 → Ring 0 切换时，CPU 会从 \texttt{g\_tss.esp0} 获取内核栈
+\end{itemize}
+\end{cpustate}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{tss\_set\_kernel\_stack()} —— 为进程切换预留}
+% ----------------------------------------------------------------------------
+
+将来做进程切换时，每个进程有独立的内核栈。切换进程后需要更新 TSS.ESP0：
+
+\begin{lstlisting}[style=cstyle]
+void tss_set_kernel_stack(uint32_t esp0) {
+    g_tss.esp0 = esp0;
+}
+\end{lstlisting}
+
+当前阶段只有一个内核栈，此函数暂时不会被调用，但接口先准备好。
+
+% ----------------------------------------------------------------------------
+\subsection{初始化时机与顺序}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+gdt_init();     /* GDT 先就位 */
+idt_init();     /* IDT 先就位（处理 Ring 3 异常） */
+tss_init();     /* TSS 依赖 GDT，且需要 IDT 已安装 */
+\end{lstlisting}
+
+\begin{whybox}
+为什么 \texttt{tss\_init()} 必须在 \texttt{gdt\_init()} 之后？
+
+因为 \texttt{tss\_init()} 会调用 \texttt{gdt\_set\_tss\_entry()} 修改 GDT[5]，
+然后用 \texttt{ltr} 加载 TSS——\texttt{ltr} 会去 GDT 查找描述符。
+如果 GDT 尚未初始化（\texttt{gdtr} 没有指向有效表），\texttt{ltr} 会触发异常。
+\end{whybox}

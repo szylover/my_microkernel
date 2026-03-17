@@ -1,0 +1,32 @@
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    ring/.style={draw, thick, circle, minimum size=#1},
+  ]
+    % Rings (outermost to innermost)
+    \node[ring=8cm, fill=blue!5] (r3) {};
+    \node[ring=5.8cm, fill=blue!10] (r2) {};
+    \node[ring=4cm, fill=blue!18] (r1) {};
+    \node[ring=2.2cm, fill=blue!30] (r0) {};
+
+    % Labels inside rings
+    \node[align=center] at (0, 0) {\textbf{Ring 0}\\[-2pt]\small 内核};
+    \node at (1.2, 1.2) {\small Ring 1};
+    \node at (1.7, 1.9) {\small Ring 2};
+    \node at (0, 3.5) {\small\textbf{Ring 3} — 用户态};
+
+    % Right side: annotations with enough vertical spacing
+    \node[anchor=west, text width=4.5cm, font=\small] at (4.8, 3.0)
+      {应用程序、Shell\\只能访问 User 页};
+    \node[anchor=west, text width=4.5cm, font=\footnotesize, gray] at (4.8, 1.5)
+      {Ring 1/2 几乎不用\\Linux/Windows 只用 0 和 3};
+    \node[anchor=west, text width=4.5cm, font=\small] at (4.8, 0)
+      {内核代码\\可执行所有指令};
+
+    % Arrow: privilege direction (placed below the rings to avoid overlap)
+    \draw[->, thick, red!70!black] (4.8, -1.0) -- (4.8, -2.5)
+      node[right, pos=0.5, font=\small] {特权级升高（数值降低）};
+  \end{tikzpicture}
+  \caption{x86 四级保护环模型}
+  \label{fig:protection-rings}
+\end{figure}

@@ -55,7 +55,7 @@
 
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
-| D-1 | TSS 与 Ring 3 | x86 特权级概念（CPL/DPL/RPL）、TSS 结构体、GDT 扩展（User Code 0x1B / User Data 0x23 / TSS 0x28）、`iret` 跳转 Ring 3、验证 GP Fault 回内核 | |
+| D-1 | TSS 与 Ring 3 | x86 特权级概念（CPL/DPL/RPL）、TSS 结构体、GDT 扩展（User Code 0x1B / User Data 0x23 / TSS 0x28）、`iret` 跳转 Ring 3、验证 GP Fault 回内核 | ✅ |
 
 #### D-β：系统调用 (ch13)
 
