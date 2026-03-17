@@ -139,7 +139,7 @@ my_microkernel/
     ├── include/                   # 公共头文件
     │   ├── arch/                  #   x86 体系结构 (gdt/idt/irq/pic/io/tss)
     │   ├── drivers/               #   设备驱动 (keyboard/serial)
-    │   └── kernel/                #   内核通用 (pmm/vmm/vma/kmalloc/shell/printk/cmd/kconfig/…)
+    │   └── kernel/                #   内核通用 (pmm/vmm/vma/kmalloc/shell/printk/cmd/kconfig/syscall/…)
     └── kernel/                    # 内核实现
         ├── arch/                  #   CPU 初始化 & 汇编 stubs (gdt/idt/irq/pic/tss)
         ├── cmds/                  #   Shell 命令模块 (cls/cmds/free/mmap/pmm/vmm/heap/vma/ring3)

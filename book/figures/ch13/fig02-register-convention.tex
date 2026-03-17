@@ -1,0 +1,41 @@
+\begin{tikzpicture}[
+    reg/.style={draw, minimum width=1.4cm, minimum height=0.7cm,
+                font=\ttfamily\small, anchor=west, fill=blue!5},
+    desc/.style={font=\small, anchor=west, text width=5cm},
+    arrow/.style={-{Stealth[length=3pt]}, thick, blue!60!black},
+  ]
+
+  % 寄存器列
+  \node[reg] (eax) at (0, 0)    {EAX};
+  \node[reg] (ebx) at (0, -1.0) {EBX};
+  \node[reg] (ecx) at (0, -2.0) {ECX};
+  \node[reg] (edx) at (0, -3.0) {EDX};
+  \node[reg] (esi) at (0, -4.0) {ESI};
+  \node[reg] (edi) at (0, -5.0) {EDI};
+
+  % 用途描述
+  \node[desc] at (2.2, 0)    {syscall number（系统调用号）};
+  \node[desc] at (2.2, -1.0) {arg1（第 1 个参数）};
+  \node[desc] at (2.2, -2.0) {arg2（第 2 个参数）};
+  \node[desc] at (2.2, -3.0) {arg3（第 3 个参数）};
+  \node[desc] at (2.2, -4.0) {arg4（第 4 个参数）};
+  \node[desc] at (2.2, -5.0) {arg5（第 5 个参数）};
+
+  % 箭头
+  \foreach \r in {eax, ebx, ecx, edx, esi, edi} {
+    \draw[arrow] (\r.east) -- ++(0.6, 0);
+  }
+
+  % 返回值标注
+  \node[reg, fill=green!10] (ret) at (0, -6.5) {EAX};
+  \node[desc] at (2.2, -6.5) {返回值（负数 = $-$errno）};
+  \draw[arrow, green!50!black] (ret.east) -- ++(0.6, 0);
+
+  % 标题
+  \node[font=\small\bfseries, anchor=west] at (-0.2, 1.0) {调用时};
+  \node[font=\small\bfseries, anchor=west] at (-0.2, -5.8) {返回时};
+
+  % 分隔线
+  \draw[thick, dashed, gray] (-0.5, -5.9) -- (8.0, -5.9);
+
+\end{tikzpicture}

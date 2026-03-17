@@ -1,0 +1,50 @@
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=3.0cm, minimum height=0.8cm,
+                font=\small, align=center},
+    api/.style={box, fill=green!8},
+    dispatch/.style={box, fill=yellow!12},
+    backend/.style={box, fill=blue!8},
+    table/.style={box, fill=orange!10},
+    arrow/.style={-{Stealth[length=4pt]}, thick},
+    darrow/.style={-{Stealth[length=4pt]}, thick, dashed},
+    note/.style={font=\scriptsize\itshape, text=gray},
+  ]
+
+  % 调用者
+  \node[api] (caller) at (0, 0) {调用者\\{\footnotesize kmain.c / 后端 stub}};
+
+  % 公开 API
+  \node[api] (api) at (0, -1.5) {公开 API\\{\footnotesize \texttt{syscall\_init()}}\\{\footnotesize \texttt{syscall\_dispatch()}}};
+
+  % dispatch 层
+  \node[dispatch] (disp) at (0, -3.5) {\texttt{syscall.c}\\{\footnotesize \texttt{g\_syscall\_ops} 指针}};
+
+  % 后端
+  \node[backend] (int80) at (-3.0, -5.5) {\texttt{int 0x80}\\{\footnotesize IDT gate DPL=3}};
+  \node[backend] (sysenter) at (3.0, -5.5) {\texttt{sysenter}\\{\footnotesize MSR 配置}};
+
+  % syscall table
+  \node[table] (table) at (0, -7.5) {\texttt{syscall\_table[256]}\\{\footnotesize nr → handler}};
+
+  % handler
+  \node[api] (handlers) at (0, -9.2) {handler 实现\\{\footnotesize \texttt{sys\_write} / \texttt{sys\_exit} / \texttt{sys\_brk}}};
+
+  % 箭头
+  \draw[arrow] (caller) -- (api);
+  \draw[arrow] (api) -- (disp) node[right, pos=0.5, note] {\texttt{g\_syscall\_ops->init()}};
+  \draw[arrow] (disp) -- (int80) node[left, pos=0.5, note] {D-3};
+  \draw[darrow] (disp) -- (sysenter) node[right, pos=0.5, note] {D-4（进阶）};
+
+  % 后端调用 dispatch
+  \draw[arrow, red!60!black] (int80.south) |- (table.west)
+    node[below left, pos=0.25, note] {stub 调用};
+  \draw[darrow, red!60!black] (sysenter.south) |- (table.east);
+
+  \draw[arrow] (table) -- (handlers) node[right, pos=0.5, note] {\texttt{table[nr](regs)}};
+
+  % kconfig 标注
+  \node[font=\scriptsize, draw, rounded corners, fill=purple!5, text=purple!60!black,
+        align=center, text width=3.5cm]
+    at (5.5, -3.5) {\texttt{KCONFIG\_SYSCALL\_BACKEND}\\[2pt]0 = int0x80, 1 = sysenter};
+
+\end{tikzpicture}

@@ -1,0 +1,114 @@
+% ============================================================================
+\section{第一批 syscall handler}
+\label{sec:syscall-handlers}
+% ============================================================================
+
+本阶段实现三个 handler 的初始版本。它们在 D-2 阶段是\textbf{占位实现}（stub），
+功能有限但足以验证 dispatch 路径正确。D-3（\texttt{int 0x80} 后端）完成后，
+这些 handler 会被真正的 Ring 3 代码所调用。
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{sys\_exit}：终止进程}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/core/syscall.c}
+\begin{lstlisting}[style=cstyle]
+/*
+ * sys_exit -- 终止当前进程
+ *
+ * arg1 (EBX) = exit status
+ *
+ * 当前没有进程管理，exit 只能 halt。
+ * 将来 D-7/D-8 会做 ZOMBIE 状态转换和资源回收。
+ */
+static int32_t sys_exit(const syscall_regs_t* regs) {
+    printk("[syscall] exit(status=%d)\n", (int)regs->arg1);
+
+    for (;;) {
+        __asm__ volatile("hlt");
+    }
+
+    return 0;  /* unreachable */
+}
+\end{lstlisting}
+
+\texttt{sys\_exit} 目前直接 halt——因为还没有进程管理，没有"下一个进程"可以调度。
+将来实现 PCB 和调度器后，\texttt{exit} 会将进程状态设为 ZOMBIE 并释放资源。
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{sys\_write}：写数据}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+/*
+ * sys_write -- 写数据到文件描述符
+ *
+ * arg1 (EBX) = fd        (当前只支持 1=stdout, 2=stderr)
+ * arg2 (ECX) = buf       (用户态缓冲区地址)
+ * arg3 (EDX) = count     (字节数)
+ *
+ * 返回值 = 实际写入字节数，-1=错误
+ */
+static int32_t sys_write(const syscall_regs_t* regs) {
+    uint32_t fd    = regs->arg1;
+    uint32_t buf   = regs->arg2;
+    uint32_t count = regs->arg3;
+
+    /* 只接受 stdout(1) 和 stderr(2) */
+    if (fd != 1 && fd != 2) {
+        return -1;
+    }
+
+    /* 安全检查：buf 必须来自用户空间 */
+    if (buf >= 0xC0000000u) {
+        printk("[syscall] write: bad user pointer 0x%08x\n", buf);
+        return -1;
+    }
+
+    /* 上限截断，防止恶意大 count */
+    if (count > 4096) {
+        count = 4096;
+    }
+
+    const char* p = (const char*)(uintptr_t)buf;
+    for (uint32_t i = 0; i < count; i++) {
+        printk("%c", p[i]);
+    }
+
+    return (int32_t)count;
+}
+\end{lstlisting}
+
+\begin{warnbox}
+\textbf{用户指针安全检查}是系统调用中最重要的安全措施之一。
+
+\texttt{buf >= 0xC0000000} 是粗略的检查——内核空间从 \hex{C0000000} 开始，
+用户态缓冲区地址不应该落在这个范围内。如果恶意用户程序传入一个内核地址，
+\texttt{sys\_write} 会拒绝而不是泄露内核数据。
+
+将来实现 VFS 后，这里还需要更精细的检查：
+验证 \texttt{[buf, buf+count)} 整个范围都在合法的用户 VMA 中。
+\end{warnbox}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{sys\_brk}：堆管理}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+/*
+ * sys_brk -- 调整进程数据段末尾
+ *
+ * arg1 (EBX) = new_brk (0 = 查询当前 brk)
+ * 返回值 = 当前 brk 地址
+ *
+ * 当前只返回占位值。将来 F-6（mmap）会和 VMA 集成。
+ */
+static int32_t sys_brk(const syscall_regs_t* regs) {
+    (void)regs;
+    printk("[syscall] brk(0x%08x) -- stub\n", regs->arg1);
+    return 0x00400000;
+}
+\end{lstlisting}
+
+\texttt{brk} 是 Unix 传统的堆管理方式——移动数据段末尾来分配/释放内存。
+用户态的 \texttt{malloc} 内部就是调用 \texttt{brk}（小分配）或 \texttt{mmap}（大分配）。

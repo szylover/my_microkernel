@@ -1,0 +1,38 @@
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=3.2cm, minimum height=0.9cm,
+                font=\small, align=center},
+    userbox/.style={box, fill=blue!8},
+    kernbox/.style={box, fill=orange!10},
+    asmbox/.style={box, fill=red!8},
+    arrow/.style={-{Stealth[length=4pt]}, thick},
+    note/.style={font=\scriptsize\itshape, text=gray},
+  ]
+
+  % --- Ring 3 区域 ---
+  \node[userbox] (app) at (0, 0) {用户程序\\{\footnotesize\texttt{write(1, buf, n)}}};
+  \node[userbox] (wrapper) at (0, -1.5) {syscall wrapper\\{\footnotesize\texttt{EAX=4, EBX=1, ECX=buf}}};
+
+  % --- 特权级切换 ---
+  \node[asmbox] (stub) at (0, -3.5) {汇编 stub\\{\footnotesize\texttt{int \$0x80} 或 \texttt{sysenter}}};
+
+  % --- Ring 0 区域 ---
+  \node[kernbox] (dispatch) at (0, -5.5) {\texttt{syscall\_dispatch()}\\{\footnotesize 查表 \texttt{syscall\_table[nr]}}};
+  \node[kernbox] (handler) at (0, -7.2) {\texttt{sys\_write()}\\{\footnotesize 执行内核服务}};
+
+  % Arrows
+  \draw[arrow] (app) -- (wrapper) node[right, pos=0.5, note] {inline asm 封装};
+  \draw[arrow] (wrapper) -- (stub) node[right, pos=0.5, note] {寄存器传参};
+  \draw[arrow, red!60!black, very thick] (stub) -- (dispatch)
+    node[right, pos=0.5, font=\small\bfseries, text=red!60!black] {特权级切换}
+    node[left, pos=0.5, note] {Ring 3 → Ring 0};
+  \draw[arrow] (dispatch) -- (handler) node[right, pos=0.5, note] {\texttt{table[4] → sys\_write}};
+
+  % Return path
+  \draw[arrow, dashed, blue!60!black] (handler.west) -- ++(-2.0, 0) |- (app.west)
+    node[left, pos=0.25, note, text=blue!60!black] {返回值 → EAX};
+
+  % 分隔线
+  \draw[thick, dashed, gray] (-4.5, -2.5) -- (4.5, -2.5)
+    node[right, font=\small\bfseries] {Ring 3 / Ring 0 边界};
+
+\end{tikzpicture}

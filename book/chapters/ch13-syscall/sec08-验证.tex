@@ -1,0 +1,57 @@
+% ============================================================================
+\section{验证}
+\label{sec:syscall-verify}
+% ============================================================================
+
+D-2 阶段没有后端，用户态代码还不能真正触发系统调用。
+我们用两种方式验证框架的正确性。
+
+% ----------------------------------------------------------------------------
+\subsection{QEMU 启动日志}
+% ----------------------------------------------------------------------------
+
+编译并启动内核，在串口输出中应看到：
+
+\begin{tcblisting}{consolebox, title={\textcolor{sol-green}{\$}~QEMU 启动输出}}
+[vma] backend: sorted-array
+[vma] init ok
+[syscall] table: 3 handlers registered (exit=1, write=4, brk=45)
+[syscall] no backend registered (dispatch only, no user-mode entry point)
+[syscall] init ok
+\end{tcblisting}
+
+关键点：
+\begin{itemize}
+  \item 三个 handler 成功注册（编号正确）
+  \item 明确报告"no backend"——提醒我们 D-3 还没实现
+  \item 已有测试（\texttt{pmm test}/\texttt{heap test}/\texttt{vma test}）全部回归通过
+\end{itemize}
+
+% ----------------------------------------------------------------------------
+\subsection{dispatch 路径内部验证}
+% ----------------------------------------------------------------------------
+
+虽然用户态还不能触发系统调用，但我们可以在内核态直接调用
+\texttt{syscall\_dispatch()} 来验证 table 分发逻辑：
+
+\begin{lstlisting}[style=cstyle]
+/* 验证代码（可在 kmain.c 中临时添加） */
+
+/* 测试 1：有效调用号 → handler 被调用 */
+syscall_regs_t r = { .nr = SYS_WRITE, .arg1 = 1,
+                      .arg2 = (uint32_t)"test\n",
+                      .arg3 = 5 };
+int32_t ret = syscall_dispatch(&r);
+/* 预期：串口输出 "test"，ret = 5 */
+
+/* 测试 2：无效调用号 → 返回 -ENOSYS */
+syscall_regs_t bad = { .nr = 999 };
+ret = syscall_dispatch(&bad);
+/* 预期：printk "[syscall] unknown"，ret = -38 */
+\end{lstlisting}
+
+\begin{warnbox}
+上面的直接调用只是临时验证手段。正式流程中，\texttt{syscall\_dispatch()} 只应被
+后端的汇编 stub 调用（从 Ring 3 触发的路径）。
+验证完毕后删除临时代码。
+\end{warnbox}

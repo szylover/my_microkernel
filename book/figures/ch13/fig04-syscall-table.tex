@@ -1,0 +1,45 @@
+\begin{tikzpicture}[
+    cell/.style={draw, minimum width=2.5cm, minimum height=0.65cm,
+                 font=\ttfamily\small, anchor=north},
+    idx/.style={font=\ttfamily\scriptsize\color{gray}, anchor=east},
+    used/.style={cell, fill=green!10},
+    empty/.style={cell, fill=gray!5},
+    arrow/.style={-{Stealth[length=3pt]}, thick, blue!60!black},
+  ]
+
+  % 数组框
+  \node[used]  (s0) at (0, 0)     {NULL};
+  \node[used]  (s1) at (0, -0.65) {sys\_exit};
+  \node[empty] (s2) at (0, -1.30) {NULL};
+  \node[empty] (s3) at (0, -1.95) {NULL};
+  \node[used]  (s4) at (0, -2.60) {sys\_write};
+  \node[empty] (s5) at (0, -3.25) {\dots};
+  \node[used]  (s45) at (0, -3.90) {sys\_brk};
+  \node[empty] (s46) at (0, -4.55) {\dots};
+  \node[empty] (s255) at (0, -5.20) {NULL};
+
+  % 索引标签
+  \node[idx] at (-1.5, 0)     {[0]};
+  \node[idx] at (-1.5, -0.65) {[1]};
+  \node[idx] at (-1.5, -1.30) {[2]};
+  \node[idx] at (-1.5, -1.95) {[3]};
+  \node[idx] at (-1.5, -2.60) {[4]};
+  \node[idx] at (-1.5, -3.25) {};
+  \node[idx] at (-1.5, -3.90) {[45]};
+  \node[idx] at (-1.5, -4.55) {};
+  \node[idx] at (-1.5, -5.20) {[255]};
+
+  % EAX 指向
+  \node[font=\small, anchor=east] (eax) at (-3.5, -2.60) {\textbf{EAX=4}};
+  \draw[arrow] (eax.east) -- (s4.west);
+
+  % 标题
+  \node[font=\small\bfseries] at (0, 0.8) {\texttt{syscall\_table[SYSCALL\_MAX]}};
+
+  % 说明
+  \node[font=\scriptsize\itshape, text=gray, anchor=west, text width=3cm]
+    at (1.8, -1.0) {预留 0 号不使用\\（检测 EAX 未初始化）};
+  \node[font=\scriptsize\itshape, text=gray, anchor=west, text width=3cm]
+    at (1.8, -4.0) {编号参考 Linux i386\\但只实现需要的子集};
+
+\end{tikzpicture}

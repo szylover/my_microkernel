@@ -1,0 +1,43 @@
+% ============================================================================
+\section{后端预告：\texttt{int 0x80} 与 \texttt{sysenter}}
+\label{sec:syscall-backend-preview}
+% ============================================================================
+
+本章搭建了系统调用的完整框架，但用户态还不能真正触发系统调用——
+因为没有安装入口点。接下来两节将实现两个后端：
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{int 0x80}（D-3）}
+% ----------------------------------------------------------------------------
+
+传统的软中断方式。需要：
+
+\begin{enumerate}
+  \item 在 IDT 中安装 \texttt{gate[0x80]}，设置 \textbf{DPL=3}
+    （\texttt{type\_attr = 0xEE}，允许 Ring 3 触发）
+  \item 编写汇编 stub：保存寄存器 → 加载内核段 → 从寄存器提取参数 →
+    打包 \texttt{syscall\_regs\_t} → 调用 \texttt{syscall\_dispatch()} →
+    返回值写入 EAX → 恢复寄存器 → \texttt{iret}
+  \item 编写用户态 inline asm wrapper（\texttt{syscall1}/\texttt{syscall2}/\texttt{syscall3}）
+  \item 验证：Ring 3 执行 \texttt{write(1, "hello", 5)} → 串口看到输出
+\end{enumerate}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{sysenter}（D-4，进阶）}
+% ----------------------------------------------------------------------------
+
+Intel 快速系统调用路径。需要：
+
+\begin{enumerate}
+  \item 配置三个 MSR：
+    \begin{itemize}
+      \item \texttt{IA32\_SYSENTER\_CS} (\hex{174}) = 内核代码段
+      \item \texttt{IA32\_SYSENTER\_ESP} (\hex{175}) = 内核栈顶
+      \item \texttt{IA32\_SYSENTER\_EIP} (\hex{176}) = 内核入口函数
+    \end{itemize}
+  \item 编写汇编入口（\texttt{sysenter} 不保存返回地址，用户端需用 ECX/EDX 传递）
+  \item 通过 \texttt{KCONFIG\_SYSCALL\_BACKEND=1} 切换
+\end{enumerate}
+
+两个后端共享本章实现的 dispatch 层和 syscall table，
+只有入口机制不同——这就是可插拔架构的价值。

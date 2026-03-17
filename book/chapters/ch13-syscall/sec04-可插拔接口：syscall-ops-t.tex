@@ -1,0 +1,93 @@
+% ============================================================================
+\section{可插拔接口：\texttt{syscall\_ops\_t}}
+\label{sec:syscall-interface}
+% ============================================================================
+
+与 \texttt{pmm\_ops\_t}（第~\ref{ch:pmm}~章）、\texttt{heap\_ops\_t}（第~\ref{ch:kmalloc}~章）、
+\texttt{vma\_ops\_t}（第~\ref{ch:vma}~章）完全相同的"dispatch + 后端"模式。
+不同的系统调用入口机制被抽象为后端，共享同一套 dispatch 层和 syscall table。
+
+\codefile{src/include/kernel/syscall.h}
+\begin{lstlisting}[style=cstyle]
+typedef struct syscall_ops {
+    const char* name;       /* "int0x80", "sysenter" */
+
+    /*
+     * init -- 初始化后端
+     *
+     * int 0x80 后端：在 IDT[0x80] 安装 DPL=3 中断门
+     * sysenter 后端：配置 IA32_SYSENTER_CS/EIP/ESP MSR
+     */
+    void (*init)(void);
+} syscall_ops_t;
+\end{lstlisting}
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch13/fig03-syscall-dispatch}
+  \caption{\texttt{syscall\_ops\_t} 可插拔后端架构——后端负责入口，dispatch 负责分发}
+  \label{fig:syscall-dispatch}
+\end{figure}
+
+\begin{designbox}
+为什么 \texttt{syscall\_ops\_t} 只有一个 \texttt{init} 函数指针？
+
+与 \texttt{vma\_ops\_t}（7 个函数指针）不同，系统调用后端只需做一件事：
+\textbf{设置入口点}。一旦入口安装完毕，后续所有系统调用都走同一条路径：
+用户态 → 汇编 stub → \texttt{syscall\_dispatch()} → handler。
+
+后端不需要 \texttt{dispatch} 或 \texttt{handle} 函数指针，
+因为汇编 stub 直接调用 dispatch 层的 C 函数。
+将来如果需要后端特定的 teardown（例如 MSR 清理），
+可以添加 \texttt{fini} 函数指针——但现在遵循 YAGNI 原则，不提前设计。
+\end{designbox}
+
+% ----------------------------------------------------------------------------
+\subsection{后端注册 API}
+% ----------------------------------------------------------------------------
+
+\codefile{src/include/kernel/syscall.h}
+\begin{lstlisting}[style=cstyle]
+/* 注册后端（在 syscall_init 之前调用） */
+void syscall_register_backend(const syscall_ops_t* ops);
+
+/* 返回当前后端名称，NULL=未注册 */
+const char* syscall_backend_name(void);
+
+/* 系统调用子系统是否已初始化 */
+int syscall_is_ready(void);
+\end{lstlisting}
+
+% ----------------------------------------------------------------------------
+\subsection{handler 函数签名}
+% ----------------------------------------------------------------------------
+
+每个具体的系统调用（如 \texttt{sys\_write}）实现为此签名的函数，
+注册到 syscall table 中：
+
+\begin{lstlisting}[style=cstyle]
+typedef int32_t (*syscall_handler_t)(const syscall_regs_t* regs);
+\end{lstlisting}
+
+\begin{itemize}
+  \item 参数：\texttt{syscall\_regs\_t} 包含了调用号和最多 5 个参数
+  \item 返回值：由后端写回用户态 EAX。负数表示 $-$errno（如 $-38 = -$ENOSYS）
+\end{itemize}
+
+% ----------------------------------------------------------------------------
+\subsection{注册单个 handler}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+/*
+ * syscall_register -- 注册/替换一个 syscall handler
+ *
+ * @param nr       系统调用号（0 < nr < SYSCALL_MAX）
+ * @param handler  处理函数
+ * @return         0=成功, -1=nr 越界
+ */
+int syscall_register(uint32_t nr, syscall_handler_t handler);
+\end{lstlisting}
+
+这个 API 不仅供内核初始化使用，将来用户态驱动（微内核架构）也可以
+通过系统调用注册新的 handler——实现内核服务的动态扩展。

@@ -1,0 +1,87 @@
+% ============================================================================
+\section{本章小结与练习}
+% ============================================================================
+
+\subsection{本章小结}
+
+本章完成了系统调用的\textbf{框架层}：
+
+\begin{enumerate}
+  \item \textbf{概念}：理解系统调用是用户态请求内核服务的唯一受控入口，
+    涉及特权级切换、参数验证、安全审计
+  \item \textbf{调用约定}：EAX=syscall nr, EBX\textasciitilde EDI=arg1\textasciitilde arg5，
+    返回值在 EAX（负数 = $-$errno），与 Linux i386 ABI 一致
+  \item \textbf{可插拔接口}：\texttt{syscall\_ops\_t}（name/init），
+    与 \texttt{pmm\_ops\_t}/\texttt{vma\_ops\_t} 同一模式
+  \item \textbf{dispatch 层}：\texttt{syscall\_table[256]} 静态数组，
+    \texttt{syscall\_dispatch()} 查表分发，未注册返回 $-$ENOSYS
+  \item \textbf{handler 占位}：\texttt{sys\_exit}（halt）、
+    \texttt{sys\_write}（串口输出 + 用户指针校验）、\texttt{sys\_brk}（占位）
+  \item \textbf{配置}：\texttt{KCONFIG\_SYSCALL\_BACKEND} 预留后端切换
+\end{enumerate}
+
+有了这个框架，下一章只需实现一个"入口"（\texttt{int 0x80} 后端的汇编 stub + IDT 配置），
+用户态代码就能调用 \texttt{write}、\texttt{exit} 等系统调用了。
+
+% ============================================================================
+\subsection{新增文件清单}
+% ============================================================================
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{文件} & \textbf{说明} \\
+\midrule
+\texttt{src/include/kernel/syscall.h} & \texttt{syscall\_ops\_t} 接口 + 调用号 + \texttt{syscall\_regs\_t} + API \\
+\texttt{src/kernel/core/syscall.c}    & dispatch 层 + syscall table + 内置 handler \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{修改文件清单}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{文件} & \textbf{变更} \\
+\midrule
+\texttt{src/include/kernel/kconfig.h} & 新增 \texttt{KCONFIG\_SYSCALL\_BACKEND} \\
+\texttt{src/kernel/core/kmain.c}      & VMA 之后添加 \texttt{syscall\_init()} 调用 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================================
+\subsection{练习}
+% ============================================================================
+
+\begin{exercise}[title={练习 1：添加 \texttt{sys\_getpid} 占位}]
+在 \texttt{syscall.h} 中定义 \texttt{SYS\_GETPID = 20}（和 Linux 一致），
+实现一个 handler 始终返回 1（PID 1 = init 进程），注册到 syscall table 中。
+在内核态直接调用 \texttt{syscall\_dispatch(\{.nr=20\})} 验证返回值。
+\end{exercise}
+
+\begin{exercise}[title={练习 2：统计 syscall 调用次数}]
+在 \texttt{syscall.c} 中添加 per-syscall 计数器数组
+\texttt{syscall\_count[SYSCALL\_MAX]}。每次 dispatch 成功时 \texttt{++syscall\_count[nr]}。
+添加一个 \texttt{syscall\_dump\_stats()} 函数打印非零计数。
+
+思考：这个统计功能对调试和性能分析有什么帮助？
+\end{exercise}
+
+\begin{exercise}[title={练习 3：对比 \texttt{int 0x80} 与 \texttt{call} 的开销}]
+查阅 Intel 软件开发手册，比较以下两条指令在 Pentium 4 上的时钟周期：
+\begin{itemize}
+  \item \texttt{int 0x80}（软中断，经过 IDT + 特权级切换）
+  \item \texttt{call [addr]}（普通间接调用，无特权级切换）
+\end{itemize}
+为什么 \texttt{sysenter} 的引入是重要的性能优化？
+\end{exercise}
+
+\begin{exercise}[title={练习 4：安全漏洞分析}]
+如果 \texttt{sys\_write} 中删掉 \texttt{buf >= 0xC0000000} 的检查，
+恶意用户程序可以传入什么地址来泄露内核数据？
+
+\emph{提示：考虑 \texttt{write(1, 0xC0100000, 1024)} 会做什么——
+它会把内核代码段的 1024 字节输出到串口。}
+\end{exercise}
