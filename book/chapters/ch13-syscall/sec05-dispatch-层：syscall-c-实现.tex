@@ -1,0 +1,120 @@
+% ============================================================================
+\section{Dispatch 层：\texttt{syscall.c} 实现}
+\label{sec:syscall-dispatch}
+% ============================================================================
+
+\texttt{syscall.c} 是系统调用子系统的核心——持有 syscall table，
+实现后端注册、handler 注册、和调用分发。
+
+% ----------------------------------------------------------------------------
+\subsection{syscall table}
+% ----------------------------------------------------------------------------
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch13/fig04-syscall-table}
+  \caption{syscall table：系统调用号直接索引函数指针数组}
+  \label{fig:syscall-table}
+\end{figure}
+
+\codefile{src/kernel/core/syscall.c}
+\begin{lstlisting}[style=cstyle]
+static syscall_handler_t syscall_table[SYSCALL_MAX];
+
+/* 当前注册的后端 */
+static const syscall_ops_t* g_syscall_ops = NULL;
+static int g_syscall_ready = 0;
+\end{lstlisting}
+
+\begin{whybox}
+为什么用静态数组而非链表或哈希表？
+\begin{enumerate}
+  \item 系统调用号是小整数（通常 $< 256$），数组索引 \textbf{$O(1)$}——没有比这更快的了
+  \item 无动态内存分配——启动早期 kmalloc 可能还没初始化
+  \item 256 个指针只占 1~KiB，内存开销可忽略
+  \item 未注册的 slot 为 NULL，dispatch 时一次判断即可
+\end{enumerate}
+\end{whybox}
+
+% ----------------------------------------------------------------------------
+\subsection{后端注册}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+void syscall_register_backend(const syscall_ops_t* ops) {
+    g_syscall_ops = ops;
+}
+
+const char* syscall_backend_name(void) {
+    return g_syscall_ops ? g_syscall_ops->name : NULL;
+}
+
+int syscall_is_ready(void) {
+    return g_syscall_ready;
+}
+\end{lstlisting}
+
+这与 \texttt{vma\_register\_backend()} 完全同一套模式——一行赋值即完成注册。
+
+% ----------------------------------------------------------------------------
+\subsection{handler 注册}
+% ----------------------------------------------------------------------------
+
+\begin{lstlisting}[style=cstyle]
+int syscall_register(uint32_t nr, syscall_handler_t handler) {
+    if (nr == 0 || nr >= SYSCALL_MAX) {
+        printk("[syscall] register: invalid nr=%u\n", nr);
+        return -1;
+    }
+    syscall_table[nr] = handler;
+    return 0;
+}
+\end{lstlisting}
+
+\begin{warnbox}
+\texttt{nr == 0} 被拒绝——0 号保留为"未初始化 EAX"的安全网。
+\texttt{nr >= SYSCALL\_MAX} 防止数组越界。
+这两个检查在系统边界上是必要的，即使当前只有内核自己调用 \texttt{syscall\_register}。
+\end{warnbox}
+
+% ----------------------------------------------------------------------------
+\subsection{syscall\_dispatch：调用分发}
+\label{sec:syscall-dispatch-fn}
+% ----------------------------------------------------------------------------
+
+后端的汇编 stub 从寄存器提取参数，打包成 \texttt{syscall\_regs\_t}，
+然后调用此函数。这是系统调用路径上最关键的 C 函数。
+
+\begin{lstlisting}[style=cstyle]
+#define ENOSYS 38
+
+int32_t syscall_dispatch(const syscall_regs_t* regs) {
+    if (!regs) {
+        return -ENOSYS;
+    }
+
+    uint32_t nr = regs->nr;
+
+    if (nr >= SYSCALL_MAX || !syscall_table[nr]) {
+        printk("[syscall] unknown syscall nr=%u\n", nr);
+        return -ENOSYS;
+    }
+
+    return syscall_table[nr](regs);
+}
+\end{lstlisting}
+
+逻辑极简：
+\begin{enumerate}
+  \item 边界检查（\texttt{nr} 不超过 table 大小）
+  \item NULL 检查（该 slot 是否注册了 handler）
+  \item 调用 handler，返回结果
+\end{enumerate}
+
+\begin{thinkbox}
+为什么返回 $-$ENOSYS（$-38$）而不是 $-1$？
+
+\emph{提示：这是 POSIX 约定。\texttt{ENOSYS} 表示"Function not implemented"，
+是 Linux 内核对未实现系统调用的标准返回值。
+遵循这个约定，将来移植 GCC/libc 时用户态 \texttt{errno} 能正确设置。}
+\end{thinkbox}

@@ -1,0 +1,98 @@
+% ============================================================================
+\section{初始化：\texttt{syscall\_init()}}
+\label{sec:syscall-init}
+% ============================================================================
+
+\texttt{syscall\_init()} 做三件事：清空 table、注册 handler、调用后端 init。
+
+\codefile{src/kernel/core/syscall.c}
+\begin{lstlisting}[style=cstyle]
+void syscall_init(void) {
+    /* 1. 清空 syscall table */
+    for (unsigned i = 0; i < SYSCALL_MAX; i++) {
+        syscall_table[i] = NULL;
+    }
+
+    /* 2. 注册内置 syscall handler */
+    syscall_register(SYS_EXIT,  sys_exit);
+    syscall_register(SYS_WRITE, sys_write);
+    syscall_register(SYS_BRK,   sys_brk);
+
+    printk("[syscall] table: %u handlers registered "
+           "(exit=%u, write=%u, brk=%u)\n",
+           3, SYS_EXIT, SYS_WRITE, SYS_BRK);
+
+    /* 3. 初始化后端（安装 IDT gate 或配置 MSR） */
+    if (g_syscall_ops) {
+        printk("[syscall] backend: %s\n", g_syscall_ops->name);
+        g_syscall_ops->init();
+    } else {
+        printk("[syscall] no backend registered "
+               "(dispatch only)\n");
+    }
+
+    g_syscall_ready = 1;
+    printk("[syscall] init ok\n");
+}
+\end{lstlisting}
+
+% ----------------------------------------------------------------------------
+\subsection{kmain.c 集成}
+% ----------------------------------------------------------------------------
+
+\texttt{syscall\_init()} 在 VMA 初始化之后调用。
+这个顺序有讲究：
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+        vma_init();
+
+        if (vma_is_ready()) {
+            vma_add(KERNEL_VIRT_OFFSET, vmm_direct_map_end(),
+                    VMA_READ | VMA_WRITE | VMA_EXEC,
+                    "direct-map");
+            vma_add(KHEAP_START,
+                    KHEAP_START + KCONFIG_HEAP_INITIAL_PAGES
+                                 * VMM_PAGE_SIZE,
+                    VMA_READ | VMA_WRITE, "kheap");
+        }
+
+        /*
+         * Stage D-2: 系统调用子系统初始化
+         *
+         * 在 VMA 之后，因为 sys_write 需要通过 VMA
+         * 验证用户态指针的合法性。
+         */
+        syscall_init();
+\end{lstlisting}
+
+\begin{whybox}
+为什么 \texttt{syscall\_init} 要在 VMA 之后？
+
+\texttt{sys\_write} 需要验证用户传入的 \texttt{buf} 指针不在内核空间。
+将来更精确的检查会查询 VMA——确认 \texttt{[buf, buf+count)} 落在合法的用户 VMA 中。
+如果 VMA 还没初始化，这些检查就无法执行。
+
+另一方面，\texttt{syscall\_init} 不依赖后端——即使没有注册后端，
+dispatch 层也能正常工作（只是没有用户态入口点）。
+\end{whybox}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{kconfig.h}：后端选择}
+% ----------------------------------------------------------------------------
+
+\codefile{src/include/kernel/kconfig.h}
+\begin{lstlisting}[style=cstyle]
+/*
+ * 系统调用后端
+ *
+ *   0 = int0x80   -- 传统软中断（IDT[0x80] DPL=3）
+ *   1 = sysenter  -- Intel 快速系统调用（MSR 配置）
+ */
+#define KCONFIG_SYSCALL_BACKEND  0
+\end{lstlisting}
+
+目前还没有后端实现，所以 \texttt{kmain.c} 中暂不调用
+\texttt{syscall\_register\_backend()}。D-3 实现 \texttt{int 0x80} 后端后，
+会在 \texttt{kmain.c} 中添加基于 \texttt{KCONFIG\_SYSCALL\_BACKEND} 的选择逻辑，
+和 PMM/VMA 的后端选择完全一致。

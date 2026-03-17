@@ -61,7 +61,7 @@
 
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
-| D-2 | 系统调用概念 + `syscall_ops_t` 接口 | 用户态→内核态受控入口、调用约定（EAX=nr, EBX~EDI=args）、可插拔 `syscall_ops_t`（init/entry）+ dispatch 层 + syscall table | |
+| D-2 | 系统调用概念 + `syscall_ops_t` 接口 | 用户态→内核态受控入口、调用约定（EAX=nr, EBX~EDI=args）、可插拔 `syscall_ops_t`（init/entry）+ dispatch 层 + syscall table | ✅ |
 | D-3 | 系统调用（int 0x80）后端 | IDT gate 0x80 DPL=3、汇编 stub、第一批 syscall：`write`/`exit`/`brk`、用户态 inline asm 封装、验证 Ring 3 → int 0x80 → write("hello") | |
 | D-4 | 系统调用（sysenter）后端 *(进阶)* | MSR 配置（IA32_SYSENTER_CS/EIP/ESP）、sysenter/sysexit 快速路径、`KCONFIG_SYSCALL_BACKEND` 切换 | |
 
@@ -76,8 +76,8 @@
 
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
-| D-7 | 进程抽象 + PCB | 进程概念（地址空间 + 执行上下文 + 资源集合）、`task_struct` 数据结构、per-process 页目录与 VMA 树（内核共享/用户独立）、进程状态机（CREATED→READY→RUNNING→BLOCKED→ZOMBIE）、PID 分配 | |
-| D-8 | fork / exec / waitpid | `fork`：复制 PCB + VMA + COW 页表（共享物理页、标记只读、#PF 时复制）；`exec`：清空用户空间→ELF 加载→重设入口；`exit` + `waitpid`：进程终止+资源回收+ZOMBIE 处理 | |
+| D-7 | 进程抽象 + PCB | 进程概念（地址空间 + 执行上下文 + 资源集合）、`task_struct` 数据结构、per-process 页目录与 VMA 树（内核共享/用户独立）、进程状态机（CREATED→READY→RUNNING→BLOCKED→ZOMBIE）、PID 分配、**进程组与会话**（`pgid`/`sid` 字段、`setpgid()`/`getpgid()`/`setsid()`、控制终端绑定） | |
+| D-8 | fork / exec / waitpid + job control | `fork`：复制 PCB + VMA + COW 页表（共享物理页、标记只读、#PF 时复制）；`exec`：清空用户空间→ELF 加载→重设入口；`exit` + `waitpid`：进程终止+资源回收+ZOMBIE 处理；**job control**：`tcsetpgrp()`/`tcgetpgrp()` 前台进程组切换、`SIGTSTP`/`SIGCONT`/`SIGTTIN`/`SIGTTOU` 信号支持 | |
 
 #### D-ε：调度器 (ch16)
 
@@ -102,7 +102,7 @@
 
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
-| E-1 | VFS 概念 + `fs_ops_t` 接口 | "一切皆文件"哲学、VFS 四大对象（superblock/inode/dentry/file）概念、可插拔 `fs_ops_t`（mount/open/read/write/close/stat/readdir）+ dispatch 层、per-process fd 表、fd 0/1/2 约定 | |
+| E-1 | VFS 概念 + `fs_ops_t` 接口 | "一切皆文件"哲学、VFS 四大对象（superblock/inode/dentry/file）概念、可插拔 `fs_ops_t`（mount/open/read/write/close/stat/readdir）+ dispatch 层、per-process fd 表、fd 0/1/2 约定、**fcntl** 系统调用（`F_DUPFD` fd 复制、`F_GETFL`/`F_SETFL` 读写 `O_NONBLOCK`、`F_SETFD`/`FD_CLOEXEC` exec 时自动关闭 fd） | |
 | E-2 | ramfs 后端 | 内存文件系统实现（链表目录树、文件内容驻内存）、实现 `fs_ops_t` 全部方法、VFS 系统调用集成（sys_open/read/write/close） | |
 | E-3 | initrd 加载 | GRUB Multiboot2 module tag 解析、打包格式（CPIO/tar/自定义）、ramfs 根目录挂载、验证 `exec("/hello")` 从 initrd 加载 ELF | |
 
@@ -145,7 +145,8 @@
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
 | F-3 | 管道概念 + `ipc_ops_t` 接口 | Unix 管道原理（匿名/命名）、IPC 分类概述、可插拔 `ipc_ops_t`（create/read/write/close/poll）+ dispatch 层 | |
-| F-4 | pipe + dup2 实现 | 匿名管道后端（内核环形缓冲区、阻塞读写、EOF 检测）、`dup2()` fd 复制、Shell 集成（`|` 管道 + `>` 重定向）、验证 `ls | grep foo` 风格管道链 | |
+| F-4 | pipe + dup2 实现 | 匿名管道后端（内核环形缓冲区、阻塞读写、EOF 检测）、`dup2()` fd 复制、`pipe2()` 带 flags（`O_CLOEXEC`）、Shell 集成（`|` 管道 + `>` 重定向）、验证 `ls | grep foo` 风格管道链 | |
+| F-4.5 | select / poll | I/O 多路复用概念、`select()` / `poll()` 系统调用实现、fd 就绪状态查询（管道/终端/Socket 共用）、超时机制、验证 `read -t` 带超时读取 | |
 
 #### F-γ：mmap (ch23)
 
@@ -160,7 +161,7 @@
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
 | F-8 | libc 概念 + 选型 | libc 在用户程序与内核之间的角色、musl vs glibc vs newlib 对比、C 运行时启动流程（`_start` → `__libc_start_main` → `main`） | |
-| F-9 | 精简 libc 实现 | crt0.o 启动代码、syscall wrapper 层、核心函数实现（printf/sprintf/malloc/free/fopen/fread/string.h/ctype.h）、静态链接 libc.a、验证用户态 `printf("hello %d\n", 42)` | |
+| F-9 | 精简 libc 实现 | crt0.o 启动代码、syscall wrapper 层、核心函数实现（printf/sprintf/malloc/free/fopen/fread/string.h/ctype.h）、**setjmp/longjmp**（x86 寄存器保存/恢复）、**目录操作**（opendir/readdir/closedir）、**fnmatch**（通配符匹配）、静态链接 libc.a、验证用户态 `printf("hello %d\n", 42)` | |
 
 #### F-ε：用户态 Shell (ch25)
 
@@ -208,6 +209,13 @@
 |---|------|------|------|
 | G-8 | Vim 依赖分析 | Vim 运行时依赖（termios/PTY/libc/文件系统/信号/mmap）、最小 feature set 编译选项（`--with-features=tiny`） | |
 | G-9 | Vim 移植 + 验证 | configure 补丁、编译 + 链接 szy-libc、验证完整流程（`vim test.c` → 编辑 → `:wq` → 文件保存成功） | |
+
+#### G-ε：移植 Bash (ch29.5)
+
+| # | 名称 | 内容 | 状态 |
+|---|------|------|------|
+| G-10 | Bash 依赖分析 | Bash 运行时依赖（termios/PTY/信号/管道/fork+exec+waitpid/文件系统/环境变量/glob/readline）、最小编译选项（`--disable-nls --without-bash-malloc`） | |
+| G-11 | Bash 移植 + 验证 | configure 补丁（config.sub/config.guess 添加 `*-szy`）、交叉编译 + 链接 szy-libc、验证完整流程（`/bin/bash` 启动→交互命令→管道+重定向→脚本执行→`exit`） | |
 
 ### 里程碑 H：网络
 

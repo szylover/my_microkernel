@@ -1,0 +1,89 @@
+% ============================================================================
+\section{概念：为什么需要系统调用}
+\label{sec:syscall-concept}
+% ============================================================================
+
+上一章我们成功从 Ring 0 跳转到了 Ring 3。然而用户态代码几乎什么都做不了——
+不能输出字符（\texttt{out} 是特权指令）、不能停机（\texttt{hlt} 会 \#GP）、
+不能访问内核内存（PTE.US=0 的页会触发 \#PF）。
+
+那用户程序怎么打印 ``Hello World''？答案就是\term{系统调用}（system call）。
+
+\begin{whybox}
+系统调用是用户态进入内核的\textbf{唯一受控入口}。
+与普通函数调用不同，它涉及：
+\begin{enumerate}
+  \item \textbf{特权级切换}：CPL 从 3 升到 0，CPU 自动换栈
+  \item \textbf{参数验证}：内核必须检查用户传入的指针是否合法
+  \item \textbf{安全审计}：内核决定"允许做什么"而非用户
+\end{enumerate}
+类比：系统调用就像银行柜台——你坐在玻璃窗外面（Ring 3）填单子，
+柜员（Ring 0）审核后帮你执行操作。你不能直接进保险库。
+\end{whybox}
+
+% ----------------------------------------------------------------------------
+\subsection{系统调用 vs 普通函数调用}
+% ----------------------------------------------------------------------------
+
+初学者容易把 \texttt{write()} 当成普通的 C 函数调用。
+实际上用户态的 \texttt{write()} 是一个\textbf{薄封装}（wrapper），
+内部执行的是 \texttt{int \$0x80} 或 \texttt{sysenter} 指令，
+触发 CPU 的特权级切换机制。
+
+\begin{center}
+\begin{tabular}{lll}
+  \toprule
+  \textbf{项目} & \textbf{普通函数调用} & \textbf{系统调用} \\
+  \midrule
+  特权级   & 不变（Ring 3 → Ring 3）  & 切换（Ring 3 → Ring 0） \\
+  栈       & 同一个用户栈             & CPU 自动切换到内核栈（TSS.ESP0） \\
+  开销     & 几纳秒（\texttt{call}+\texttt{ret}） & 数百纳秒（中断流程/MSR 切换） \\
+  参数传递 & 栈或寄存器（cdecl/fastcall） & 寄存器（避免访问不可信用户栈） \\
+  安全     & 无检查                   & 内核验证每个参数 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------------
+\subsection{三种系统调用入口机制}
+\label{sec:syscall-mechanisms}
+% ----------------------------------------------------------------------------
+
+x86 提供了三种从 Ring 3 进入 Ring 0 的机制，它们的目的相同但性能和复杂度不同：
+
+\begin{enumerate}
+  \item \texttt{int N}（软中断）——最传统的方式。
+    Linux i386 早期使用 \texttt{int 0x80}。
+    CPU 查 IDT[0x80]，走完整的中断流程（保存上下文 → 切换栈 → 执行 handler）。
+    优点：简单、调试友好；缺点：比较慢（需要查 IDT + 保存完整帧）。
+
+  \item \texttt{sysenter}/\texttt{sysexit}（Intel 快速系统调用）——
+    Pentium II 引入。通过 MSR（Model Specific Register）硬编码入口点，
+    跳过 IDT 查表和完整帧保存。
+    显著（约 10×）快于 \texttt{int}，但编程复杂度更高。
+
+  \item \texttt{syscall}/\texttt{sysret}（AMD64）——
+    64 位 long mode 专用。本项目是 32 位 i386，暂不涉及。
+\end{enumerate}
+
+\begin{designbox}
+我们将 \texttt{int 0x80} 和 \texttt{sysenter} 设计为可切换的\textbf{后端}。
+本章先搭框架（接口 + dispatch + table），D-3 实现 \texttt{int 0x80}，
+D-4 实现 \texttt{sysenter}。切换只需改 \texttt{KCONFIG\_SYSCALL\_BACKEND}。
+\end{designbox}
+
+% ============================================================================
+\subsection{系统调用全路径概览}
+% ============================================================================
+
+从用户态发起一个 \texttt{write(1, "hello", 5)} 到串口看到输出，经历以下步骤：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch13/fig01-syscall-overview}
+  \caption{系统调用全路径：用户态 → 汇编 stub → 特权级切换 → 内核 handler → 返回}
+  \label{fig:syscall-overview}
+\end{figure}
+
+这条路径中，本章负责中间的"dispatch 层 + handler"部分。
+汇编 stub 和特权级切换由后端（\texttt{int 0x80} / \texttt{sysenter}）在下一章实现。

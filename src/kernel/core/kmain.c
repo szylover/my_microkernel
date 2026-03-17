@@ -14,6 +14,7 @@
 #include "vmm.h"
 #include "kmalloc.h"
 #include "vma.h"
+#include "syscall.h"
 #include "kconfig.h"
 
 /* core: 内核基础设施 */
@@ -228,6 +229,15 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
                     KHEAP_START + KCONFIG_HEAP_INITIAL_PAGES * VMM_PAGE_SIZE,
                     VMA_READ | VMA_WRITE, "kheap");
         }
+
+        /*
+         * Stage D-2: 系统调用子系统初始化
+         *
+         * [WHY] 在 VMA 之后初始化，因为将来 syscall handler（如 sys_write）
+         *   需要通过 VMA 验证用户态指针的合法性。
+         *   后端在 kconfig.h 中选择（D-3 实现 int 0x80，D-4 实现 sysenter）。
+         */
+        syscall_init();
     }
 
     /* --- IRQ + keyboard + shell --- */

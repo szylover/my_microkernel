@@ -1,4 +1,16 @@
 
+## 2026-03-17 (Roadmap: Bash porting + infrastructure gaps)
+- `docs/roadmap.md`：新增 G-ε 移植 Bash 子阶段（G-10 依赖分析 + G-11 移植验证）；为满足 Bash 运行时依赖，在 D/E/F 里程碑中补充通用基础设施——D-7/D-8 增加 job control（进程组/会话/`setpgid`/`setsid`/`tcsetpgrp`/`SIGTSTP`/`SIGCONT`）、E-1 VFS 增加 `fcntl`（`F_DUPFD`/`O_NONBLOCK`/`FD_CLOEXEC`）、F-4 增加 `pipe2` + 新增 F-4.5 select/poll I/O 多路复用、F-9 libc 增加 `setjmp`/`longjmp`/`opendir`/`fnmatch`。
+
+## 2026-03-17 (Stage D-2: syscall_ops_t interface + dispatch layer)
+- 新增 `src/include/kernel/syscall.h`：系统调用可插拔接口定义——`syscall_ops_t`（name/init）+ `syscall_regs_t` 参数快照结构体 + `syscall_handler_t` handler 签名 + 系统调用号定义（`SYS_EXIT=1`/`SYS_WRITE=4`/`SYS_BRK=45`）+ dispatch/register/init API 声明。
+- 新增 `src/kernel/core/syscall.c`：dispatch 层实现——`syscall_table[256]` 静态数组（nr→handler O(1) 查表）、`syscall_dispatch()` 分发函数（未注册返回 -ENOSYS）、`syscall_register()` handler 注册、`syscall_init()` 初始化（清空表→注册内置 handler→调用后端 init）、内置 stub 实现（`sys_exit` halt / `sys_write` 串口输出+用户指针检查 / `sys_brk` 占位）。
+- `src/include/kernel/kconfig.h`：新增 `KCONFIG_SYSCALL_BACKEND`（0=int0x80, 1=sysenter），为 D-3/D-4 后端切换预留。
+- `src/kernel/core/kmain.c`：VMA 初始化之后添加 `syscall_init()` 调用 + `#include "syscall.h"`。
+- `compile_commands.json`：重新生成（新增 syscall.c 条目）。
+- 调用约定：EAX=syscall nr, EBX~EDI=arg1~arg5，返回值通过 EAX（与 Linux i386 ABI 一致）。
+- 验证通过：QEMU 启动输出 `[syscall] table: 3 handlers registered` + `[syscall] init ok`；所有已有测试回归通过。
+
 ## 2026-03-17 (Stage D-1: TSS + Ring 3)
 - 新增 `src/include/arch/tss.h`：TSS 结构体定义（104 字节）+ 段选择子枚举 (`SEL_USER_CODE=0x1B` / `SEL_USER_DATA=0x23` / `SEL_TSS=0x28`) + API 声明 (`tss_init` / `tss_set_kernel_stack` / `jump_to_ring3`)。
 - 新增 `src/kernel/arch/tss.c`：TSS 初始化（清零 + SS0:ESP0 + iomap_base + GDT[5] TSS 描述符 + `ltr` 加载）；`tss_set_kernel_stack()` 为将来进程切换预留。

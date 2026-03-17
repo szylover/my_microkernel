@@ -1,0 +1,17 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解系统调用的本质：用户态通过受控入口请求内核服务
+  \item 掌握 i386 系统调用寄存器约定：EAX=syscall nr, EBX\textasciitilde EDI=args
+  \item 设计可插拔 \texttt{syscall\_ops\_t} 接口（与 \texttt{pmm\_ops\_t}/\texttt{vma\_ops\_t} 同一模式）
+  \item 实现 dispatch 层 + syscall table（O(1) 查表分发）
+  \item 注册第一批 syscall handler：\texttt{sys\_write}/\texttt{sys\_exit}/\texttt{sys\_brk}
+  \item 在 \texttt{kconfig.h} 预留 \texttt{KCONFIG\_SYSCALL\_BACKEND} 供后续后端切换
+\end{itemize}
+
+\begin{designbox}
+本章只搭建系统调用的\textbf{框架}——接口、dispatch、syscall table、handler 占位。
+真正的系统调用\textbf{入口}（汇编 stub + IDT/MSR 配置）在下一节（D-3: \texttt{int 0x80}
+后端）实现。框架先行的好处是：后端只需关注"如何从 Ring 3 切换到 Ring 0 并提取寄存器参数"，
+dispatch 和 handler 逻辑完全复用。
+\end{designbox}
