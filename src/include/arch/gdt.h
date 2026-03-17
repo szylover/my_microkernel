@@ -30,16 +30,34 @@
  * - bit 2: TI（0=GDT, 1=LDT）
  * - bits 0..1: RPL（请求特权级，0..3）
  *
- * 我们的 GDT：
+ * 我们的 GDT（6 项）：
  * - index 0: null
- * - index 1: kernel code
- * - index 2: kernel data
+ * - index 1: kernel code  (DPL=0)
+ * - index 2: kernel data  (DPL=0)
+ * - index 3: user code    (DPL=3)   ← D-1 新增
+ * - index 4: user data    (DPL=3)   ← D-1 新增
+ * - index 5: TSS                    ← D-1 新增
  */
 
 enum {
-    GDT_KERNEL_CODE_SEL = 0x08, /* 1 << 3 */
-    GDT_KERNEL_DATA_SEL = 0x10, /* 2 << 3 */
+    GDT_KERNEL_CODE_SEL = 0x08, /* 1 << 3           */
+    GDT_KERNEL_DATA_SEL = 0x10, /* 2 << 3           */
+    GDT_USER_CODE_SEL   = 0x1B, /* (3 << 3) | RPL=3 */
+    GDT_USER_DATA_SEL   = 0x23, /* (4 << 3) | RPL=3 */
+    GDT_TSS_SEL         = 0x28, /* 5 << 3           */
 };
 
 /* 初始化并加载 GDT，同时刷新 CS/DS/SS 等段寄存器。 */
 void gdt_init(void);
+
+/*
+ * gdt_set_tss_entry — 在 GDT[5] 写入 TSS 描述符
+ *
+ * [WHY] TSS 描述符是"系统段"（S=0），type=0x89 表示 32-bit TSS Available。
+ *   tss_init() 知道 TSS 结构体的地址和大小，通过此函数写入 GDT。
+ *   分开暴露而不是在 gdt_init() 里直接写，是为了避免 gdt.c 依赖 tss.h。
+ *
+ * @param base  TSS 结构体的线性地址
+ * @param limit TSS 大小 - 1（通常 103 = sizeof(tss_t) - 1）
+ */
+void gdt_set_tss_entry(uint32_t base, uint32_t limit);
