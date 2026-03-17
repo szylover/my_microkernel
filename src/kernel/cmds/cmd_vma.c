@@ -119,10 +119,15 @@ static int cmd_vma_count_fn(void) {
  * [WHY] 验证 VMA 后端的基本功能：
  *   1. add + find: 添加一个临时 VMA，然后查找确认存在
  *   2. find outside: 查找不属于该 VMA 的地址，确认返回 NULL
- *   3. remove + find: 移除后再查找，确认不存在
- *   4. overlap: 尝试添加重叠的 VMA，确认被拒绝
+ *   3. overlap: 尝试添加重叠的 VMA，确认被拒绝
+ *   4. remove + find: 移除后再查找，确认不存在
+ *   5. boundary: 边界地址测试（start, end-1, end）
+ *   6. adjacent: 相邻但不重叠的 VMA
+ *   7. multiple: 批量添加多个 VMA，逐一查找
+ *   8. remove non-existent: 移除不存在的 VMA 应返回错误
+ *   9. count consistency: 添加/移除后验证 count 一致
  *
- * 测试用地址 0xF1000000 - 0xF1010000 (64KiB)，位于内核虚拟地址空间的
+ * 测试用地址 0xF1000000 - 0xF1100000，位于内核虚拟地址空间的
  * 高端区域，不会和已有映射冲突。
  */
 static int cmd_vma_test(void) {
@@ -187,6 +192,168 @@ static int cmd_vma_test(void) {
             pass = 0;
         } else {
             printk("[vma-test] PASS\n");
+        }
+    }
+
+    /* test 5: boundary addresses */
+    printk("[vma-test] test 5: boundary find (start, end-1, end)\n");
+    {
+        if (vma_add(test_start, test_end, VMA_READ, "_test_bound") != 0) {
+            printk("[vma-test] FAIL: vma_add for boundary test\n");
+            pass = 0;
+        } else {
+            int bound_ok = 1;
+
+            /* find(start) → should hit */
+            v = vma_find(test_start);
+            if (!v || v->start != test_start) {
+                printk("[vma-test] FAIL: find(start=0x%08x) missed\n", test_start);
+                bound_ok = 0;
+            }
+
+            /* find(end - 1) → should hit (last byte in range) */
+            v = vma_find(test_end - 1);
+            if (!v || v->start != test_start) {
+                printk("[vma-test] FAIL: find(end-1=0x%08x) missed\n", test_end - 1);
+                bound_ok = 0;
+            }
+
+            /* find(end) → should miss (half-open interval) */
+            v = vma_find(test_end);
+            if (v && v->start == test_start) {
+                printk("[vma-test] FAIL: find(end=0x%08x) should not hit\n", test_end);
+                bound_ok = 0;
+            }
+
+            vma_remove(test_start);
+            if (bound_ok)
+                printk("[vma-test] PASS\n");
+            else
+                pass = 0;
+        }
+    }
+
+    /* test 6: adjacent (non-overlapping, touching) regions */
+    printk("[vma-test] test 6: adjacent regions\n");
+    {
+        const uint32_t a_start = 0xF1020000u;
+        const uint32_t a_end   = 0xF1030000u;
+        const uint32_t b_start = 0xF1030000u;  /* touches a_end exactly */
+        const uint32_t b_end   = 0xF1040000u;
+        int adj_ok = 1;
+
+        if (vma_add(a_start, a_end, VMA_READ, "_adj_a") != 0) {
+            printk("[vma-test] FAIL: add region A\n");
+            adj_ok = 0;
+        }
+        if (adj_ok && vma_add(b_start, b_end, VMA_READ | VMA_WRITE, "_adj_b") != 0) {
+            printk("[vma-test] FAIL: add region B (adjacent should succeed)\n");
+            adj_ok = 0;
+        }
+
+        if (adj_ok) {
+            /* Find in A */
+            v = vma_find(a_start + 0x100);
+            if (!v || v->start != a_start) {
+                printk("[vma-test] FAIL: find in region A\n");
+                adj_ok = 0;
+            }
+            /* Find in B */
+            v = vma_find(b_start + 0x100);
+            if (!v || v->start != b_start) {
+                printk("[vma-test] FAIL: find in region B\n");
+                adj_ok = 0;
+            }
+            /* Verify flags differ */
+            v = vma_find(a_start);
+            if (v && (v->flags & VMA_WRITE)) {
+                printk("[vma-test] FAIL: region A should be RO\n");
+                adj_ok = 0;
+            }
+        }
+
+        vma_remove(a_start);
+        vma_remove(b_start);
+        if (adj_ok)
+            printk("[vma-test] PASS\n");
+        else
+            pass = 0;
+    }
+
+    /* test 7: multiple VMAs batch */
+    printk("[vma-test] test 7: batch add/find (8 regions)\n");
+    {
+        #define VMA_BATCH_N 8
+        uint32_t bases[VMA_BATCH_N];
+        int batch_ok = 1;
+
+        for (int i = 0; i < VMA_BATCH_N; i++) {
+            bases[i] = 0xF1050000u + (uint32_t)i * 0x10000u;
+            uint32_t end = bases[i] + 0x10000u;
+            if (vma_add(bases[i], end, VMA_READ, "_batch") != 0) {
+                printk("[vma-test] FAIL: batch add %d (0x%08x)\n", i, bases[i]);
+                batch_ok = 0;
+                /* clean up already added */
+                for (int j = 0; j < i; j++) vma_remove(bases[j]);
+                break;
+            }
+        }
+
+        if (batch_ok) {
+            /* Find middle of each region */
+            for (int i = 0; i < VMA_BATCH_N; i++) {
+                v = vma_find(bases[i] + 0x8000);
+                if (!v || v->start != bases[i]) {
+                    printk("[vma-test] FAIL: batch find %d (0x%08x)\n", i, bases[i]);
+                    batch_ok = 0;
+                }
+            }
+            /* Clean up */
+            for (int i = 0; i < VMA_BATCH_N; i++) vma_remove(bases[i]);
+        }
+
+        if (batch_ok)
+            printk("[vma-test] PASS\n");
+        else
+            pass = 0;
+        #undef VMA_BATCH_N
+    }
+
+    /* test 8: remove non-existent */
+    printk("[vma-test] test 8: remove non-existent\n");
+    {
+        ret = vma_remove(0xF1FF0000u);
+        if (ret == 0) {
+            printk("[vma-test] FAIL: removing non-existent VMA should fail\n");
+            pass = 0;
+        } else {
+            printk("[vma-test] PASS\n");
+        }
+    }
+
+    /* test 9: count consistency */
+    printk("[vma-test] test 9: count consistency\n");
+    {
+        unsigned count_before = vma_count();
+        if (vma_add(test_start, test_end, VMA_READ, "_cnt") != 0) {
+            printk("[vma-test] FAIL: add for count test\n");
+            pass = 0;
+        } else {
+            unsigned count_after = vma_count();
+            if (count_after != count_before + 1) {
+                printk("[vma-test] FAIL: count %u -> %u (expected +1)\n",
+                       count_before, count_after);
+                pass = 0;
+            }
+            vma_remove(test_start);
+            unsigned count_final = vma_count();
+            if (count_final != count_before) {
+                printk("[vma-test] FAIL: count not restored %u != %u\n",
+                       count_final, count_before);
+                pass = 0;
+            } else {
+                printk("[vma-test] PASS\n");
+            }
         }
     }
 

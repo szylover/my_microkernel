@@ -112,6 +112,7 @@ static void cmd_pmm_usage(void) {
     printk("  pmm free <addr>\n");
     printk("  pmm freeall\n");
     printk("  pmm dump [start_index] [count]\n");
+    printk("  pmm test              — automated selftest\n");
     printk("Notes:\n");
     printk("  - addr can be decimal or hex (0x...)\n");
     printk("  - dump shows used/free for page indices\n");
@@ -271,6 +272,167 @@ static int cmd_pmm_dump(int argc, char** argv) {
     return 0;
 }
 
+/*
+ * pmm test — 自动化 PMM selftest
+ *
+ * 测试 1: 基本 alloc/free 往返 — 分配后 free 计数减少，释放后恢复
+ * 测试 2: 页对齐验证 — 所有返回地址都 4KiB 对齐
+ * 测试 3: 唯一性验证 — 连续分配的页地址互不相同
+ * 测试 4: 批量压力 — 连续分配 32 页再全部释放，验证计数器一致
+ * 测试 5: 写读验证 — 通过 PHYS_TO_VIRT 写入并回读魔数
+ */
+#include "vmm.h"  /* for PHYS_TO_VIRT */
+
+static int cmd_pmm_test(void) {
+    printk("[pmm-test] === PMM selftest ===\n");
+    int pass = 1;
+
+    /* --- 测试 1: 基本 alloc/free 往返 --- */
+    printk("[pmm-test] test 1: basic alloc/free roundtrip\n");
+    unsigned free_before = pmm_free_pages();
+    void* p1 = pmm_alloc_page();
+    if (!p1) {
+        printk("[pmm-test] FAIL: pmm_alloc_page returned NULL\n");
+        return 0;
+    }
+    unsigned free_after_alloc = pmm_free_pages();
+    if (free_after_alloc != free_before - 1) {
+        printk("[pmm-test] FAIL: free count %u -> %u (expected %u)\n",
+               free_before, free_after_alloc, free_before - 1);
+        pass = 0;
+    }
+    pmm_free_page(p1);
+    unsigned free_after_free = pmm_free_pages();
+    if (free_after_free != free_before) {
+        printk("[pmm-test] FAIL: free count not restored %u != %u\n",
+               free_after_free, free_before);
+        pass = 0;
+    }
+    if (pass) printk("[pmm-test] PASS\n");
+
+    /* --- 测试 2: 页对齐验证 --- */
+    printk("[pmm-test] test 2: page alignment\n");
+    int align_ok = 1;
+    #define PMM_TEST_ALIGN_N 8
+    void* align_pages[PMM_TEST_ALIGN_N];
+    for (int i = 0; i < PMM_TEST_ALIGN_N; i++) {
+        align_pages[i] = pmm_alloc_page();
+        if (!align_pages[i]) {
+            printk("[pmm-test] FAIL: alloc returned NULL at i=%d\n", i);
+            /* 释放已分配的 */
+            for (int j = 0; j < i; j++) pmm_free_page(align_pages[j]);
+            return 0;
+        }
+        uint32_t addr = (uint32_t)(uintptr_t)align_pages[i];
+        if (addr & 0xFFFu) {
+            printk("[pmm-test] FAIL: page %d not 4KiB aligned: 0x%08x\n", i, addr);
+            align_ok = 0;
+        }
+    }
+    for (int i = 0; i < PMM_TEST_ALIGN_N; i++) pmm_free_page(align_pages[i]);
+    if (align_ok) {
+        printk("[pmm-test] PASS\n");
+    } else {
+        pass = 0;
+    }
+
+    /* --- 测试 3: 唯一性验证 --- */
+    printk("[pmm-test] test 3: uniqueness\n");
+    int unique_ok = 1;
+    #define PMM_TEST_UNIQUE_N 16
+    void* unique_pages[PMM_TEST_UNIQUE_N];
+    for (int i = 0; i < PMM_TEST_UNIQUE_N; i++) {
+        unique_pages[i] = pmm_alloc_page();
+        if (!unique_pages[i]) {
+            printk("[pmm-test] FAIL: alloc returned NULL at i=%d\n", i);
+            for (int j = 0; j < i; j++) pmm_free_page(unique_pages[j]);
+            return 0;
+        }
+    }
+    for (int i = 0; i < PMM_TEST_UNIQUE_N; i++) {
+        for (int j = i + 1; j < PMM_TEST_UNIQUE_N; j++) {
+            if (unique_pages[i] == unique_pages[j]) {
+                printk("[pmm-test] FAIL: duplicate page [%d]==[%d]=0x%08x\n",
+                       i, j, (unsigned)(uintptr_t)unique_pages[i]);
+                unique_ok = 0;
+            }
+        }
+    }
+    for (int i = 0; i < PMM_TEST_UNIQUE_N; i++) pmm_free_page(unique_pages[i]);
+    if (unique_ok) {
+        printk("[pmm-test] PASS\n");
+    } else {
+        pass = 0;
+    }
+
+    /* --- 测试 4: 批量压力 + 计数器一致 --- */
+    printk("[pmm-test] test 4: batch stress (32 pages)\n");
+    unsigned free_start = pmm_free_pages();
+    #define PMM_TEST_BATCH_N 32
+    void* batch_pages[PMM_TEST_BATCH_N];
+    int alloc_count = 0;
+    for (int i = 0; i < PMM_TEST_BATCH_N; i++) {
+        batch_pages[i] = pmm_alloc_page();
+        if (!batch_pages[i]) {
+            printk("[pmm-test] WARN: OOM at page %d (ok if memory is tight)\n", i);
+            break;
+        }
+        alloc_count++;
+    }
+    unsigned free_mid = pmm_free_pages();
+    if (free_mid != free_start - (unsigned)alloc_count) {
+        printk("[pmm-test] FAIL: free count %u, expected %u (allocated %d)\n",
+               free_mid, free_start - (unsigned)alloc_count, alloc_count);
+        pass = 0;
+    }
+    for (int i = 0; i < alloc_count; i++) {
+        pmm_free_page(batch_pages[i]);
+    }
+    unsigned free_end = pmm_free_pages();
+    if (free_end != free_start) {
+        printk("[pmm-test] FAIL: free count not restored %u != %u\n",
+               free_end, free_start);
+        pass = 0;
+    }
+    if (pass) printk("[pmm-test] PASS\n");
+
+    /* --- 测试 5: 写读验证（通过内核虚拟地址） --- */
+    printk("[pmm-test] test 5: write/read via PHYS_TO_VIRT\n");
+    if (vmm_is_ready()) {
+        void* pg = pmm_alloc_page();
+        if (pg) {
+            uint32_t* virt = (uint32_t*)PHYS_TO_VIRT(pg);
+            /* 写入魔数模式 */
+            for (unsigned i = 0; i < PMM_PAGE_SIZE / sizeof(uint32_t); i++) {
+                virt[i] = 0xC0FFEE00u + i;
+            }
+            /* 回读验证 */
+            int rw_ok = 1;
+            for (unsigned i = 0; i < PMM_PAGE_SIZE / sizeof(uint32_t); i++) {
+                if (virt[i] != 0xC0FFEE00u + i) {
+                    printk("[pmm-test] FAIL: mismatch at word %u: 0x%08x != 0x%08x\n",
+                           i, virt[i], 0xC0FFEE00u + i);
+                    rw_ok = 0;
+                    break;
+                }
+            }
+            pmm_free_page(pg);
+            if (rw_ok) {
+                printk("[pmm-test] PASS\n");
+            } else {
+                pass = 0;
+            }
+        } else {
+            printk("[pmm-test] SKIP: alloc returned NULL\n");
+        }
+    } else {
+        printk("[pmm-test] SKIP: VMM not ready\n");
+    }
+
+    printk("[pmm-test] === %s ===\n", pass ? "ALL PASS" : "SOME FAILED");
+    return 0;
+}
+
 static int cmd_pmm_main(int argc, char** argv) {
     if (argc < 2) {
         cmd_pmm_usage();
@@ -292,6 +454,9 @@ static int cmd_pmm_main(int argc, char** argv) {
     if (streq(argv[1], "dump")) {
         return cmd_pmm_dump(argc, argv);
     }
+    if (streq(argv[1], "test")) {
+        return cmd_pmm_test();
+    }
     if (streq(argv[1], "help") || streq(argv[1], "-h") || streq(argv[1], "--help")) {
         cmd_pmm_usage();
         return 0;
@@ -304,6 +469,6 @@ static int cmd_pmm_main(int argc, char** argv) {
 
 const cmd_t cmd_pmm = {
     .name = "pmm",
-    .help = "PMM tools: state/alloc/free/freeall/dump",
+    .help = "PMM tools: state/alloc/free/freeall/dump/test",
     .fn = cmd_pmm_main,
 };

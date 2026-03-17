@@ -188,8 +188,8 @@ if [[ "${TEST_PMM}" == "1" ]]; then
   tr -d '\r' <"${LOG_PMM_RAW}" >"${LOG_PMM}" || true
 
   # Basic command presence checks.
-  if ! grep -Fq -- "PMM: base=" "${LOG_PMM}"; then
-    echo "[FAIL] pmm output: missing 'PMM: base=' line"
+  if ! grep -Fq -- "PMM: min_base=" "${LOG_PMM}"; then
+    echo "[FAIL] pmm output: missing 'PMM: min_base=' line"
     echo "[test] pmm log (last 120 lines):"
     tail -n 120 "${LOG_PMM}" || true
     exit 1
@@ -273,6 +273,74 @@ if [[ "${TEST_HEAP}" == "1" ]]; then
   fi
 
   echo "[ OK ] heap test (vmm_alloc_pages selftest)"
+fi
+
+# Optional: verify `vma test` selftest.
+# Enable with: TEST_VMA=1 make test
+TEST_VMA=${TEST_VMA:-0}
+
+if [[ "${TEST_VMA}" == "1" ]]; then
+  echo "[test] cmd: vma test (VMA selftest)"
+  LOG_VMA_RAW="${LOG_DIR}/serial-vma-${TS}.raw.log"
+  LOG_VMA="${LOG_DIR}/serial-vma-${TS}.log"
+
+  QEMU_TIMEOUT_VMA_SEC=${QEMU_TIMEOUT_VMA_SEC:-8}
+
+  ({
+    sleep 1
+    printf 'vma test\n'
+  } ) | (timeout "${QEMU_TIMEOUT_VMA_SEC}s" "${QEMU_BIN}" \
+    -cdrom "${ISO_IMAGE}" \
+    -serial stdio \
+    -display none \
+    -no-reboot \
+    -no-shutdown \
+    >"${LOG_VMA_RAW}" 2>&1) || true
+
+  tr -d '\r' <"${LOG_VMA_RAW}" >"${LOG_VMA}" || true
+
+  if ! grep -Fq -- "[vma-test] === ALL PASS ===" "${LOG_VMA}"; then
+    echo "[FAIL] vma test: missing 'ALL PASS' marker"
+    echo "[test] vma log (last 80 lines):"
+    tail -n 80 "${LOG_VMA}" || true
+    exit 1
+  fi
+
+  echo "[ OK ] vma test (VMA selftest)"
+fi
+
+# Optional: verify `pmm test` selftest.
+# Enable with: TEST_PMM_TEST=1 make test
+TEST_PMM_TEST=${TEST_PMM_TEST:-0}
+
+if [[ "${TEST_PMM_TEST}" == "1" ]]; then
+  echo "[test] cmd: pmm test (PMM selftest)"
+  LOG_PMM_TEST_RAW="${LOG_DIR}/serial-pmm-test-${TS}.raw.log"
+  LOG_PMM_TEST="${LOG_DIR}/serial-pmm-test-${TS}.log"
+
+  QEMU_TIMEOUT_PMM_TEST_SEC=${QEMU_TIMEOUT_PMM_TEST_SEC:-8}
+
+  ({
+    sleep 1
+    printf 'pmm test\n'
+  } ) | (timeout "${QEMU_TIMEOUT_PMM_TEST_SEC}s" "${QEMU_BIN}" \
+    -cdrom "${ISO_IMAGE}" \
+    -serial stdio \
+    -display none \
+    -no-reboot \
+    -no-shutdown \
+    >"${LOG_PMM_TEST_RAW}" 2>&1) || true
+
+  tr -d '\r' <"${LOG_PMM_TEST_RAW}" >"${LOG_PMM_TEST}" || true
+
+  if ! grep -Fq -- "[pmm-test] === ALL PASS ===" "${LOG_PMM_TEST}"; then
+    echo "[FAIL] pmm test: missing 'ALL PASS' marker"
+    echo "[test] pmm test log (last 80 lines):"
+    tail -n 80 "${LOG_PMM_TEST}" || true
+    exit 1
+  fi
+
+  echo "[ OK ] pmm test (PMM selftest)"
 fi
 
 if [[ "${fail}" -ne 0 ]]; then

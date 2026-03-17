@@ -1,4 +1,12 @@
 
+## 2026-03-17 (Enhanced tests + testing appendix)
+- `cmd_pmm.c`：新增 `pmm test` 自动化命令（5 项：alloc/free 往返、页对齐、唯一性、32 页批量压力、PHYS_TO_VIRT 写读验证）。
+- `cmd_heap.c`：`heap test` 从 4 项扩展到 8 项（新增：8 字节对齐验证、碎片化压力、1~2048 递增大小、4096 大块分配）。
+- `cmd_vma.c`：`vma test` 从 4 项扩展到 9 项（新增：边界半开区间、相邻区域、8 区域批量、移除不存在、count 一致性）。
+- `scripts/test.sh`：新增 `TEST_VMA=1` 和 `TEST_PMM_TEST=1` 自动化标志；修复 PMM 输出匹配模式 `PMM: base=` → `PMM: min_base=`。
+- 新增 `book/chapters/appendix-testing.tex`：内核测试框架附录（PMM/Heap/VMA 测试原理与代码详解、QEMU 自动化脚本、测试设计原则）。
+- `book/main.tex`：附录部分加入 `appendix-testing`。
+
 ## 2026-03-16 (Book: add Part 5–7 placeholder chapters)
 - `main.tex`：新增 Part 5 POSIX 兼容层（ch21–ch25）、Part 6 移植 GCC 与 Vim（ch26–ch29）、Part 7 网络（ch30–ch33），Part 4 补充 ch19 磁盘文件系统、ch20 设备文件。
 - 新增 15 个占位章节文件（ch19–ch33），每个包含本章目标和背景知识 TODO 框架。
