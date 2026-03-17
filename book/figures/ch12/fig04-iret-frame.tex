@@ -1,0 +1,36 @@
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    cell/.style={draw, minimum height=0.8cm, minimum width=5cm, anchor=west, font=\ttfamily\small},
+    addr/.style={font=\ttfamily\footnotesize, anchor=east},
+  ]
+    \node[font=\bfseries] at (2.5, 0.5) {iret 帧（栈上布局）};
+
+    % Stack grows downward, so low address is at bottom
+    \node[cell, fill=green!15] (ss) at (0, -0.3)  {SS \quad\quad (0x23)};
+    \node[cell, fill=green!10] (esp) at (0, -1.1)  {ESP \quad\quad (user\_stack\_top)};
+    \node[cell, fill=yellow!15] (efl) at (0, -1.9) {EFLAGS \quad (IF=1)};
+    \node[cell, fill=blue!10] (cs) at (0, -2.7)   {CS \quad\quad (0x1B)};
+    \node[cell, fill=blue!15] (eip) at (0, -3.5)  {EIP \quad\quad (user\_entry)};
+
+    % Push order annotations
+    \node[addr] at (-0.2, -0.3) {先 push};
+    \node[addr] at (-0.2, -3.5) {后 push};
+
+    % Pop order
+    \draw[->, thick, red!60!black] (5.5, -3.5) -- (5.5, -0.3)
+      node[right, pos=0.5, text width=2.5cm, font=\small] {iret 弹出\\顺序};
+
+    % Address annotation
+    \node[font=\small, gray, anchor=west] at (5.8, -0.3) {高地址};
+    \node[font=\small, gray, anchor=west] at (5.8, -3.5) {低地址 (ESP)};
+
+    % Cross-privilege note
+    \draw[decorate, decoration={brace, amplitude=5pt}, thick]
+      (-0.3, 0.0) -- (-0.3, -1.4);
+    \node[font=\small, text width=3cm, anchor=east, align=right] at (-0.5, -0.7)
+      {跨特权级时\\额外弹出};
+  \end{tikzpicture}
+  \caption{\texttt{iret} 帧布局——跨特权级返回时的 5 个栈元素}
+  \label{fig:iret-frame}
+\end{figure}

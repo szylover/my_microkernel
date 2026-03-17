@@ -1,0 +1,91 @@
+% ============================================================================
+\section{GDT 扩展：添加用户态段}
+\label{sec:tss-gdt-extend}
+% ============================================================================
+
+之前的 GDT 只有 3 项（null + 内核代码 + 内核数据）。
+现在我们需要扩展到 6 项，新增用户态段和 TSS：
+
+\input{figures/ch12/fig03-gdt-layout}
+
+% ----------------------------------------------------------------------------
+\subsection{用户代码段与用户数据段}
+% ----------------------------------------------------------------------------
+
+用户态段和内核段的\textbf{唯一区别}是 DPL 从 0 改为 3。
+其他所有参数（base=0, limit=4GiB, 平坦段）完全相同：
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{段} & \textbf{access} & \textbf{DPL} & \textbf{含义} \\
+\midrule
+Kernel Code & \texttt{0x9A} & 0 & P=1, DPL=0, S=1, code+read \\
+Kernel Data & \texttt{0x92} & 0 & P=1, DPL=0, S=1, data+write \\
+User Code   & \texttt{0xFA} & 3 & P=1, DPL=3, S=1, code+read \\
+User Data   & \texttt{0xF2} & 3 & P=1, DPL=3, S=1, data+write \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ----------------------------------------------------------------------------
+\subsection{段选择子的计算}
+% ----------------------------------------------------------------------------
+
+段选择子 = \texttt{(GDT index << 3) | RPL}。对于用户态段，RPL=3：
+
+\begin{itemize}
+  \item User Code: \texttt{(3 << 3) | 3} = \texttt{0x18 | 0x03} = \hex{1B}
+  \item User Data: \texttt{(4 << 3) | 3} = \texttt{0x20 | 0x03} = \hex{23}
+  \item TSS:       \texttt{(5 << 3) | 0} = \hex{28}（DPL=0，只有内核能 \texttt{ltr}）
+\end{itemize}
+
+% ----------------------------------------------------------------------------
+\subsection{代码实现：\texttt{gdt\_init()} 扩展}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/arch/gdt.c（扩展部分）}
+\begin{lstlisting}[style=cstyle]
+/* GDT 条目从 3 扩展到 6 */
+static gdt_entry_t gdt[6];
+
+void gdt_init(void) {
+    gdt_set_entry(0, 0, 0, 0, 0);            /* null */
+    gdt_set_entry(1, 0, 0xFFFFF, 0x9A, 0xC0); /* kernel code */
+    gdt_set_entry(2, 0, 0xFFFFF, 0x92, 0xC0); /* kernel data */
+
+    /* 新增：用户态段（DPL=3） */
+    gdt_set_entry(3, 0, 0xFFFFF, 0xFA, 0xC0); /* user code */
+    gdt_set_entry(4, 0, 0xFFFFF, 0xF2, 0xC0); /* user data */
+
+    /* TSS 位置先设为空，tss_init() 会调用 gdt_set_tss_entry() 填写 */
+    gdt_set_entry(5, 0, 0, 0, 0);
+
+    gdtr.limit = (uint16_t)(sizeof(gdt) - 1);
+    gdtr.base  = (uint32_t)(uintptr_t)&gdt[0];
+    gdt_flush(&gdtr);
+}
+\end{lstlisting}
+
+\codefile{src/include/arch/gdt.h}
+\begin{lstlisting}[style=cstyle]
+enum {
+    GDT_KERNEL_CODE_SEL = 0x08, /* 1 << 3           */
+    GDT_KERNEL_DATA_SEL = 0x10, /* 2 << 3           */
+    GDT_USER_CODE_SEL   = 0x1B, /* (3 << 3) | RPL=3 */
+    GDT_USER_DATA_SEL   = 0x23, /* (4 << 3) | RPL=3 */
+    GDT_TSS_SEL         = 0x28, /* 5 << 3           */
+};
+
+void gdt_init(void);
+void gdt_set_tss_entry(uint32_t base, uint32_t limit);
+\end{lstlisting}
+
+\begin{thinkbox}
+为什么 \texttt{gdt\_set\_tss\_entry()} 要单独作为一个函数暴露出去，
+而不是直接在 \texttt{gdt\_init()} 中完成 TSS 描述符的写入？
+
+\emph{提示：TSS 描述符需要知道 TSS 结构体的地址（base）和大小（limit），
+而 TSS 结构体定义在 tss.c 中。如果在 gdt\_init() 就写入，
+需要在 gdt.c 中 \texttt{\#include "tss.h"}，增加了模块间的耦合。}
+\end{thinkbox}

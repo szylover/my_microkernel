@@ -1,0 +1,104 @@
+% ============================================================================
+\section{验证}
+\label{sec:tss-verify}
+% ============================================================================
+
+我们通过 \texttt{ring3 test} shell 命令来验证整个 TSS + Ring 3 机制。
+
+% ----------------------------------------------------------------------------
+\subsection{测试流程}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/cmds/cmd\_ring3.c}
+\begin{lstlisting}[style=cstyle]
+static int ring3_test(void) {
+    /* 1. 分配物理页并映射到用户代码地址 */
+    uint32_t code_phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+    vmm_map_page(USER_CODE_VADDR, code_phys,
+                 PTE_PRESENT | PTE_USER);
+
+    /* 2. 分配物理页并映射到用户栈地址 */
+    uint32_t stack_phys = (uint32_t)(uintptr_t)pmm_alloc_page();
+    vmm_map_page(USER_STACK_VADDR, stack_phys,
+                 PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+
+    /* 3. 将 HLT 指令（0xF4）复制到用户代码页 */
+    kmemcpy((void*)USER_CODE_VADDR,
+            user_test_code, sizeof(user_test_code));
+
+    /* 4. 注册 VMA（便于 #PF handler 诊断） */
+    vma_add(USER_CODE_VADDR, ..., VMA_READ | VMA_EXEC, "user-code");
+    vma_add(USER_STACK_VADDR, ..., VMA_READ | VMA_WRITE, "user-stack");
+
+    /* 5. 跳转到 Ring 3 —— 不返回！ */
+    jump_to_ring3(USER_CODE_VADDR, USER_STACK_TOP);
+}
+\end{lstlisting}
+
+地址选择：
+
+\begin{itemize}
+  \item 用户代码页：\hex{00400000}（4MiB 处，避开 NULL 区域）
+  \item 用户栈页：\hex{00401000}，栈顶 = \hex{00402000}（栈向低地址增长）
+\end{itemize}
+
+% ----------------------------------------------------------------------------
+\subsection{用户态测试代码}
+% ----------------------------------------------------------------------------
+
+测试代码只有 3 字节：
+
+\begin{lstlisting}[style=nasmstyle]
+0xF4        ; hlt — Ring 3 执行此指令触发 #GP
+0xEB, 0xFE  ; jmp $ — 无穷循环（安全网）
+\end{lstlisting}
+
+\noindent \texttt{HLT} 是特权指令——只有 Ring 0 可以执行。
+Ring 3 执行 \texttt{HLT} 时，CPU 会触发 \#GP（General Protection Fault, vector 13）。
+
+% ----------------------------------------------------------------------------
+\subsection{预期输出}
+% ----------------------------------------------------------------------------
+
+\begin{tcblisting}{consolebox, title={\tpk{>}~ring3 test}}
+«\tpk{szy-kernel >}» «\tin{ring3 test}»
+[ring3] Preparing Ring 3 test...
+[ring3] code page: virt=0x00400000 phys=0x001b1000
+[ring3] stack page: virt=0x00401000 phys=0x001b3000 (top=0x00402000)
+[ring3] test code copied (3 bytes): HLT instruction
+[ring3] Jumping to Ring 3 (eip=0x00400000, esp=0x00402000)...
+[ring3] Expected: #GP fault (HLT is privileged)
+
+[isr] #GP General Protection vector=13 err=0x00000000 eip=0x00400000
+[isr] Fault from Ring 3 (user mode)
+[isr] User CS=0x001b  SS=0x0023  ESP=0x00402000
+Kernel panic: #GP General Protection
+\end{tcblisting}
+
+关键验证要点：
+
+\begin{enumerate}
+  \item \texttt{Fault from Ring 3 (user mode)} —— ISR 正确识别异常来自用户态
+  \item \texttt{CS=0x001b} —— 用户代码段选择子（GDT[3] | RPL=3）
+  \item \texttt{SS=0x0023} —— 用户数据段选择子（GDT[4] | RPL=3）
+  \item \texttt{eip=0x00400000} —— 故障发生在用户代码页的入口地址
+  \item \texttt{err=0x00000000} —— \#GP 错误码为 0 表示常规保护违规
+\end{enumerate}
+
+\begin{whybox}
+为什么 ISR 能正确打印"Fault from Ring 3"？
+
+当 \#GP 从 Ring 3 触发时，CPU 自动执行以下操作：
+\begin{enumerate}
+  \item 从 TSS 读取 SS0:ESP0，切换到内核栈
+  \item 在内核栈上压入旧的 SS/ESP/EFLAGS/CS/EIP 和 error code
+  \item 跳转到 IDT[13] 的处理程序（我们的 \texttt{isr13}）
+\end{enumerate}
+
+ISR 的 \texttt{isr\_common\_stub} 把这些值打包成 \texttt{regs\_t} 结构体传给 C。
+C 代码检查 \texttt{r->cs \& 0x3}：CS 的低 2 位 = RPL = 异常发生时的 CPL。
+如果 RPL=3，就打印"Ring 3"。
+
+结构体末尾的 \texttt{user\_esp} 和 \texttt{user\_ss} 字段在跨特权级中断时
+自动出现在栈上（CPU 额外压入），同特权级时不存在。
+\end{whybox}

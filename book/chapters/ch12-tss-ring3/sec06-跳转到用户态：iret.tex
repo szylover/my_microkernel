@@ -1,0 +1,88 @@
+% ============================================================================
+\section{跳转到用户态：\texttt{iret}}
+\label{sec:tss-iret}
+% ============================================================================
+
+目标：从 Ring 0 跳到 Ring 3 执行一段用户态代码。
+关键是构造一个 \texttt{iret} 帧——让 CPU 以为自己在从中断返回到 Ring 3。
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{iret} 帧的构造}
+% ----------------------------------------------------------------------------
+
+\texttt{iret} 从栈上依次弹出 EIP → CS → EFLAGS。当检测到目标 CS 的 RPL > 当前 CPL 时（跨特权级返回），还会额外弹出 ESP → SS。
+
+所以我们需要从高到低依次 push 5 个值：
+
+\input{figures/ch12/fig04-iret-frame}
+
+% ----------------------------------------------------------------------------
+\subsection{汇编实现：\texttt{jump\_to\_ring3}}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/arch/tss\_flush.asm}
+\begin{lstlisting}[style=nasmstyle]
+USER_CODE_SEL equ 0x1B     ; GDT[3] | RPL=3
+USER_DATA_SEL equ 0x23     ; GDT[4] | RPL=3
+
+; void jump_to_ring3(uint32_t eip, uint32_t esp3);
+jump_to_ring3:
+    mov eax, [esp + 4]     ; eax = eip（用户态入口）
+    mov ecx, [esp + 8]     ; ecx = esp3（用户态栈顶）
+
+    ; 先切换 DS/ES/FS/GS 到用户数据段
+    mov dx, USER_DATA_SEL
+    mov ds, dx
+    mov es, dx
+    mov fs, dx
+    mov gs, dx
+
+    ; 构造 iret 帧
+    push dword USER_DATA_SEL  ; SS
+    push ecx                   ; ESP
+    pushfd                     ; EFLAGS
+    or dword [esp], 0x200      ; 确保 IF=1
+    push dword USER_CODE_SEL  ; CS
+    push eax                   ; EIP
+
+    iret                       ; 跳转到 Ring 3！
+\end{lstlisting}
+
+\begin{warnbox}
+\textbf{为什么要在 \texttt{iret} 前切换 DS/ES/FS/GS？}
+
+如果不切换，\texttt{iret} 后 DS 仍指向内核数据段（DPL=0），
+但 CPL 已变为 3。用户态代码第一次访问 DS 时，CPU 检查发现
+$\max(\text{CPL}=3, \text{RPL}) > \text{DPL}=0$，立即触发 \#GP。
+
+所以必须在 \texttt{iret} 之前把 DS/ES/FS/GS 切换到 DPL=3 的
+用户数据段（\hex{23}）。
+\end{warnbox}
+
+\begin{cpustate}
+\texttt{iret} 执行后：
+\begin{itemize}
+  \item CPL 从 0 变为 3（用户态）
+  \item CS 从 \hex{08} 变为 \hex{1B}（User Code）
+  \item SS 从 \hex{10} 变为 \hex{23}（User Data）
+  \item ESP 切换到用户态栈（参数 \texttt{esp3}）
+  \item EIP 指向用户态代码入口（参数 \texttt{eip}）
+  \item EFLAGS.IF = 1（中断保持打开，键盘和定时器仍然工作）
+  \item 后续中断发生时，CPU 自动从 TSS 读取 SS0:ESP0 切回内核栈
+\end{itemize}
+\end{cpustate}
+
+% ----------------------------------------------------------------------------
+\subsection{为什么要确保 IF=1？}
+% ----------------------------------------------------------------------------
+
+\texttt{pushfd} 保存的 EFLAGS 可能 IF=0（如果在关中断的上下文中调用）。
+\texttt{or dword [esp], 0x200} 强制设置 bit 9（IF），确保用户态运行时
+中断处于打开状态——否则键盘和定时器中断都不会触发，系统假死。
+
+\begin{thinkbox}
+如果忘记设置 IF=1，用户态代码执行了怎样的循环会导致系统完全无响应？
+
+\emph{提示：任何循环都会，因为 IF=0 时所有可屏蔽中断（包括键盘 IRQ1）
+都被禁止，没有任何机制能打断 Ring 3 的循环回到内核。}
+\end{thinkbox}

@@ -1,0 +1,25 @@
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    entry/.style={draw, minimum height=0.8cm, minimum width=8cm, anchor=west, font=\small},
+    old/.style={fill=blue!8},
+    new/.style={fill=orange!15},
+  ]
+    \node[font=\bfseries] at (4, 0.5) {扩展后的 GDT（6 项）};
+
+    \node[entry, old] (e0) at (0, -0.3) {GDT[0] \quad \texttt{0x00} \quad Null 描述符};
+    \node[entry, old] (e1) at (0, -1.1) {GDT[1] \quad \texttt{0x08} \quad Kernel Code (DPL=0, code+read)};
+    \node[entry, old] (e2) at (0, -1.9) {GDT[2] \quad \texttt{0x10} \quad Kernel Data (DPL=0, data+write)};
+    \node[entry, new] (e3) at (0, -2.7) {GDT[3] \quad \texttt{0x1B} \quad User Code (DPL=3, code+read)};
+    \node[entry, new] (e4) at (0, -3.5) {GDT[4] \quad \texttt{0x23} \quad User Data (DPL=3, data+write)};
+    \node[entry, new] (e5) at (0, -4.3) {GDT[5] \quad \texttt{0x28} \quad TSS (type=0x89, DPL=0)};
+
+    % Legend
+    \node[fill=blue!8, draw, minimum width=1cm, minimum height=0.4cm] at (1.5, -5.2) {};
+    \node[anchor=west, font=\small] at (2.1, -5.2) {原有};
+    \node[fill=orange!15, draw, minimum width=1cm, minimum height=0.4cm] at (4.5, -5.2) {};
+    \node[anchor=west, font=\small] at (5.1, -5.2) {本章新增};
+  \end{tikzpicture}
+  \caption{GDT 扩展——新增 User Code/Data 段和 TSS 描述符}
+  \label{fig:gdt-layout-extended}
+\end{figure}

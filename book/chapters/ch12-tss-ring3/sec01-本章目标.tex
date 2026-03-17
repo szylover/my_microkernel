@@ -1,0 +1,17 @@
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解 x86 特权级（Ring 0 -- Ring 3）与 CPL/DPL/RPL 检查机制
+  \item 掌握 Task State Segment（TSS）的结构与作用——为什么只用 SS0:ESP0
+  \item 在 GDT 中添加用户态代码/数据段（DPL=3）和 TSS 描述符
+  \item 理解段选择子的格式：\hex{1B}（User Code）与 \hex{23}（User Data）
+  \item 用 \texttt{iret} 从 Ring 0 跳转到 Ring 3 执行用户代码
+  \item 理解 PDE/PTE 的 U/S 位在两级页表中的"与"逻辑
+  \item 验证 Ring 3 触发 GP Fault 能安全回到内核
+\end{itemize}
+
+\begin{designbox}
+本章是里程碑 D（进程与用户态）的第一步。后续章节将在此基础上依次添加
+系统调用（\texttt{syscall\_ops\_t}）、ELF 加载器（\texttt{loader\_ops\_t}）、
+进程管理和调度器。TSS + GDT 扩展 + \texttt{iret} 是所有这些机制的硬件基础。
+\end{designbox}

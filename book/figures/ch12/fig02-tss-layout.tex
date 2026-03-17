@@ -1,0 +1,49 @@
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    field/.style={draw, minimum height=0.8cm, anchor=west, font=\ttfamily\small},
+    label/.style={font=\small, anchor=east},
+    star/.style={fill=orange!20},
+    dim/.style={fill=gray!10},
+  ]
+    \def\w{6.5}
+    % Title
+    \node[font=\bfseries] at (\w/2, 0.6) {TSS 结构体（104 字节）};
+
+    % Fields (top to bottom = offset 0x00 to 0x66)
+    \node[field, dim, minimum width=\w cm] (f0) at (0, -0.3) {prev\_tss};
+    \node[label] at (-0.3, -0.3) {\footnotesize 0x00};
+
+    \node[field, star, minimum width=\w cm] (f1) at (0, -1.1) {esp0 ★};
+    \node[label] at (-0.3, -1.1) {\footnotesize 0x04};
+
+    \node[field, star, minimum width=\w cm] (f2) at (0, -1.9) {ss0 ★};
+    \node[label] at (-0.3, -1.9) {\footnotesize 0x08};
+
+    \node[field, dim, minimum width=\w cm] (f3) at (0, -2.7) {esp1, ss1, esp2, ss2};
+    \node[label] at (-0.3, -2.7) {\footnotesize 0x0C};
+
+    \node[field, dim, minimum width=\w cm] (f4) at (0, -3.5) {cr3, eip, eflags};
+    \node[label] at (-0.3, -3.5) {\footnotesize 0x1C};
+
+    \node[field, dim, minimum width=\w cm] (f5) at (0, -4.3) {eax -- edi （8 个通用寄存器）};
+    \node[label] at (-0.3, -4.3) {\footnotesize 0x28};
+
+    \node[field, dim, minimum width=\w cm] (f6) at (0, -5.1) {es, cs, ss, ds, fs, gs};
+    \node[label] at (-0.3, -5.1) {\footnotesize 0x48};
+
+    \node[field, dim, minimum width=\w cm] (f7) at (0, -5.9) {ldt, trap, iomap\_base};
+    \node[label] at (-0.3, -5.9) {\footnotesize 0x60};
+
+    % Annotations — each on its own row, no overlap
+    \draw[->, thick, orange!70!black] (\w + 0.3, -1.1) -- (\w + 1.3, -1.1)
+      node[right, font=\small, text width=4.5cm] {CPU 在 Ring 3$\to$0 切换时\\读取此字段作为内核栈};
+    \draw[->, thick, orange!70!black] (\w + 0.3, -1.9) -- (\w + 1.3, -1.9)
+      node[right, font=\small] {固定为 \hex{10}（内核数据段）};
+
+    \node[font=\small\itshape, gray, text width=4cm, anchor=north west] at (\w + 1.3, -3.2)
+      {灰色字段在软件任务切换模式\\下不使用，全部保持 0};
+  \end{tikzpicture}
+  \caption{TSS 结构体布局——仅 \texttt{esp0} 和 \texttt{ss0} 被实际使用}
+  \label{fig:tss-layout}
+\end{figure}

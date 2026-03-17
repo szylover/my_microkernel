@@ -1,11 +1,12 @@
-«\tpk{>}» «\tin{vma test}»
-[vma-test] === VMA selftest ===
-[vma-test] test 1: add + find
-[vma-test] PASS
-[vma-test] test 2: find outside
-[vma-test] PASS
-[vma-test] test 3: overlap detection
-[vma-test] PASS
-[vma-test] test 4: remove + find
-[vma-test] PASS
-[vma-test] === ALL PASS ===
+«\tpk{szy-kernel >}» «\tin{ring3 test}»
+[ring3] Preparing Ring 3 test...
+[ring3] code page: virt=0x00400000 phys=0x001b1000
+[ring3] stack page: virt=0x00401000 phys=0x001b3000 (top=0x00402000)
+[ring3] test code copied (3 bytes): HLT instruction
+[ring3] Jumping to Ring 3 (eip=0x00400000, esp=0x00402000)...
+[ring3] Expected: #GP fault (HLT is privileged)
+
+[isr] #GP General Protection vector=13 err=0x00000000 eip=0x00400000
+[isr] Fault from Ring 3 (user mode)
+[isr] User CS=0x001b  SS=0x0023  ESP=0x00402000
+Kernel panic: #GP General Protection

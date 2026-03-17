@@ -1,0 +1,55 @@
+% ============================================================================
+\section{PDE\_USER 标志传播：两级页表的"与"逻辑}
+\label{sec:tss-pde-user}
+% ============================================================================
+
+在实现过程中我们遇到了一个重要问题：即使 PTE 设置了 \texttt{PTE\_USER}（U/S=1），
+用户态代码仍然触发了 \#PF（protection violation）。
+
+\begin{warnbox}
+\textbf{x86 两级页表的权限检查是"与"逻辑}：
+
+要让用户态（Ring 3）访问一个页，\textbf{必须同时满足}：
+\begin{itemize}
+  \item PDE 的 U/S 位 = 1（用户态可访问该 4MiB 区域）
+  \item PTE 的 U/S 位 = 1（用户态可访问该 4KiB 页面）
+\end{itemize}
+
+即 $\text{PDE.US} \land \text{PTE.US}$。
+如果 PDE 的 U/S = 0，即使 PTE 的 U/S = 1，用户态也会 \#PF。
+\end{warnbox}
+
+之前的 \texttt{vmm\_ensure\_page\_table()} 创建新页表时，
+PDE 固定设为 \texttt{PDE\_PRESENT | PDE\_WRITABLE}——没有 \texttt{PDE\_USER}。
+这对内核映射（高半部分）是正确的，但对用户地址空间就不够了。
+
+修复方案：在 \texttt{vmm\_map\_page()} 中，当 flags 包含 \texttt{PTE\_USER} 时，
+同步设置 PDE 的 \texttt{PDE\_USER} 位。
+
+\codefile{src/kernel/mm/vmm.c（修复）}
+\begin{lstlisting}[style=cstyle]
+int vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags) {
+    /* ... 对齐检查、ensure_page_table ... */
+
+    /* 当映射用户页时，PDE 也需要 USER 标志 */
+    if (flags & PTE_USER) {
+        g_kernel_pd.entries[pdi] |= PDE_USER;
+    }
+
+    /* 写入 PTE */
+    pt->entries[pti] = (phys & ~0xFFFu) | (flags & 0xFFFu);
+    /* ...TLB 刷新... */
+}
+\end{lstlisting}
+
+用 \texttt{|=}（追加）而非 \texttt{=}（覆盖）是因为 PDE 的 flags 还包含
+\texttt{PDE\_PRESENT} 和 \texttt{PDE\_WRITABLE}，我们只是额外添加第三个标志位。
+
+\begin{thinkbox}
+同一个页表可能同时包含内核页（PTE\_USER=0）和用户页（PTE\_USER=1）吗？
+如果可以，设置 PDE\_USER=1 后，内核页的安全性是否会受到影响？
+
+\emph{提示：PDE.US=1 只是放宽了"PDE 层面的限制"。
+最终权限还要看 PTE：如果某个 PTE 没有设 US=1，用户态仍然不能访问那一页。
+PDE 是上限，PTE 才是精确控制。}
+\end{thinkbox}
