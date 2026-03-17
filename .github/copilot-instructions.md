@@ -137,12 +137,12 @@ my_microkernel/
     ├── Makefile                   # 真正的构建系统
     ├── boot/                      # Multiboot2 引导 & 链接脚本
     ├── include/                   # 公共头文件
-    │   ├── arch/                  #   x86 体系结构 (gdt/idt/irq/pic/io)
+    │   ├── arch/                  #   x86 体系结构 (gdt/idt/irq/pic/io/tss)
     │   ├── drivers/               #   设备驱动 (keyboard/serial)
     │   └── kernel/                #   内核通用 (pmm/vmm/vma/kmalloc/shell/printk/cmd/kconfig/…)
     └── kernel/                    # 内核实现
-        ├── arch/                  #   CPU 初始化 & 汇编 stubs
-        ├── cmds/                  #   Shell 命令模块
+        ├── arch/                  #   CPU 初始化 & 汇编 stubs (gdt/idt/irq/pic/tss)
+        ├── cmds/                  #   Shell 命令模块 (cls/cmds/free/mmap/pmm/vmm/heap/vma/ring3)
         ├── core/                  #   内核入口和基础设施 (kmain/shell/printk/console)
         ├── drivers/               #   设备驱动实现
         └── mm/                    #   内存管理 (pmm/pmm_bitmap/pmm_buddy/vmm/vma/vma_sorted_array/vma_rbtree/vma_maple/kmalloc/heap_first_fit/heap_slab/mmap)
