@@ -1,0 +1,582 @@
+% ============================================================================
+\chapter{内核测试框架}
+\label{ch:appendix-testing}
+% ============================================================================
+
+操作系统内核运行在裸机之上，没有标准库、没有 \texttt{assert.h}、没有单元测试框架。
+但这不意味着我们不需要测试——恰恰相反，内核代码的 bug 会直接导致 triple fault 或数据
+损坏，调试成本极高。本附录介绍 SZY-KERNEL 的测试策略：如何在没有任何操作系统支持的
+环境下验证物理内存分配器、内核堆和虚拟内存区域管理等关键子系统的正确性。
+
+\section{测试架构概览}
+
+SZY-KERNEL 采用\textbf{三层测试体系}：
+
+\begin{enumerate}
+  \item \textbf{Boot-time selftest}——子系统初始化时自动运行（如 PMM 在注册后立即分配
+    / 释放几个页面验证基本功能），不需要人工干预。
+  \item \textbf{Shell 交互式 selftest}——通过内核 Shell 命令 (\texttt{pmm test}、
+    \texttt{heap test}、\texttt{vma test}) 手动或脚本触发，覆盖更多边界条件。
+  \item \textbf{QEMU 自动化脚本}——\texttt{scripts/test.sh} 启动 QEMU、注入命令、
+    抓取串口日志、用正则断言关键标记，实现 CI 级别的回归测试。
+\end{enumerate}
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=4.5cm, minimum height=1cm,
+                font=\small, align=center},
+    arr/.style={-{Stealth[length=5pt]}, thick},
+  ]
+    \node[box, fill=blue!10]  (boot) {Boot-time selftest\\(pmm\_selftest 等)};
+    \node[box, fill=green!10, right=2cm of boot] (shell) {Shell selftest\\(\texttt{pmm/heap/vma test})};
+    \node[box, fill=orange!10, right=2cm of shell] (ci) {QEMU 自动化\\(\texttt{test.sh})};
+
+    \draw[arr] (boot) -- node[above, font=\scriptsize] {更多用例} (shell);
+    \draw[arr] (shell) -- node[above, font=\scriptsize] {脚本驱动} (ci);
+  \end{tikzpicture}
+  \caption{三层测试体系}
+  \label{fig:test-layers}
+\end{figure}
+
+\subsection{为什么不用标准测试框架？}
+
+内核代码运行在 Ring 0，没有 \texttt{libc}、没有 \texttt{exit()}、没有文件系统。
+常见的 C 测试框架（CUnit、Unity、Check）都依赖标准库。我们的做法是：
+
+\begin{itemize}
+  \item 用 \texttt{printk()} 替代 \texttt{printf()} 输出结果到串口
+  \item 用固定格式的标记字符串（如 \texttt{[pmm-test] === ALL PASS ===}）替代
+    返回码，方便脚本 \texttt{grep} 断言
+  \item 每个测试子命令自行管理分配/释放，确保测试结束后不泄漏资源
+\end{itemize}
+
+
+% ============================================================================
+\section{PMM 测试：物理内存分配器}
+\label{sec:test-pmm}
+% ============================================================================
+
+物理内存分配器（PMM）是整个内存子系统的地基。它的接口很简洁——\texttt{pmm\_alloc\_page()}
+返回一个 4KiB 物理页地址，\texttt{pmm\_free\_page()} 归还。我们需要验证的核心属性是：
+
+\begin{itemize}
+  \item 分配后空闲计数正确减少，释放后恢复
+  \item 返回的地址满足 4KiB 对齐
+  \item 连续分配不会返回相同页面
+  \item 大批量分配/释放后计数器保持一致（无泄漏）
+  \item 分配的页面物理可写可读（通过内核虚拟地址访问）
+\end{itemize}
+
+\subsection{测试代码详解}
+
+\codefile{src/kernel/cmds/cmd\_pmm.c — cmd\_pmm\_test()}
+\begin{lstlisting}[style=cstyle]
+static int cmd_pmm_test(void) {
+    printk("[pmm-test] === PMM selftest ===\n");
+    int pass = 1;
+\end{lstlisting}
+
+\texttt{pass} 标志贯穿所有测试。任何一个子测试失败都会将其置为 0，但不会提前退出——
+这样可以一次看到所有失败项。
+
+\subsubsection{测试 1：alloc/free 往返}
+
+\begin{lstlisting}[style=cstyle]
+    /* --- 测试 1: 基本 alloc/free 往返 --- */
+    unsigned free_before = pmm_free_pages();
+    void* p1 = pmm_alloc_page();
+    if (!p1) {
+        printk("[pmm-test] FAIL: pmm_alloc_page returned NULL\n");
+        return 0;
+    }
+    unsigned free_after_alloc = pmm_free_pages();
+    if (free_after_alloc != free_before - 1) {
+        printk("[pmm-test] FAIL: free count %u -> %u\n",
+               free_before, free_after_alloc);
+        pass = 0;
+    }
+    pmm_free_page(p1);
+    unsigned free_after_free = pmm_free_pages();
+    if (free_after_free != free_before) {
+        printk("[pmm-test] FAIL: free count not restored\n");
+        pass = 0;
+    }
+\end{lstlisting}
+
+\textbf{原理}：这是最基本的"不变量检查"——分配一页后 \texttt{free\_pages()} 应该
+恰好减 1，释放后恢复原值。如果 bitmap 的位翻转逻辑有 off-by-one，这里立刻就能抓到。
+
+\subsubsection{测试 2：页对齐验证}
+
+\begin{lstlisting}[style=cstyle]
+    #define PMM_TEST_ALIGN_N 8
+    void* align_pages[PMM_TEST_ALIGN_N];
+    for (int i = 0; i < PMM_TEST_ALIGN_N; i++) {
+        align_pages[i] = pmm_alloc_page();
+        uint32_t addr = (uint32_t)(uintptr_t)align_pages[i];
+        if (addr & 0xFFFu) {  // 低 12 位非零 => 未对齐
+            printk("[pmm-test] FAIL: page %d not 4KiB aligned\n", i);
+            align_ok = 0;
+        }
+    }
+    for (int i = 0; i < PMM_TEST_ALIGN_N; i++)
+        pmm_free_page(align_pages[i]);
+\end{lstlisting}
+
+\textbf{原理}：x86 分页要求页帧地址低 12 位为 0。检查方法很直接——用
+\texttt{addr \& 0xFFF} 掩码。如果 PMM 的 \texttt{page\_addr(index)} 计算公式有误
+（比如忘记乘以 4096），这里会立即暴露。
+
+\subsubsection{测试 3：唯一性验证}
+
+\begin{lstlisting}[style=cstyle]
+    #define PMM_TEST_UNIQUE_N 16
+    void* unique_pages[PMM_TEST_UNIQUE_N];
+    for (int i = 0; i < PMM_TEST_UNIQUE_N; i++)
+        unique_pages[i] = pmm_alloc_page();
+
+    for (int i = 0; i < PMM_TEST_UNIQUE_N; i++) {
+        for (int j = i + 1; j < PMM_TEST_UNIQUE_N; j++) {
+            if (unique_pages[i] == unique_pages[j]) {
+                printk("[pmm-test] FAIL: duplicate [%d]==[%d]\n", i, j);
+                unique_ok = 0;
+            }
+        }
+    }
+\end{lstlisting}
+
+\textbf{原理}：$O(n^2)$ 两两比较。16 个页面只需 120 次比较，开销可忽略。这个测试能
+抓到 bitmap \texttt{set\_bit} / \texttt{clear\_bit} 的逻辑 bug——比如 \texttt{free} 时
+没有正确清除位标记，导致同一个页被分配两次。
+
+\subsubsection{测试 4：批量压力}
+
+\begin{lstlisting}[style=cstyle]
+    unsigned free_start = pmm_free_pages();
+    #define PMM_TEST_BATCH_N 32
+    void* batch_pages[PMM_TEST_BATCH_N];
+    int alloc_count = 0;
+    for (int i = 0; i < PMM_TEST_BATCH_N; i++) {
+        batch_pages[i] = pmm_alloc_page();
+        if (!batch_pages[i]) break;  // OOM: 可以接受
+        alloc_count++;
+    }
+    // 验证: free_mid == free_start - alloc_count
+    for (int i = 0; i < alloc_count; i++)
+        pmm_free_page(batch_pages[i]);
+    // 验证: free_end == free_start
+\end{lstlisting}
+
+\textbf{原理}：一次性分配 32 页（128 KiB）再一次性释放。这验证了分配器在连续操作下
+计数器的一致性。如果 buddy 分配器的分裂/合并有 bug，连续分配大量页面后计数器会
+出现偏移。
+
+\subsubsection{测试 5：写读验证}
+
+\begin{lstlisting}[style=cstyle]
+    if (vmm_is_ready()) {
+        void* pg = pmm_alloc_page();
+        uint32_t* virt = (uint32_t*)PHYS_TO_VIRT(pg);
+        for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++)
+            virt[i] = 0xC0FFEE00u + i;
+        for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++) {
+            if (virt[i] != 0xC0FFEE00u + i) {
+                printk("[pmm-test] FAIL: mismatch at word %u\n", i);
+                rw_ok = 0;
+                break;
+            }
+        }
+        pmm_free_page(pg);
+    }
+\end{lstlisting}
+
+\textbf{原理}：分配一个物理页后，通过 \texttt{PHYS\_TO\_VIRT()} 将其转换为内核虚拟
+地址（\texttt{phys + 0xC0000000}），然后写入 1024 个 \texttt{uint32\_t} 魔数并逐一
+回读。这同时验证了三件事：
+\begin{enumerate}
+  \item PMM 返回的物理页确实是可用 RAM（不是 MMIO 或保留区）
+  \item VMM 的直接映射（direct mapping）正确覆盖了该物理地址
+  \item 整页 4096 字节都可写可读，无 DRAM 故障
+\end{enumerate}
+
+注意必须判断 \texttt{vmm\_is\_ready()}——如果在分页未开启前调用 \texttt{PHYS\_TO\_VIRT}
+会直接 triple fault。
+
+% ============================================================================
+\section{Heap 测试：内核堆分配器}
+\label{sec:test-heap}
+% ============================================================================
+
+内核堆（\texttt{kmalloc/kfree}）建立在 PMM + VMM 之上，提供字节级动态内存分配。
+测试的关键属性：
+
+\begin{itemize}
+  \item 分配返回非 NULL 指针，可写可读
+  \item 多个同时存活的分配不会互相覆盖
+  \item 全部释放后 \texttt{alloc\_count == 0}（无泄漏）
+  \item 释放后的空间可被重新分配（复用）
+  \item 返回指针满足 8 字节对齐
+  \item 碎片化场景下仍能正常分配
+  \item 不同大小（1B \textasciitilde{} 4KiB）均能正确处理
+\end{itemize}
+
+\subsection{测试代码详解}
+
+\codefile{src/kernel/cmds/cmd\_heap.c — do\_test()}
+
+\subsubsection{测试 1--4：基础功能}
+
+前四个测试覆盖最核心的功能循环：
+
+\begin{enumerate}
+  \item \textbf{基本 alloc/free}——分配 64 字节，逐字节写入 \texttt{0x00..0x3F}
+    并回读验证，然后 \texttt{kfree}。
+  \item \textbf{多大小不重叠}——同时分配 32、128、256、1024 字节四块内存，每块首字写入
+    不同魔数（\texttt{0xAA550000 + i}），分配完成后逐一验证魔数未被后续分配覆盖。
+  \item \textbf{Stats 一致性}——四块全部释放后，检查 \texttt{kheap\_get\_stats().alloc\_count == 0}。
+  \item \textbf{复用}——释放后重新 \texttt{kmalloc(64)}，验证指针有效且可写。
+\end{enumerate}
+
+\subsubsection{测试 5：对齐验证}
+
+\begin{lstlisting}[style=cstyle]
+    unsigned align_sizes[] = { 1, 3, 7, 13, 33, 100, 255, 512 };
+    for (int i = 0; i < align_n; i++) {
+        align_ptrs[i] = kmalloc(align_sizes[i]);
+        uintptr_t addr = (uintptr_t)align_ptrs[i];
+        if (addr & 0x7u) {  // 低 3 位非零 => 未 8 字节对齐
+            printk("FAIL: not 8-byte aligned\n");
+            align_ok = 0;
+        }
+    }
+\end{lstlisting}
+
+\textbf{原理}：内核代码经常需要访问 \texttt{uint64\_t} 或 \texttt{double}，x86 虽然
+不强制要求对齐但未对齐会导致性能损失。更重要的是，某些 CPU 指令（如 SSE）要求 16 字节
+对齐。我们至少保证 8 字节。故意选择「刁难」的奇数大小（1、3、7、13 字节）来测试分配器的
+内部 round-up 逻辑。
+
+\subsubsection{测试 6：碎片化压力}
+
+\begin{lstlisting}[style=cstyle]
+    #define FRAG_N 8
+    void* frag[FRAG_N];
+    // 步骤 1: 分配 8 块，每块 64 字节
+    for (int i = 0; i < FRAG_N; i++) {
+        frag[i] = kmalloc(64);
+        ((uint32_t*)frag[i])[0] = 0xF0F00000u + i;
+    }
+    // 步骤 2: 释放偶数位置 (0, 2, 4, 6) — 制造空洞
+    for (int i = 0; i < FRAG_N; i += 2)
+        kfree(frag[i]);
+    // 步骤 3: 验证奇数位置数据完好
+    for (int i = 1; i < FRAG_N; i += 2)
+        assert(((uint32_t*)frag[i])[0] == 0xF0F00000u + i);
+    // 步骤 4: 重新分配偶数位（碎片回收）
+    for (int i = 0; i < FRAG_N; i += 2)
+        frag[i] = kmalloc(64);
+    // 步骤 5: 验证所有数据正确
+\end{lstlisting}
+
+\textbf{原理}：这是经典的"瑞士奶酪"碎片化场景。堆内存布局变成：
+
+\begin{center}
+\begin{tikzpicture}[
+  block/.style={draw, minimum width=1.2cm, minimum height=0.6cm, font=\ttfamily\scriptsize},
+]
+  \node[block, fill=red!20] (b0) {free};
+  \node[block, fill=green!20, right=0pt of b0] (b1) {\#1};
+  \node[block, fill=red!20, right=0pt of b1] (b2) {free};
+  \node[block, fill=green!20, right=0pt of b2] (b3) {\#3};
+  \node[block, fill=red!20, right=0pt of b3] (b4) {free};
+  \node[block, fill=green!20, right=0pt of b4] (b5) {\#5};
+  \node[block, fill=red!20, right=0pt of b5] (b6) {free};
+  \node[block, fill=green!20, right=0pt of b6] (b7) {\#7};
+
+  \node[below=2pt of b0, font=\scriptsize\color{gray}] {空洞};
+  \node[below=2pt of b2, font=\scriptsize\color{gray}] {空洞};
+\end{tikzpicture}
+\end{center}
+
+释放偶数位后，四个空洞散布在已用块之间。此时重新 \texttt{kmalloc(64)} 必须能找到
+并利用这些空洞，而不会破坏相邻奇数位置的数据。这验证了 first-fit / slab 分配器的
+空闲块管理和合并逻辑。
+
+\subsubsection{测试 7：递增大小}
+
+\begin{lstlisting}[style=cstyle]
+    unsigned inc_sizes[] = { 1, 2, 4, 8, 16, 32, 64,
+                             128, 256, 512, 1024, 2048 };
+    for (int i = 0; i < inc_n; i++) {
+        void* p = kmalloc(inc_sizes[i]);
+        uint8_t pattern = (uint8_t)(inc_sizes[i] & 0xFF);
+        // 写满整个分配区域
+        for (unsigned j = 0; j < inc_sizes[i]; j++)
+            ((uint8_t*)p)[j] = pattern;
+        // 逐字节回读验证
+        for (unsigned j = 0; j < inc_sizes[i]; j++)
+            assert(((uint8_t*)p)[j] == pattern);
+        kfree(p);
+    }
+\end{lstlisting}
+
+\textbf{原理}：从 1 字节到 2048 字节逐级测试，覆盖分配器内部的 round-up 边界。
+对于 slab 分配器，不同大小会命中不同 cache 级别（32B、64B、128B……2048B）；
+对于 first-fit，大小变化会导致不同的空闲链表分裂模式。每次分配后\textbf{写满}
+而不是只写一个字——这能检测到空间实际可用量不足（分配器声称给了 N 字节但实际
+可写区域不到 N 字节）的 bug。
+
+\subsubsection{测试 8：大块分配}
+
+\begin{lstlisting}[style=cstyle]
+    void* big = kmalloc(4096);
+    uint32_t* wp = (uint32_t*)big;
+    for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++)
+        wp[i] = 0xCAFE0000u + i;
+    for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++)
+        assert(wp[i] == 0xCAFE0000u + i);
+    kfree(big);
+\end{lstlisting}
+
+\textbf{原理}：4096 字节恰好是一个物理页的大小。对于 slab 分配器，这超出了最大
+cache 级别（2048B），需要回退到整页分配路径。对于 first-fit，需要找到至少
+4096 + header 大小的连续空闲块。写满 1024 个 \texttt{uint32\_t} 并验证，同时检查
+\texttt{alloc\_count} 统计是否一致。
+
+
+% ============================================================================
+\section{VMA 测试：虚拟内存区域管理}
+\label{sec:test-vma}
+% ============================================================================
+
+VMA（Virtual Memory Area）子系统跟踪内核地址空间中每一段虚拟地址的用途和权限。
+它的接口是 \texttt{vma\_add(start, end, flags, name)} /
+\texttt{vma\_remove(start)} / \texttt{vma\_find(addr)}，后端可以是 sorted-array、
+红黑树或 Maple Tree。测试需要验证的属性：
+
+\begin{itemize}
+  \item 添加的区域能被正确查找到
+  \item 区间外地址查找返回 NULL
+  \item 重叠区域被拒绝
+  \item 移除后不再可查找
+  \item 边界语义正确（半开区间 $[\text{start}, \text{end})$）
+  \item 相邻但不重叠的区域互不干扰
+  \item 批量操作正确
+  \item \texttt{count()} 与实际增删一致
+\end{itemize}
+
+\subsection{测试地址选择}
+
+所有测试使用 \texttt{0xF1000000} 附近的地址。这个区域位于内核虚拟地址空间高端
+（\texttt{KHEAP\_END} = \texttt{0xF0000000} 之上），不会和内核堆、直接映射区或 VMA
+自身的内部区域冲突。
+
+\subsection{测试代码详解}
+
+\codefile{src/kernel/cmds/cmd\_vma.c — cmd\_vma\_test()}
+
+\subsubsection{测试 1--4：核心 CRUD}
+
+\begin{enumerate}
+  \item \textbf{add + find}——添加 $[\texttt{0xF1000000},\texttt{0xF1010000})$，
+    然后 \texttt{find(start + 0x100)} 验证命中且 \texttt{start/end} 正确。
+  \item \textbf{find outside}——\texttt{find(start - 0x1000)} 应返回 NULL
+    （不属于该区域）。
+  \item \textbf{overlap 拒绝}——尝试添加 $[\texttt{start+0x1000},\texttt{end+0x1000})$
+    （与现有区域部分重叠），\texttt{vma\_add} 应返回 $-1$。
+  \item \textbf{remove + find}——\texttt{vma\_remove(start)} 后再 \texttt{find}
+    应返回 NULL。
+\end{enumerate}
+
+\subsubsection{测试 5：边界语义}
+
+\begin{lstlisting}[style=cstyle]
+    vma_add(test_start, test_end, VMA_READ, "_test_bound");
+
+    // find(start) -> 应命中
+    v = vma_find(test_start);
+    assert(v && v->start == test_start);
+
+    // find(end - 1) -> 应命中（半开区间的最后一个字节）
+    v = vma_find(test_end - 1);
+    assert(v && v->start == test_start);
+
+    // find(end) -> 应 miss（半开区间，end 不包含在内）
+    v = vma_find(test_end);
+    assert(!v || v->start != test_start);
+\end{lstlisting}
+
+\textbf{原理}：VMA 使用半开区间 $[\text{start}, \text{end})$，这是 Linux 内核的
+标准约定。\texttt{end} 地址本身不属于该 VMA。这个测试专门验证边界条件——off-by-one
+是 VMA 后端实现中最容易出错的地方，尤其是二分查找的 \texttt{left/right} 边界。
+
+\subsubsection{测试 6：相邻区域}
+
+\begin{lstlisting}[style=cstyle]
+    const uint32_t a_start = 0xF1020000u;
+    const uint32_t a_end   = 0xF1030000u;
+    const uint32_t b_start = 0xF1030000u;  // == a_end
+    const uint32_t b_end   = 0xF1040000u;
+
+    vma_add(a_start, a_end, VMA_READ, "_adj_a");
+    vma_add(b_start, b_end, VMA_READ | VMA_WRITE, "_adj_b");
+
+    // 两个区域各自独立可查找
+    assert(vma_find(a_start + 0x100)->start == a_start);
+    assert(vma_find(b_start + 0x100)->start == b_start);
+
+    // flags 互不影响：A 只读，B 可写
+    v = vma_find(a_start);
+    assert(!(v->flags & VMA_WRITE));
+\end{lstlisting}
+
+\textbf{原理}：两个 VMA 首尾相接（A 的 \texttt{end} == B 的 \texttt{start}）。
+由于半开区间，它们不重叠：A 覆盖 \texttt{0xF1020000..0xF102FFFF}，B 覆盖
+\texttt{0xF1030000..0xF103FFFF}。这验证了后端的排序和查找逻辑不会将相邻区域
+错误合并或混淆。
+
+\subsubsection{测试 7：批量操作}
+
+\begin{lstlisting}[style=cstyle]
+    #define VMA_BATCH_N 8
+    for (int i = 0; i < VMA_BATCH_N; i++) {
+        uint32_t base = 0xF1050000u + i * 0x10000u;
+        vma_add(base, base + 0x10000u, VMA_READ, "_batch");
+    }
+    // 逐一查找中间地址
+    for (int i = 0; i < VMA_BATCH_N; i++) {
+        v = vma_find(bases[i] + 0x8000);
+        assert(v && v->start == bases[i]);
+    }
+    // 清理
+    for (int i = 0; i < VMA_BATCH_N; i++)
+        vma_remove(bases[i]);
+\end{lstlisting}
+
+\textbf{原理}：一次添加 8 个 64KiB 区域（总跨度 512KiB）。对于 sorted-array 后端，
+这会触发多次有序插入和数组移动；对于红黑树，触发多次旋转和重着色；对于 Maple Tree，
+可能触发叶节点分裂。这是一个轻量级的"规模测试"，验证后端在多条目下仍然正确。
+
+\subsubsection{测试 8--9：负面路径与 count}
+
+\begin{enumerate}
+  \item[8.] \textbf{移除不存在的 VMA}——\texttt{vma\_remove(0xF1FF0000)} 应返回
+    错误码 $-1$ 而不是崩溃或静默操作。
+  \item[9.] \textbf{count 一致性}——记录当前 \texttt{vma\_count()}，添加一个 VMA
+    后 count 应加 1，移除后恢复原值。
+\end{enumerate}
+
+这两个测试验证了 VMA 子系统的"健壮性"——即使调用者传入无效参数，也不会导致内部状态
+损坏。
+
+
+% ============================================================================
+\section{QEMU 自动化测试脚本}
+\label{sec:test-script}
+% ============================================================================
+
+手动在 Shell 中输入命令适合开发阶段，但不能保证回归。\texttt{scripts/test.sh}
+实现了完全自动化的测试流程。
+
+\subsection{工作原理}
+
+\begin{enumerate}
+  \item \texttt{make clean \&\& make iso}——从干净状态构建
+  \item 启动 QEMU，串口输出到文件（\texttt{-serial file:...}），超时后自动终止
+  \item 对日志文件做 \texttt{grep} 断言：检查引导标记、命令输出等
+  \item 需要注入命令时，改用 \texttt{-serial stdio} + \texttt{printf} 管道
+\end{enumerate}
+
+\subsection{Smoke 测试（始终运行）}
+
+\begin{lstlisting}[style=shellstyle]
+require_fixed "[init] gdt ok"          "gdt init"
+require_fixed "[init] idt ok"          "idt init"
+require_fixed "[mb2] magic=36d76289"   "multiboot2 magic"
+require_regex "\\[mb2\\] info @ 0x[0-9a-fA-F]+" "mb2 info header"
+require_fixed "[mb2] end tag"          "mb2 end tag"
+\end{lstlisting}
+
+这五项检查确保内核能完成最基本的引导：GDT/IDT 初始化、Multiboot2 magic 正确、
+内存映射标签完整。
+
+\subsection{命令注入测试}
+
+以 PMM 测试为例，脚本通过延时管道向 QEMU 的 \texttt{-serial stdio} 注入命令：
+
+\begin{lstlisting}[style=shellstyle]
+({
+  sleep 1                    # 等待 Shell 就绪
+  printf 'pmm state\n'
+  sleep 0.1
+  printf 'pmm alloc 3\n'
+  sleep 0.1
+  printf 'pmm state\n'
+  sleep 0.1
+  printf 'pmm freeall\n'
+  sleep 0.1
+  printf 'pmm state\n'
+}) | timeout 8s qemu-system-i386 \
+  -cdrom kernel.iso -serial stdio -display none
+\end{lstlisting}
+
+然后用 \texttt{awk} 提取三次 \texttt{pmm state} 输出中的空闲页数，验证
+\texttt{free0 - free1 == 3}（分配了 3 页）且 \texttt{free2 == free0}（全部归还）。
+
+\subsection{使用方式}
+
+\begin{lstlisting}[style=shellstyle, numbers=none]
+# 仅 smoke 测试（默认）
+make test
+
+# 启用所有命令测试
+TEST_PMM=1 TEST_HEAP=1 TEST_VMA=1 TEST_PMM_TEST=1 make test
+
+# 自定义超时（低配机器）
+QEMU_TIMEOUT_SEC=10 TEST_HEAP=1 make test
+\end{lstlisting}
+
+\subsection{测试标志一览}
+
+\begin{longtable}{lll}
+  \toprule
+  \textbf{环境变量} & \textbf{注入命令} & \textbf{断言标记} \\
+  \midrule
+  \texttt{TEST\_MMAP=1}      & \texttt{mmap}      & \texttt{Available RAM: 0x...} \\
+  \texttt{TEST\_PMM=1}       & \texttt{pmm state/alloc/freeall} & free 计数 $\pm 3$ \\
+  \texttt{TEST\_HEAP=1}      & \texttt{heap test}  & \texttt{[heap-test] === ALL PASS ===} \\
+  \texttt{TEST\_VMA=1}       & \texttt{vma test}   & \texttt{[vma-test] === ALL PASS ===} \\
+  \texttt{TEST\_PMM\_TEST=1} & \texttt{pmm test}   & \texttt{[pmm-test] === ALL PASS ===} \\
+  \bottomrule
+\end{longtable}
+
+
+% ============================================================================
+\section{测试设计原则}
+\label{sec:test-principles}
+% ============================================================================
+
+总结 SZY-KERNEL 测试框架遵循的设计原则：
+
+\begin{description}
+  \item[资源自清理] 每个测试函数负责分配和释放自己使用的所有资源。测试失败时也要
+    尽量释放（在 \texttt{for} 循环中逐一 \texttt{free}），避免泄漏的页/VMA 影响
+    后续测试。
+
+  \item[不变量检查] 利用 \texttt{free\_pages()} / \texttt{alloc\_count} / \texttt{vma\_count()}
+    等查询接口，在操作前后验证计数器变化符合预期。这比单纯检查返回值更可靠。
+
+  \item[魔数写入] 分配内存后立即写入唯一的魔数模式（如 \texttt{0xC0FFEE00 + i}、
+    \texttt{0xAA550000 + i}），然后在适当时機回读。如果两个分配互相覆盖，魔数会
+    被破坏，测试立即报告 FAIL。
+
+  \item[边界覆盖] 专门测试 off-by-one 易错点：页对齐的最低位、半开区间的 \texttt{end}、
+    最小分配大小 1 字节、最大 cache 级别边界等。
+
+  \item[负面路径] 不仅测试正常功能，还验证异常输入：移除不存在的 VMA、重叠添加、
+    分配 0 字节等。正确的行为是返回错误码，而非崩溃。
+
+  \item[标记输出] 每个测试打印固定格式的 \texttt{PASS/FAIL/ALL PASS}，方便
+    自动化脚本 \texttt{grep} 断言。这是裸机环境下 \texttt{assert} 的替代方案。
+\end{description}

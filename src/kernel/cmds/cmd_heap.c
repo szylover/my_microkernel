@@ -125,6 +125,10 @@ static void do_test(void) {
      * 测试 2: 多次 alloc 不同大小，验证地址不重叠
      * 测试 3: 全部 free 后 stats 验证 alloc_count == 0
      * 测试 4: free 后重新 alloc，验证空间可复用
+     * 测试 5: 对齐验证 — 所有返回指针至少 8 字节对齐
+     * 测试 6: 碎片化压力 — 交替 alloc/free，验证碎片回收
+     * 测试 7: 递增大小 — 从 1 到 2048 字节逐级分配
+     * 测试 8: 大块分配 — 4096 字节整页级分配
      */
     printk("[heap-test] === kmalloc/kfree selftest ===\n");
 
@@ -135,6 +139,7 @@ static void do_test(void) {
     }
 
     kheap_stats_t st;
+    int pass = 1;
 
     /* --- 测试 1: 基本 alloc/free --- */
     printk("[heap-test] test 1: basic alloc/free\n");
@@ -197,9 +202,10 @@ static void do_test(void) {
            st.alloc_count, (unsigned)st.free_bytes);
     if (st.alloc_count != 0) {
         printk("[heap-test] FAIL: alloc_count should be 0, got %u\n", st.alloc_count);
-        return;
+        pass = 0;
+    } else {
+        printk("[heap-test] alloc_count == 0: PASS\n");
     }
-    printk("[heap-test] alloc_count == 0: PASS\n");
 
     /* --- 测试 4: 复用验证 --- */
     printk("[heap-test] test 4: reuse after free\n");
@@ -207,20 +213,191 @@ static void do_test(void) {
     if (!p2) { printk("[heap-test] FAIL: re-alloc returned NULL\n"); return; }
     printk("[heap-test] re-alloc kmalloc(64) = 0x%08x\n", (unsigned)(uintptr_t)p2);
 
-    /*
-     * free 后重新 alloc 同样大小，如果合并正确，
-     * 应该能拿到一个有效的指针（地址可能和之前的相同也可能不同，都 OK）。
-     */
     uint32_t* w2 = (uint32_t*)p2;
     w2[0] = 0xDEADBEEFu;
     if (w2[0] != 0xDEADBEEFu) {
         printk("[heap-test] FAIL: write/read after re-alloc\n");
-        return;
+        pass = 0;
+    } else {
+        printk("[heap-test] reuse: PASS\n");
     }
     kfree(p2);
-    printk("[heap-test] reuse: PASS\n");
 
-    printk("[heap-test] === ALL PASS ===\n");
+    /* --- 测试 5: 对齐验证 --- */
+    printk("[heap-test] test 5: alignment (8-byte minimum)\n");
+    {
+        unsigned align_sizes[] = { 1, 3, 7, 13, 33, 100, 255, 512 };
+        int align_n = (int)(sizeof(align_sizes) / sizeof(align_sizes[0]));
+        void* align_ptrs[8];
+        int align_ok = 1;
+
+        for (int i = 0; i < align_n; i++) {
+            align_ptrs[i] = kmalloc(align_sizes[i]);
+            if (!align_ptrs[i]) {
+                printk("[heap-test] FAIL: kmalloc(%u) returned NULL\n", align_sizes[i]);
+                for (int j = 0; j < i; j++) kfree(align_ptrs[j]);
+                return;
+            }
+            uintptr_t addr = (uintptr_t)align_ptrs[i];
+            if (addr & 0x7u) {
+                printk("[heap-test] FAIL: kmalloc(%u) = 0x%08x not 8-byte aligned\n",
+                       align_sizes[i], (unsigned)addr);
+                align_ok = 0;
+            }
+        }
+        for (int i = 0; i < align_n; i++) kfree(align_ptrs[i]);
+        if (align_ok) {
+            printk("[heap-test] PASS\n");
+        } else {
+            pass = 0;
+        }
+    }
+
+    /* --- 测试 6: 碎片化压力 — alloc 8 块, free 偶数, alloc 填回 --- */
+    printk("[heap-test] test 6: fragmentation stress\n");
+    {
+        #define FRAG_N 8
+        void* frag[FRAG_N];
+        for (int i = 0; i < FRAG_N; i++) {
+            frag[i] = kmalloc(64);
+            if (!frag[i]) {
+                printk("[heap-test] FAIL: frag alloc %d returned NULL\n", i);
+                for (int j = 0; j < i; j++) kfree(frag[j]);
+                return;
+            }
+            /* 写入标记 */
+            ((uint32_t*)frag[i])[0] = 0xF0F00000u + (unsigned)i;
+        }
+
+        /* 释放偶数位置（制造碎片空洞） */
+        for (int i = 0; i < FRAG_N; i += 2) {
+            kfree(frag[i]);
+            frag[i] = NULL;
+        }
+
+        /* 验证奇数位置数据完好 */
+        int frag_ok = 1;
+        for (int i = 1; i < FRAG_N; i += 2) {
+            uint32_t val = ((uint32_t*)frag[i])[0];
+            if (val != 0xF0F00000u + (unsigned)i) {
+                printk("[heap-test] FAIL: frag[%d] corrupted: 0x%08x\n", i, val);
+                frag_ok = 0;
+            }
+        }
+
+        /* 重新填充偶数位置（碎片回收） */
+        for (int i = 0; i < FRAG_N; i += 2) {
+            frag[i] = kmalloc(64);
+            if (!frag[i]) {
+                printk("[heap-test] FAIL: frag re-alloc %d returned NULL\n", i);
+                frag_ok = 0;
+                break;
+            }
+            ((uint32_t*)frag[i])[0] = 0xBEBE0000u + (unsigned)i;
+        }
+
+        /* 再次验证所有数据 */
+        for (int i = 0; i < FRAG_N; i++) {
+            if (!frag[i]) continue;
+            uint32_t expected;
+            if (i % 2 == 0)
+                expected = 0xBEBE0000u + (unsigned)i;
+            else
+                expected = 0xF0F00000u + (unsigned)i;
+            uint32_t actual = ((uint32_t*)frag[i])[0];
+            if (actual != expected) {
+                printk("[heap-test] FAIL: frag[%d] = 0x%08x, expected 0x%08x\n",
+                       i, actual, expected);
+                frag_ok = 0;
+            }
+        }
+
+        for (int i = 0; i < FRAG_N; i++) {
+            if (frag[i]) kfree(frag[i]);
+        }
+
+        if (frag_ok) {
+            printk("[heap-test] PASS\n");
+        } else {
+            pass = 0;
+        }
+        #undef FRAG_N
+    }
+
+    /* --- 测试 7: 递增大小分配 --- */
+    printk("[heap-test] test 7: increasing sizes (1..2048)\n");
+    {
+        unsigned inc_sizes[] = { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048 };
+        int inc_n = (int)(sizeof(inc_sizes) / sizeof(inc_sizes[0]));
+        int inc_ok = 1;
+
+        for (int i = 0; i < inc_n; i++) {
+            void* p = kmalloc(inc_sizes[i]);
+            if (!p) {
+                printk("[heap-test] FAIL: kmalloc(%u) returned NULL\n", inc_sizes[i]);
+                inc_ok = 0;
+                break;
+            }
+            /* 写满并回读 */
+            uint8_t* bp = (uint8_t*)p;
+            uint8_t pattern = (uint8_t)(inc_sizes[i] & 0xFF);
+            for (unsigned j = 0; j < inc_sizes[i]; j++) bp[j] = pattern;
+            for (unsigned j = 0; j < inc_sizes[i]; j++) {
+                if (bp[j] != pattern) {
+                    printk("[heap-test] FAIL: kmalloc(%u) readback error at byte %u\n",
+                           inc_sizes[i], j);
+                    inc_ok = 0;
+                    break;
+                }
+            }
+            kfree(p);
+            if (!inc_ok) break;
+        }
+        if (inc_ok) {
+            printk("[heap-test] PASS\n");
+        } else {
+            pass = 0;
+        }
+    }
+
+    /* --- 测试 8: 大块分配（4096 字节） --- */
+    printk("[heap-test] test 8: large allocation (4096 bytes)\n");
+    {
+        void* big = kmalloc(4096);
+        if (!big) {
+            printk("[heap-test] FAIL: kmalloc(4096) returned NULL\n");
+            pass = 0;
+        } else {
+            /* 写满整页 */
+            uint32_t* wp = (uint32_t*)big;
+            int big_ok = 1;
+            for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++) {
+                wp[i] = 0xCAFE0000u + i;
+            }
+            for (unsigned i = 0; i < 4096 / sizeof(uint32_t); i++) {
+                if (wp[i] != 0xCAFE0000u + i) {
+                    printk("[heap-test] FAIL: 4096-byte readback mismatch at word %u\n", i);
+                    big_ok = 0;
+                    break;
+                }
+            }
+
+            kheap_get_stats(&st);
+            if (st.alloc_count < 1) {
+                printk("[heap-test] FAIL: alloc_count should be >= 1 after 4096 alloc\n");
+                big_ok = 0;
+            }
+
+            kfree(big);
+            if (big_ok) {
+                printk("[heap-test] PASS\n");
+            } else {
+                pass = 0;
+            }
+        }
+    }
+
+    printk("[heap-test] === %s ===\n", pass ? "ALL PASS" : "SOME FAILED");
 }
 
 static int cmd_heap_main(int argc, char** argv) {
