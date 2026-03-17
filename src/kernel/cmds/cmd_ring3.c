@@ -55,8 +55,8 @@ static void kmemcpy(void* dst, const void* src, uint32_t n) {
     }
 }
 
-static int ring3_test(void) {
-    printk("[ring3] Preparing Ring 3 test...\n");
+static int ring3_panic(void) {
+    printk("[ring3] Preparing Ring 3 panic test...\n");
 
     /* 1. 分配并映射用户代码页 */
     uint32_t code_phys = (uint32_t)(uintptr_t)pmm_alloc_page();
@@ -130,16 +130,24 @@ static int ring3_test(void) {
     return -1;
 }
 
+static int streq(const char* a, const char* b) {
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static int cmd_ring3_fn(int argc, char** argv) {
     if (argc < 2) {
         printk("Usage: ring3 <subcommand>\n");
-        printk("  ring3 test   - jump to Ring 3 and trigger GP fault\n");
+        printk("  ring3 panic  - jump to Ring 3, execute HLT -> #GP (destructive)\n");
         return 0;
     }
 
     const char* sub = argv[1];
-    if (sub[0] == 't' && sub[1] == 'e' && sub[2] == 's' && sub[3] == 't' && sub[4] == '\0') {
-        return ring3_test();
+    if (streq(sub, "panic")) {
+        return ring3_panic();
     }
 
     printk("Unknown subcommand: %s\n", sub);
