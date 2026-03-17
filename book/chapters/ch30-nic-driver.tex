@@ -1,21 +1,110 @@
 % ============================================================================
 \chapter{网卡驱动}
 \label{ch:nic-driver}
-% 里程碑 H-1 — 待实现
+% Stage H-1 ~ H-3
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 Intel E1000 网卡驱动（QEMU 默认网卡）
-  \item 收发以太网帧：初始化、发送描述符环、接收描述符环
-  \item PCI 设备枚举与 MMIO 映射
+  \item 理解网络分层模型（OSI / TCP-IP）与以太网帧结构
+  \item 设计可插拔 \texttt{netdev\_ops\_t} 接口，解耦网卡驱动
+  \item 实现 PCI 设备枚举与 MMIO 映射
+  \item 实现 Intel E1000 驱动后端（QEMU 默认网卡）
+  \item 了解 virtio-net 备选方案
+  \item 通过 \texttt{KCONFIG\_NETDEV\_BACKEND} 一键切换
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：网络分层}
+\label{sec:nic-concept}
+% ============================================================================
 
 % TODO:
-% - PCI 总线与设备发现
-% - E1000 寄存器布局
-% - 发送/接收描述符环（TX/RX ring）
-% - DMA 与物理内存分配
+% - TCP/IP 四层模型（从下到上）：
+%     1. 链路层（Link）：以太网帧收发、MAC 地址
+%     2. 网络层（Network）：IP 路由、ICMP
+%     3. 传输层（Transport）：TCP/UDP
+%     4. 应用层（Application）：HTTP、DNS
+% - 以太网帧结构：
+%     [6B dst MAC][6B src MAC][2B EtherType][46~1500B payload][4B FCS]
+%     EtherType: 0x0800=IPv4, 0x0806=ARP
+% - MTU = 1500 bytes（不含帧头帧尾）
+% - 图：数据封装过程（HTTP → TCP 段 → IP 包 → 以太网帧）
+
+% ============================================================================
+\section{可插拔接口：\texttt{netdev\_ops\_t}}
+\label{sec:nic-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct netdev_ops {
+%         const char* name;                          // "e1000", "virtio_net"
+%         int (*init)(void);                          // 初始化网卡硬件
+%         int (*send)(const void* frame, size_t len); // 发送以太网帧
+%         int (*recv)(void* buf, size_t max_len);     // 接收以太网帧
+%         void (*get_mac)(uint8_t mac[6]);            // 获取 MAC 地址
+%         int (*link_status)(void);                   // 是否连接（1/0）
+%     } netdev_ops_t;
+% - dispatch 层 + kconfig.h: KCONFIG_NETDEV_BACKEND 0=e1000, 1=virtio_net
+
+% ============================================================================
+\section{PCI 设备枚举}
+\label{sec:nic-pci}
+% ============================================================================
+
+% TODO:
+% - PCI 配置空间读取（I/O ports 0xCF8/0xCFC）
+% - 遍历 bus/device/function → 读 vendor_id/device_id
+% - E1000 标识：vendor=0x8086, device=0x100E (82540EM)
+% - BAR0 → MMIO 基地址 → vmm_map 映射到内核虚拟地址
+
+% ============================================================================
+\section{后端一：E1000 驱动}
+\label{sec:nic-e1000}
+% ============================================================================
+
+% TODO:
+% - E1000 初始化序列：
+%     1. 读取 MMIO BAR0 基地址 → 映射到虚拟地址
+%     2. 软复位（CTRL.RST）
+%     3. 读取 MAC 地址（RAL/RAH 寄存器或 EEPROM）
+%     4. 配置 RX：分配 RX 描述符环 + 缓冲区（DMA 物理地址）→ 写 RDBAL/RDBAH/RDLEN/RDH/RDT
+%     5. 配置 TX：分配 TX 描述符环 → 写 TDBAL/TDBAH/TDLEN/TDH/TDT
+%     6. 启用 RX/TX（RCTL.EN + TCTL.EN）
+%     7. 配置中断（IMS 寄存器）+ 注册 IRQ handler
+% - 发送：构造以太网帧 → 填 TX 描述符 → 更新 TDT → 等待完成
+% - 接收：IRQ 通知有新帧 → 从 RX 描述符读取 → 传递给协议栈 → 更新 RDT
+% - [WHY] TX/RX 使用描述符环：DMA 让网卡直接读写物理内存，CPU 不需逐字节搬运
+
+% ============================================================================
+\section{后端二：virtio-net（备选）}
+\label{sec:nic-virtio}
+% ============================================================================
+
+% TODO:（备选，可跳过）
+% - virtio 模型：Guest 和 Host 通过共享内存 virtqueue 通信
+% - 比 E1000 仿真更高效（少很多寄存器操作）
+% - PCI device: vendor=0x1AF4, device=0x1000
+% - KCONFIG_NETDEV_BACKEND=1 切换
+
+% ============================================================================
+\section{验证}
+\label{sec:nic-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：PCI 枚举 → 找到 E1000 → 输出 vendor/device/BAR
+% - 测试 2：读取并打印 MAC 地址
+% - 测试 3：发送一个 ARP 请求帧 → Wireshark/tcpdump 在 host 抓到
+% - 测试 4：接收来自 host 的帧 → 解析并打印
+% - shell 命令：net info / net send / net recv
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+网卡驱动通过可插拔 \texttt{netdev\_ops\_t} 接口，让 E1000 和 virtio-net 可以一键切换。
+E1000 的 TX/RX 描述符环 + DMA 是理解现代网卡驱动的基础。
+下一章在驱动之上构建 TCP/IP 协议栈，让 OS 能进行真正的网络通信。

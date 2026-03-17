@@ -1,21 +1,100 @@
 % ============================================================================
 \chapter{用户态 mmap}
 \label{ch:mmap}
-% 里程碑 F-3 — 待实现
+% Stage F-5 ~ F-7
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 \texttt{mmap}/\texttt{munmap} 系统调用
-  \item 支持匿名映射（\texttt{MAP\_ANONYMOUS}）和文件映射
-  \item 基于 VMA 管理用户态地址空间
+  \item 理解 mmap 的用途与语义（匿名映射 / 文件映射）
+  \item 实现 mmap 与 VMA 子系统的集成（复用里程碑 C 的可插拔 VMA 后端）
+  \item 实现匿名映射后端（\texttt{MAP\_ANONYMOUS | MAP\_PRIVATE}）
+  \item 实现文件映射后端（进阶，\texttt{MAP\_PRIVATE} 文件映射）
   \item 按需分页（demand paging）与 Page Fault 处理
+  \item 通过 \texttt{KCONFIG\_MMAP\_FILE} 开关控制文件映射
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：mmap 内存映射}
+\label{sec:mmap-concept}
+% ============================================================================
 
 % TODO:
-% - mmap 的用途：动态库加载、共享内存、大文件访问
-% - 匿名映射 vs 文件映射
-% - demand paging 与 copy-on-write
+% - mmap = 将一段虚拟地址直接映射到物理资源（匿名页 / 文件内容）
+% - 用途：
+%     1. 匿名映射：malloc 的大块分配走 mmap（glibc 中 > 128KB）
+%     2. 文件映射：将文件内容映射到地址空间（比 read/write 高效）
+%     3. 共享内存：MAP_SHARED 让多进程共享同一物理页
+%     4. 动态库加载：ld.so 用 mmap 加载 .so 文件
+% - mmap(addr, length, prot, flags, fd, offset) 参数详解：
+%     addr: 建议地址（通常 NULL 让内核分配）
+%     length: 映射长度（向上取整到页大小）
+%     prot: PROT_READ | PROT_WRITE | PROT_EXEC
+%     flags: MAP_ANONYMOUS | MAP_PRIVATE | MAP_SHARED
+%     fd: 文件映射时的文件描述符（匿名映射 = -1）
+%     offset: 文件映射起始偏移
+% - munmap(addr, length)：解除映射 + 释放物理页
+
+\subsection{与 VMA 的关系}
+
+% TODO:
+% - mmap 创建新的 VMA（调 vma_add）
+% - munmap 删除 VMA（调 vma_remove）+ 释放物理页 + 解除页表映射
+% - demand paging：mmap 时不分配物理页，只创建 VMA
+%     → 第一次访问触发 #PF → PF handler 检查 VMA 有效 → 分配零页/从文件读入
+% - 里程碑 C 的 VMA 后端（sorted-array / rbtree / maple-tree）直接复用
+
+% ============================================================================
+\section{匿名映射后端}
+\label{sec:mmap-anon}
+% ============================================================================
+
+% TODO:
+% - sys_mmap 实现（MAP_ANONYMOUS | MAP_PRIVATE）：
+%     1. 在用户地址空间找空闲区域（vma_find_free 或固定 mmap 区 0x40000000+）
+%     2. vma_add(start, start+length, prot_to_flags(prot), "anon-mmap")
+%     3. 不分配物理页（demand paging）
+%     4. 返回 start
+% - Page Fault 处理（匿名）：
+%     1. PF handler 调 vma_find(fault_addr)
+%     2. 如果是 demand paging 的匿名 VMA → pmm_alloc_page → memset 0 → vmm_map(PTE_USER)
+%     3. 如果权限不匹配（写只读页）→ SIGSEGV
+% - sys_munmap：
+%     1. vma_remove(start)
+%     2. 遍历页表释放物理页 + vmm_unmap
+%     3. TLB 刷新（invlpg）
+
+% ============================================================================
+\section{文件映射后端（进阶）}
+\label{sec:mmap-file}
+% ============================================================================
+
+% TODO:（进阶，KCONFIG_MMAP_FILE=1 开启）
+% - MAP_PRIVATE 文件映射：
+%     mmap 时记录 (fd, offset) 到 VMA 的 private 字段
+%     PF handler：从文件读取一页内容到新分配的物理页（COW 语义）
+%     修改不写回文件
+% - MAP_SHARED 文件映射（更进阶）：
+%     多进程共享同一物理页 → 写入写回文件（msync）
+% - VFS 集成：PF handler 调 vfs_read(file, page_buf, PAGE_SIZE)
+
+% ============================================================================
+\section{验证}
+\label{sec:mmap-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：mmap 匿名 → 写入 → 读回 → 正确
+% - 测试 2：mmap 匿名 → munmap → 再次访问 → SIGSEGV
+% - 测试 3：demand paging → 第一次读触发 PF → 页内容全零
+% - 测试 4（文件映射）：mmap 一个已知文件 → 读内容 → 与 read 方式对比
+% - shell 命令：mmap test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+mmap 将虚拟地址映射与 VMA 子系统深度集成，实现了 demand paging 的按需分配。
+匿名映射为用户态 \texttt{malloc} 的大块分配提供基础，文件映射为动态库和高效 I/O 铺路。
+下一章实现用户态 libc，让用户程序能用标准 C 函数编程。

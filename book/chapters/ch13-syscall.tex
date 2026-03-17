@@ -1,0 +1,157 @@
+% ============================================================================
+\chapter{系统调用}
+\label{ch:syscall}
+% Stage D-2 ~ D-4
+% ============================================================================
+
+\section{本章目标}
+
+\begin{itemize}
+  \item 理解系统调用的本质：用户态 → 内核态的受控入口
+  \item 设计可插拔 \texttt{syscall\_ops\_t} 接口，解耦系统调用入口机制
+  \item 实现 \texttt{int 0x80} 后端（传统、调试友好）
+  \item 实现 \texttt{sysenter} 后端（现代快速路径，进阶）
+  \item 第一批 syscall：\texttt{write}、\texttt{exit}、\texttt{brk}
+  \item 通过 \texttt{KCONFIG\_SYSCALL\_BACKEND} 一键切换
+\end{itemize}
+
+% ============================================================================
+\section{概念：为什么需要系统调用}
+\label{sec:syscall-concept}
+% ============================================================================
+
+% TODO:
+% - 用户态 (Ring 3) 不能直接访问硬件、修改页表、操作 I/O 端口
+% - 系统调用是"合法的特权提升"通道——经过内核审查的受控入口
+% - 与函数调用的区别：涉及特权级切换 + 地址空间切换 + 参数验证
+% - 对比三种实现机制：
+%     1. int N（软中断，IA-32 传统方式，Linux 早期用 int 0x80）
+%     2. sysenter/sysexit（Intel 快速系统调用，Pentium II+）
+%     3. syscall/sysret（AMD64，64位专用，本项目暂不涉及）
+% - 图：系统调用全路径（用户 → stub → 特权切换 → 内核 handler → 返回）
+
+\subsection{系统调用约定}
+
+% TODO:
+% - 寄存器约定（与 Linux i386 一致）：
+%     EAX = syscall number
+%     EBX = arg1, ECX = arg2, EDX = arg3, ESI = arg4, EDI = arg5
+%     返回值在 EAX（负数表示 -errno）
+% - 为什么用寄存器而非栈传参（避免内核访问用户栈的安全风险）
+% - syscall 编号表设计（数组索引，快速 O(1) 分发）
+
+% ============================================================================
+\section{可插拔接口：\texttt{syscall\_ops\_t}}
+\label{sec:syscall-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计（与 pmm_ops_t / heap_ops_t 同一模式）：
+%     typedef struct syscall_ops {
+%         const char* name;           // "int80", "sysenter"
+%         void (*init)(void);         // 设置 IDT/MSR
+%     } syscall_ops_t;
+% - dispatch 层：syscall.c 持有 g_syscall_ops 全局指针
+%     syscall_register_backend() → 注册
+%     syscall_init() → 调用 backend init()
+% - syscall table：函数指针数组 syscall_table[NR_SYSCALLS]
+%     分发逻辑在 C handler 中：syscall_handler_c(regs) → table[eax](args...)
+% - 好处：int 0x80 和 sysenter 共享同一个 syscall_table，只是入口不同
+% - kconfig.h: #define KCONFIG_SYSCALL_BACKEND 0  // 0=int80, 1=sysenter
+
+% ============================================================================
+\section{后端一：\texttt{int 0x80}（软中断）}
+\label{sec:syscall-int80}
+% ============================================================================
+
+% TODO:
+% - IDT 配置：idt_set_gate(0x80, syscall_stub_int80, 0x08, 0xEE)
+%   [BITFIELDS] type_attr=0xEE → P=1, DPL=3, Type=1110
+%   [WHY] DPL=3 是关键——允许 Ring 3 代码触发此中断
+% - 汇编 stub (syscall_stub_int80)：
+%     1. pusha / push ds/es/fs/gs（保存所有寄存器）
+%     2. 加载内核段选择子 (ds/es = 0x10)
+%     3. push esp → 传递 regs 结构体指针
+%     4. call syscall_handler_c
+%     5. 返回值写入 regs->eax
+%     6. pop 恢复寄存器 → iret
+% - [CPU STATE] int 0x80 触发后：
+%     CPU 自动从 TSS 读 SS0:ESP0 → 压入 SS3/ESP3/EFLAGS/CS3/EIP3
+%     → 跳转到 IDT[0x80] handler → Ring 0
+
+% ============================================================================
+\section{后端二：\texttt{sysenter}（快速路径）}
+\label{sec:syscall-sysenter}
+% ============================================================================
+
+% TODO:（进阶，可跳过）
+% - sysenter/sysexit 为什么比 int 快：
+%     不经过 IDT 查表、不压完整栈帧、不做特权检查（硬编码 Ring 0）
+% - 三个 MSR 配置：
+%     IA32_SYSENTER_CS  (0x174) = 内核代码段选择子 (0x08)
+%     IA32_SYSENTER_EIP (0x176) = 内核入口函数地址
+%     IA32_SYSENTER_ESP (0x175) = 内核栈顶
+% - [CPU STATE] sysenter 执行时：
+%     CS = IA32_SYSENTER_CS, SS = IA32_SYSENTER_CS + 8
+%     EIP = IA32_SYSENTER_EIP, ESP = IA32_SYSENTER_ESP
+%     CPL 立刻变为 0，不保存旧寄存器（用户端需自行保存）
+% - 用户态约定：ECX=用户ESP, EDX=用户EIP（返回地址）
+% - sysexit：CS = IA32_SYSENTER_CS + 16, SS = IA32_SYSENTER_CS + 24
+%     → 这就是为什么 GDT 排列 Kernel_Code/Kernel_Data/User_Code/User_Data 连续
+% - KCONFIG_SYSCALL_BACKEND=1 切换
+
+% ============================================================================
+\section{第一批系统调用}
+\label{sec:syscall-first}
+% ============================================================================
+
+% TODO:
+% - sys_write(fd, buf, count):
+%     fd=1 → 输出到串口（COM1），fd=2 → 同上（stderr）
+%     需要验证 buf 指针在用户地址空间内（安全检查）
+% - sys_exit(code):
+%     标记当前进程为 ZOMBIE
+%     （暂时只有一个"进程"→直接 halt 或回到 shell）
+% - sys_brk(addr):
+%     调整用户堆边界
+%     新增页面：pmm_alloc → vmm_map(PTE_USER|PTE_WRITABLE) → VMA 更新
+% - syscall 编号定义：syscall_nr.h
+%     #define SYS_exit  1
+%     #define SYS_write 4
+%     #define SYS_brk   45
+
+% ============================================================================
+\section{用户态封装}
+\label{sec:syscall-userlib}
+% ============================================================================
+
+% TODO:
+% - 用户态 syscall 封装（inline asm）：
+%     static inline int syscall1(int nr, int arg1) {
+%         int ret;
+%         asm volatile("int $0x80" : "=a"(ret) : "a"(nr), "b"(arg1));
+%         return ret;
+%     }
+% - 更高层封装：write(), exit(), brk()
+
+% ============================================================================
+\section{验证}
+\label{sec:syscall-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：Ring 3 执行 write(1, "hello from ring3\n", 17) → 串口看到输出
+% - 测试 2：Ring 3 执行 exit(42) → 内核报告退出码 42
+% - 测试 3：brk 扩展堆 → 写入新页 → 读回验证
+% - 测试 4：无效 syscall 编号 → 返回 -ENOSYS
+% - 测试 5（sysenter 后端）：同上测试在 sysenter 路径上通过
+% - shell 命令：syscall test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+系统调用桥接了用户态和内核态。通过可插拔 \texttt{syscall\_ops\_t} 接口，
+\texttt{int 0x80} 和 \texttt{sysenter} 两种入口机制可以一键切换。
+有了 \texttt{write}/\texttt{exit}/\texttt{brk}，用户程序能输出信息、正常退出和管理堆内存。
+下一章实现 ELF 加载器，让内核执行外部编译的用户程序。

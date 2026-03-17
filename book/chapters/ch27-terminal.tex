@@ -1,21 +1,104 @@
 % ============================================================================
 \chapter{终端子系统}
 \label{ch:terminal}
-% 里程碑 G-3 — 待实现
+% Stage G-3 ~ G-5
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 termios 接口：行缓冲、回显、特殊字符处理
-  \item 实现伪终端（PTY）：master/slave 配对
-  \item VT100/ANSI 转义序列解析（光标移动、颜色、清屏）
+  \item 理解终端的历史演进（物理终端 → 虚拟终端 → 伪终端）
+  \item 设计可插拔 \texttt{tty\_ops\_t} 接口（raw / canonical 模式可切换）
+  \item 实现 termios 行规程（行缓冲、回显、特殊字符）
+  \item 实现伪终端 PTY（master/slave 配对）
+  \item 实现 VT100/ANSI 转义序列解析（光标/颜色/清屏）
+  \item 通过 \texttt{KCONFIG\_TTY\_BACKEND} 切换（basic / pty）
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：终端}
+\label{sec:tty-concept}
+% ============================================================================
 
 % TODO:
-% - 终端的历史：物理终端 → 虚拟终端 → 伪终端
-% - termios 结构与 ioctl
-% - PTY 用途：ssh、screen/tmux、终端模拟器
-% - VT100 转义序列速查
+% - 终端的历史：
+%     物理终端：Teletype (TTY) 打字机 → CRT 终端（VT100）
+%     虚拟终端：/dev/tty1~tty6（Linux 内核 console）
+%     伪终端：/dev/ptmx + /dev/pts/N（ssh/tmux/终端模拟器使用）
+% - 行规程 (Line Discipline)：内核在 TTY 驱动和用户进程之间的中间层
+%     canonical 模式：按行缓冲（回车才送达进程）+ 回显 + 编辑
+%     raw 模式：每个字符立刻送达进程（Vim/Emacs 需要）
+% - termios 结构体：控制终端行为的配置（iflag/oflag/cflag/lflag/cc[]）
+% - PTY 用途：ssh/screen/tmux 通过 PTY master 控制远程/虚拟终端
+
+% ============================================================================
+\section{可插拔接口：\texttt{tty\_ops\_t}}
+\label{sec:tty-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct tty_ops {
+%         const char* name;                    // "basic", "pty"
+%         int (*open)(uint32_t minor);
+%         int (*read)(uint32_t minor, void* buf, size_t count);
+%         int (*write)(uint32_t minor, const void* buf, size_t count);
+%         int (*ioctl)(uint32_t minor, uint32_t cmd, void* arg);
+%         int (*close)(uint32_t minor);
+%     } tty_ops_t;
+% - dispatch 层 + kconfig.h: KCONFIG_TTY_BACKEND 0=basic, 1=pty
+
+% ============================================================================
+\section{termios 实现}
+\label{sec:tty-termios}
+% ============================================================================
+
+% TODO:
+% - struct termios { tcflag_t iflag, oflag, cflag, lflag; cc_t cc[NCCS]; }
+% - 关键 lflag 位：
+%     ICANON：canonical 模式
+%     ECHO：回显字符
+%     ISIG：启用信号（Ctrl+C → SIGINT）
+% - 特殊字符 cc[]：VEOF(Ctrl+D), VERASE(Backspace), VINTR(Ctrl+C), VMIN, VTIME
+% - 系统调用：tcgetattr(fd, &termios) / tcsetattr(fd, TCSANOW, &termios)
+%   实际走 ioctl(fd, TCGETS/TCSETS, &termios)
+
+% ============================================================================
+\section{PTY + VT100}
+\label{sec:tty-pty}
+% ============================================================================
+
+% TODO:
+% - PTY master/slave 配对：
+%     master：控制端（终端模拟器/ssh 使用）
+%     slave：应用程序端（/dev/pts/N，进程 stdin/stdout 指向此）
+%     master 写 → slave 读（发送到应用）
+%     slave 写 → master 读（显示到屏幕）
+% - openpty(&master, &slave, name, &termios, NULL) / posix_openpt()
+% - VT100/ANSI 转义序列解析：
+%     ESC [ H：光标归位
+%     ESC [ 2 J：清屏
+%     ESC [ N A/B/C/D：光标上/下/右/左移 N
+%     ESC [ 31m ~ ESC [ 37m：前景色
+%     ESC [ 0m：重置属性
+% - 转义序列状态机解析器
+
+% ============================================================================
+\section{验证}
+\label{sec:tty-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：canonical 模式 → 输入整行 → 程序收到完整行
+% - 测试 2：raw 模式 → 每个按键立刻送达
+% - 测试 3：Ctrl+C → SIGINT → 前台进程终止
+% - 测试 4：VT100 光标移动 + 颜色 → 串口/console 正确渲染
+% - shell 命令：tty test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+终端子系统通过可插拔 \texttt{tty\_ops\_t} 接口，支持 basic 和 PTY 两种模式。
+termios 行规程和 VT100 解析为 Vim 等交互式程序提供了必要的终端环境。
+下一章开始移植 GCC，让 SZY-KERNEL 能自己编译程序。

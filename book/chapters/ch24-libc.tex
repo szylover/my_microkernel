@@ -1,22 +1,98 @@
 % ============================================================================
-\chapter{移植用户态 libc}
+\chapter{用户态 libc}
 \label{ch:libc}
-% 里程碑 F-4 — 待实现
+% Stage F-8 ~ F-9
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 移植 musl-libc（或精简子集）到 SZY-KERNEL
-  \item 提供标准 C 库函数：\texttt{printf}/\texttt{malloc}/\texttt{fopen}/\texttt{string.h}
-  \item 实现 C 运行时启动（\texttt{crt0.o}、\texttt{\_start} → \texttt{main}）
-  \item 验证：用户态程序能链接 libc 并正常运行
+  \item 理解 libc 在用户程序与内核之间的桥梁角色
+  \item 对比 musl / glibc / newlib，选择合适的策略
+  \item 实现 C 运行时启动代码（\texttt{crt0.o}、\texttt{\_start} → \texttt{main}）
+  \item 实现精简 libc 核心函数（printf/malloc/fopen/string.h）
+  \item 验证用户态程序链接 libc 并正常运行
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：libc 的角色}
+\label{sec:libc-concept}
+% ============================================================================
 
 % TODO:
-% - libc 在用户程序与内核之间的角色
-% - musl vs glibc vs newlib 对比
-% - syscall wrapper 的实现
-% - C 运行时启动流程（_start → __libc_start_main → main）
+% - libc = 用户态对内核 syscall 的封装 + C 标准库函数
+% - 分层：用户程序 → libc API（printf, malloc） → syscall wrapper → 内核
+% - 没有 libc 时用户程序只能 inline asm 调 syscall → 极不方便
+% - libc 提供的核心功能：
+%     I/O：printf/scanf/fopen/fread/fwrite/fclose
+%     内存：malloc/free/calloc/realloc（底层调 brk/mmap）
+%     字符串：strlen/strcpy/strcmp/memcpy/memset
+%     进程：exit/fork/exec/wait（syscall 的 thin wrapper）
+% - 方案对比：
+%     musl：轻量、代码清晰、适合嵌入式和自制 OS
+%     glibc：功能齐全但庞大、不适合早期移植
+%     newlib：专为嵌入式设计，需实现少量 syscall stub
+%     自写精简 libc：最小依赖，全部可控（我们先用这个）
+
+\subsection{C 运行时启动流程}
+
+% TODO:
+% - 用户程序入口不是 main()，而是 _start（crt0.o 提供）
+% - _start → __libc_init（初始化 heap/stdio/env）→ main(argc, argv, envp) → exit(ret)
+% - crt0.o 汇编：
+%     _start:
+%         xor ebp, ebp       ; 栈底标记（调试器用）
+%         pop ecx             ; argc（内核在栈上准备的）
+%         mov esi, esp        ; argv 起始地址
+%         call main
+%         push eax            ; main 返回值
+%         call exit           ; 不返回
+
+% ============================================================================
+\section{syscall wrapper 层}
+\label{sec:libc-syscall}
+% ============================================================================
+
+% TODO:
+% - 每个 POSIX 函数的 thin wrapper：
+%     ssize_t write(int fd, const void* buf, size_t count) {
+%         return syscall3(SYS_write, fd, (uint32_t)buf, count);
+%     }
+% - 错误处理：syscall 返回负数 → 设 errno = -ret, 返回 -1
+% - errno 定义（ENOSYS, EBADF, ENOMEM, EFAULT, ...）
+
+% ============================================================================
+\section{核心函数实现}
+\label{sec:libc-impl}
+% ============================================================================
+
+% TODO:
+% - stdio：
+%     printf → vsnprintf + write(1, ...)
+%     fopen → open + 分配 FILE 结构
+%     fread/fwrite → read/write + 缓冲
+% - malloc/free：
+%     小块 → brk 扩展堆 + 简单 free-list
+%     大块 → mmap(MAP_ANONYMOUS)
+% - string.h：strlen, strcpy, strcmp, memcpy, memset, strncmp, ...
+% - ctype.h：isalpha, isdigit, isspace, toupper, tolower
+% - 静态链接：ar rcs libc.a *.o → 用户程序 -lc 链接
+
+% ============================================================================
+\section{验证}
+\label{sec:libc-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：printf("hello %d %s\n", 42, "world") → 串口输出正确
+% - 测试 2：malloc(1024) → memset → free → malloc → 地址复用
+% - 测试 3：fopen("/etc/hello") → fread → fclose → 内容匹配
+% - 测试 4：main 返回 0 → exit(0) 正常退出
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+精简 libc 为用户程序提供了标准 C 编程接口，屏蔽了 syscall 的底层细节。
+crt0.o + syscall wrapper + 核心函数三层结构让用户程序能用熟悉的 printf/malloc 编程。
+下一章实现用户态 Shell，替代内核内置的 shell，迈向真正的多用户系统。

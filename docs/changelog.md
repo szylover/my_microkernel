@@ -1,4 +1,18 @@
 
+## 2026-03-17 (Roadmap D–H refactor + book chapters restructure)
+- `docs/roadmap.md`：里程碑 D–H 从 20 个粗粒度 stage 细化为 55 个递进 stage，统一"概念→可插拔接口→多后端实现"模式。新增 11 个可插拔接口设计（`syscall_ops_t`/`loader_ops_t`/`sched_ops_t`/`fs_ops_t`/`blkdev_ops_t`/`chardev_ops_t`/`ipc_ops_t`/`tty_ops_t`/`netdev_ops_t`/`proto_ops_t`/`socket_ops_t`），每个里程碑按 α/β/γ/δ/ε/ζ 子阶段分组。
+- `book/chapters/ch13-syscall.tex`（原 ch13-elf-loader.tex）：系统调用章节调整为 ch13（先于 ELF），新增 `syscall_ops_t` 可插拔接口 + int 0x80/sysenter 双后端结构。
+- `book/chapters/ch14-elf-loader.tex`（原 ch14-syscall.tex）：ELF 加载器章节调整为 ch14，新增 `loader_ops_t` 可插拔接口 + ELF32 后端结构。
+- `book/chapters/ch12-tss-ring3.tex`：TSS 章节扩展（CPL/DPL/RPL 三级检查、TSS 结构体逐字段、GDT 段选择子 0x1B/0x23/0x28、iret 帧构造详解）。
+- `book/chapters/ch15-process.tex`：进程管理章节扩展（五状态机、COW fork 详细步骤、exec/exit/waitpid 完整流程）。
+- `book/chapters/ch16-scheduler.tex`：调度器章节扩展（`sched_ops_t` 接口、PIT 配置、上下文切换汇编、RR + 优先级双后端）。
+- `book/chapters/ch17-vfs.tex` ~ `ch20-devfs.tex`：文件系统四章重写（`fs_ops_t`/`blkdev_ops_t`/`chardev_ops_t` 三层可插拔架构）。
+- `book/chapters/ch21-signals.tex` ~ `ch25-user-shell.tex`：POSIX 五章重写（信号跳板、`ipc_ops_t` 管道接口、mmap+VMA 集成、精简 libc、用户态 Shell）。
+- `book/chapters/ch26-cross-toolchain.tex` ~ `ch29-port-vim.tex`：GCC/Vim 四章重写（`tty_ops_t` 终端接口、交叉编译步骤、GCC/Vim 依赖分析）。
+- `book/chapters/ch30-nic-driver.tex` ~ `ch33-net-tools.tex`：网络四章重写（`netdev_ops_t`/`proto_ops_t`/`socket_ops_t` 三层可插拔架构、E1000 驱动、TCP/IP 协议栈）。
+- `book/main.tex`：ch13/ch14 include 顺序交换（syscall → elf-loader）。
+- `.github/copilot-instructions.md`：项目文件结构目录树同步更新。
+
 ## 2026-03-17 (Enhanced tests + testing appendix)
 - `cmd_pmm.c`：新增 `pmm test` 自动化命令（5 项：alloc/free 往返、页对齐、唯一性、32 页批量压力、PHYS_TO_VIRT 写读验证）。
 - `cmd_heap.c`：`heap test` 从 4 项扩展到 8 项（新增：8 字节对齐验证、碎片化压力、1~2048 递增大小、4096 大块分配）。

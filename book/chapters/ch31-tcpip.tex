@@ -1,24 +1,107 @@
 % ============================================================================
 \chapter{TCP/IP 协议栈}
 \label{ch:tcpip}
-% 里程碑 H-2 — 待实现
+% Stage H-4 ~ H-6
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现以太网帧解析与组装
-  \item 实现 ARP 协议（地址解析）
-  \item 实现 IP 层（路由、分片）
-  \item 实现 ICMP（ping）
-  \item 实现 UDP 和 TCP（三次握手、数据传输、四次挥手）
+  \item 理解协议栈分层架构与数据封装/解封
+  \item 设计可插拔 \texttt{proto\_ops\_t} 接口 + 协议注册表
+  \item 设计 \texttt{sk\_buff} 网络缓冲区
+  \item 实现 ARP + IPv4 + ICMP（能 ping 通 QEMU 网关）
+  \item 实现 UDP + TCP（三次握手 / 数据传输 / 四次挥手）
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：协议栈分层}
+\label{sec:tcpip-concept}
+% ============================================================================
 
 % TODO:
-% - OSI 七层 vs TCP/IP 四层模型
-% - 以太网帧格式
-% - ARP 请求/应答流程
-% - IP 头部字段详解
-% - TCP 状态机
+% - 自底向上数据流：
+%     网卡收到以太网帧 → Link 层解析 EtherType
+%     → Network 层解析 IP 头 → 路由/转发
+%     → Transport 层解析 TCP/UDP 头 → 递交给 Socket
+% - sk_buff（网络缓冲区）设计：
+%     一块连续内存，通过 head/data/tail/end 指针在各层之间共享
+%     push/pull 操作添加/剥离协议头
+% - 协议注册表：根据 EtherType/IP Protocol/Port 分发到不同处理函数
+
+% ============================================================================
+\section{可插拔接口：\texttt{proto\_ops\_t}}
+\label{sec:tcpip-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct proto_ops {
+%         const char* name;                    // "tcp", "udp", "icmp"
+%         int (*send)(struct sk_buff* skb);
+%         int (*recv)(struct sk_buff* skb);
+%         int (*bind)(uint16_t port);
+%         int (*connect)(uint32_t ip, uint16_t port);
+%     } proto_ops_t;
+% - 协议注册：proto_register(IPPROTO_TCP, tcp_get_ops())
+% - IP 层根据 protocol 字段分发到对应 proto_ops
+
+% ============================================================================
+\section{ARP + IPv4 + ICMP}
+\label{sec:tcpip-arp-ip-icmp}
+% ============================================================================
+
+% TODO:
+% - ARP (Address Resolution Protocol)：
+%     IP 地址 → MAC 地址映射
+%     ARP 请求：广播 "Who has 10.0.2.2?"
+%     ARP 应答：单播 "10.0.2.2 is at xx:xx:xx:xx:xx:xx"
+%     ARP 缓存表（IP → MAC，带超时）
+% - IPv4：
+%     IP 头结构：version(4), IHL, TTL, protocol, src_ip, dst_ip, checksum
+%     路由表（简单：单默认网关）
+%     checksum 计算（one's complement sum）
+% - ICMP (Internet Control Message Protocol)：
+%     Echo Request (type=8) / Echo Reply (type=0)
+%     ping 实现：构造 echo request → 发送 → 等待 reply → 计算 RTT
+% - 验证：ping 10.0.2.2（QEMU user-net 网关）
+
+% ============================================================================
+\section{UDP + TCP}
+\label{sec:tcpip-tcp}
+% ============================================================================
+
+% TODO:
+% - UDP (User Datagram Protocol)：
+%     无连接、不可靠、简单
+%     UDP 头：src_port, dst_port, length, checksum
+%     sendto/recvfrom 语义
+% - TCP (Transmission Control Protocol)：
+%     面向连接、可靠传输、流控制
+%     TCP 头：src_port, dst_port, seq, ack, flags(SYN/ACK/FIN/RST), window, checksum
+%     三次握手：SYN → SYN+ACK → ACK
+%     四次挥手：FIN → ACK → FIN → ACK
+%     TCP 状态机图（CLOSED→LISTEN→SYN_RCVD→ESTABLISHED→...→TIME_WAIT）
+%     滑动窗口（简化版：固定窗口大小）
+%     超时重传（简单定时器，指数退避）
+% - 验证：TCP 连接到 QEMU host 上的 echo server
+
+% ============================================================================
+\section{验证}
+\label{sec:tcpip-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：ARP 请求 → 收到应答 → 缓存表正确
+% - 测试 2：ping 10.0.2.2 → ICMP reply → RTT 显示
+% - 测试 3：UDP sendto → host 收到数据
+% - 测试 4：TCP 三次握手 → 发送数据 → 收到回复 → 四次挥手
+% - shell 命令：ping / arp / net test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+TCP/IP 协议栈通过可插拔 \texttt{proto\_ops\_t} 接口，让协议实现可独立扩展。
+ARP + IP + ICMP 构成基本网络通信能力，TCP + UDP 提供可靠和不可靠传输选择。
+下一章实现 BSD Socket API，将网络能力暴露给用户态程序。

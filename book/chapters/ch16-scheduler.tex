@@ -1,57 +1,170 @@
 % ============================================================================
 \chapter{调度器}
 \label{ch:scheduler}
-% Stage 14 — 待实现
+% Stage D-9 ~ D-12
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现时间片轮转（Round-Robin）调度
-  \item 实现上下文切换：寄存器保存/恢复 + CR3 切换
-  \item 利用 IRQ0（PIT 定时器）触发调度
+  \item 理解协作式与抢占式调度的区别
+  \item 设计可插拔 \texttt{sched\_ops\_t} 接口，解耦调度算法
+  \item 配置 PIT 8253 定时器产生周期中断（IRQ0）
+  \item 实现上下文切换汇编（保存/恢复寄存器 + CR3 + TSS.ESP0）
+  \item 实现 Round-Robin 调度器后端
+  \item 实现优先级调度器后端（进阶）
+  \item 通过 \texttt{KCONFIG\_SCHED\_BACKEND} 一键切换
 \end{itemize}
 
-\section{背景知识：CPU 调度}
+% ============================================================================
+\section{概念：CPU 调度}
+\label{sec:sched-concept}
+% ============================================================================
 
 % TODO:
-% - 协作式 vs 抢占式调度
-% - 时间片（time quantum / time slice）
-% - PIT (Programmable Interval Timer) 配置
+% - 调度的目标：多个就绪进程共享有限 CPU → 公平/高效/响应快
+% - 协作式调度 (Cooperative)：进程自愿让出 CPU（yield）
+%     优点：实现简单，无需定时器中断
+%     缺点：恶意/有 bug 的进程可以霸占 CPU 永不释放
+% - 抢占式调度 (Preemptive)：定时器中断强制切换
+%     优点：内核保证公平性，用户程序无法垄断 CPU
+%     缺点：需要定时器 + 更复杂的上下文切换
+% - 我们实现抢占式调度（Unix/Linux 标准方式）
+% - 时间片 (Time Quantum)：每个进程连续运行的最大时间
+%     太短 → 切换开销大；太长 → 响应慢
+%     典型值：10ms (100Hz) ~ 100ms (10Hz)
+% - 图：三个进程的甘特图（时间片轮转示意）
 
+\subsection{调度算法分类}
+
+% TODO:
+% - Round-Robin（轮转）：简单公平，所有进程等优先级
+% - Priority Scheduling（优先级）：高优先级先运行，可能饥饿
+% - MLFQ (Multi-Level Feedback Queue)：多级反馈，Linux CFS 的前身
+% - CFS (Completely Fair Scheduler)：Linux 2.6.23+，基于 vruntime 红黑树
+% - 我们先实现 RR，再进阶到优先级调度
+
+% ============================================================================
+\section{可插拔接口：\texttt{sched\_ops\_t}}
+\label{sec:sched-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计（与 pmm_ops_t 同一模式）：
+%     typedef struct sched_ops {
+%         const char* name;                           // "round_robin", "priority"
+%         void (*init)(void);                          // 初始化就绪队列
+%         void (*enqueue)(struct task_struct* task);   // 加入就绪队列
+%         void (*dequeue)(struct task_struct* task);   // 从就绪队列移除
+%         struct task_struct* (*pick_next)(void);      // 选择下一个运行的进程
+%         void (*tick)(struct task_struct* current);   // 定时器 tick 回调
+%     } sched_ops_t;
+% - dispatch 层：sched.c 持有 g_sched_ops 全局指针
+%     sched_register_backend() → 注册
+%     sched_init() → 初始化
+%     schedule() → 核心调度函数：
+%         1. 当前进程入队（如果还是 READY）
+%         2. pick_next() 选出下一个
+%         3. context_switch(current, next)
+% - kconfig.h: #define KCONFIG_SCHED_BACKEND 0  // 0=round_robin, 1=priority
+
+% ============================================================================
+\section{PIT 定时器配置}
+\label{sec:sched-pit}
+% ============================================================================
+
+% TODO:
+% - PIT 8253/8254 硬件：3 个独立计数器，我们用 Counter 0 (IRQ0)
+% - 基础频率：1193182 Hz
+% - 配置目标频率 100Hz（每 10ms 一次 tick）：
+%     divisor = 1193182 / 100 = 11932
+%     outb(0x43, 0x36)  // Counter 0, lo/hi byte, mode 3 (square wave)
+%     outb(0x40, divisor & 0xFF)   // low byte
+%     outb(0x40, divisor >> 8)     // high byte
+% - [WHY] 100Hz 是经典选择：10ms tick 兼顾响应性和切换开销
+% - IRQ0 handler 调用 sched_tick() → 可能触发 schedule()
+% - pic_clear_mask(0) 启用 IRQ0
+
+% ============================================================================
 \section{上下文切换}
+\label{sec:sched-context-switch}
+% ============================================================================
 
 % TODO:
-% - 保存当前进程的寄存器（pushad + 段寄存器）到 PCB
-% - 切换 CR3（地址空间切换）
-% - 更新 TSS 中的 ESP0（内核栈）
-% - 恢复新进程的寄存器（popad）→ iret
+% - 上下文切换 = 保存当前进程状态 + 恢复下一个进程状态
+% - context_switch(prev, next) 汇编实现：
+%     ; === 保存 prev ===
+%     pushad
+%     push ds / es / fs / gs
+%     mov [prev->esp], esp          ; 保存内核栈指针
+%     ; === 切换地址空间 ===
+%     mov eax, [next->page_directory]
+%     mov cr3, eax                   ; TLB 全刷新
+%     ; === 更新 TSS ===
+%     mov eax, [next->kernel_stack]
+%     mov [tss.esp0], eax            ; 下次中断用 next 的内核栈
+%     ; === 恢复 next ===
+%     mov esp, [next->esp]           ; 切换到 next 的内核栈
+%     pop gs / fs / es / ds
+%     popad
+%     ret                            ; 返回到 next 上次被切走的位置
 
 \begin{cpustate}
 上下文切换后：
 \begin{itemize}
-  \item CR3 指向新进程的页目录 → 地址空间切换
-  \item TSS.ESP0 指向新进程的内核栈 → 中断时用正确的栈
-  \item 通用寄存器恢复为新进程上次被切走时的状态
+  \item CR3 指向新进程的页目录 → 地址空间完全切换
+  \item TSS.ESP0 指向新进程的内核栈 → 下次中断用正确的栈
+  \item ESP 指向新进程上次保存的栈帧 → \texttt{popad} 恢复所有通用寄存器
+  \item \texttt{ret} 跳到新进程上次被 \texttt{schedule()} 切走时的下一条指令
 \end{itemize}
 \end{cpustate}
 
-\section{Round-Robin 调度器}
+% ============================================================================
+\section{后端一：Round-Robin 调度器}
+\label{sec:sched-rr}
+% ============================================================================
 
 % TODO:
-% - 就绪队列（ready queue）
-% - schedule(): 选下一个进程 → context_switch()
-% - IRQ0 handler 中调用 schedule()
+% - 数据结构：环形双向链表（就绪队列）
+%     head → task_A ↔ task_B ↔ task_C → head
+% - enqueue：插入队尾（O(1)）
+% - dequeue：从链表移除（O(1)）
+% - pick_next：取队头（O(1)）
+% - tick：current->remaining_ticks--
+%     如果 == 0 → 设 need_resched = 1 → 重置 remaining_ticks = TIME_SLICE
+% - TIME_SLICE = 10（10 * 10ms = 100ms 时间片）
 
-\section{PIT 定时器配置}
+% ============================================================================
+\section{后端二：优先级调度器（进阶）}
+\label{sec:sched-priority}
+% ============================================================================
 
-% TODO: 频率设置（如 100Hz = 每 10ms 一次中断）
+% TODO:（进阶，可跳过）
+% - 数据结构：多级就绪队列 ready_queue[MAX_PRIORITY]
+%     优先级 0（最高）~ N（最低）
+% - pick_next：从最高优先级非空队列取队头
+% - 防饥饿：aging 机制
+%     每次 tick，所有等待中的进程优先级提升 1 级
+% - KCONFIG_SCHED_BACKEND=1 切换
 
+% ============================================================================
 \section{验证}
+\label{sec:sched-verify}
+% ============================================================================
 
-% TODO: 两个用户进程交替输出 → 串口看到交错输出
+% TODO:
+% - 测试 1：两个用户进程各打印 A/B → 串口看到交替输出 ABABAB...
+% - 测试 2：三个进程不同工作量 → 观察公平分配
+% - 测试 3：进程 exit → 自动从就绪队列移除 → 不再被调度
+% - 测试 4（优先级）：高优先级抢占低优先级
+% - 里程碑 D 集成测试：fork+exec+scheduler 完整流程
+% - shell 命令：sched info / sched test
 
+% ============================================================================
 \section{本章小结}
+% ============================================================================
 
-调度器让多个进程分时运行。至此"进程与用户态"里程碑完成。
-下一部分进入文件系统。
+调度器通过可插拔 \texttt{sched\_ops\_t} 接口，将调度算法与内核核心解耦。
+Round-Robin 提供了最简单的公平调度，优先级调度允许差异化的 CPU 分配。
+配合 PIT 定时器的抢占式设计，保证了任何用户进程都无法独占 CPU。
+至此"进程与用户态"里程碑 D 全部完成。下一部分进入文件系统。

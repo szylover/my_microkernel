@@ -1,22 +1,126 @@
 % ============================================================================
-\chapter{磁盘文件系统}
+\chapter{块设备与磁盘文件系统}
 \label{ch:diskfs}
-% 里程碑 E-3 — 待实现
+% Stage E-4 ~ E-7
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 ATA/AHCI 磁盘驱动：读写扇区
-  \item 实现 FAT32 或 ext2 只读文件系统
-  \item 挂载到 VFS，支持 \texttt{open}/\texttt{read}/\texttt{stat}/\texttt{readdir}
-  \item 后续扩展写入支持
+  \item 理解块设备抽象与扇区寻址
+  \item 设计可插拔 \texttt{blkdev\_ops\_t} 接口，解耦磁盘驱动
+  \item 实现 ATA PIO 驱动后端
+  \item 理解 ext2 磁盘布局（超级块 / 块组 / inode 表）
+  \item 实现 ext2 只读文件系统后端（\texttt{fs\_ops\_t}）
+  \item 通过 \texttt{KCONFIG\_BLKDEV\_BACKEND} 一键切换
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：块设备}
+\label{sec:diskfs-blkdev}
+% ============================================================================
 
 % TODO:
-% - 块设备 vs 字符设备
-% - ATA PIO / DMA 模式
-% - FAT32 文件系统结构（BPB、FAT 表、目录项）
-% - ext2 文件系统结构（超级块、inode 表、块组描述符）
+% - 块设备 vs 字符设备：
+%     块设备：固定大小块（扇区 512B / 4KB）随机读写（磁盘、SSD、USB）
+%     字符设备：字节流顺序读写（串口、键盘、终端）
+% - 块设备抽象：隐藏不同磁盘控制器的差异
+%     ATA PIO（简单、慢，QEMU 默认）
+%     ATA DMA（高效，需要内存 DMA 映射）
+%     AHCI（SATA 现代接口）
+%     virtio-blk（QEMU 虚拟化优化）
+% - 扇区寻址：LBA（Logical Block Addressing）
+%     28-bit LBA → 最大 128 GiB
+%     48-bit LBA → 最大 128 PiB
+
+% ============================================================================
+\section{可插拔接口：\texttt{blkdev\_ops\_t}}
+\label{sec:diskfs-blkdev-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct blkdev_ops {
+%         const char* name;                              // "ata_pio", "virtio_blk"
+%         int (*init)(void);                              // 探测+初始化磁盘
+%         int (*read_block)(uint32_t lba, void* buf, uint32_t count);
+%         int (*write_block)(uint32_t lba, const void* buf, uint32_t count);
+%         uint32_t (*get_capacity)(void);                 // 总扇区数
+%     } blkdev_ops_t;
+% - dispatch 层 + kconfig.h: KCONFIG_BLKDEV_BACKEND 0=ata_pio
+
+% ============================================================================
+\section{后端一：ATA PIO 驱动}
+\label{sec:diskfs-ata}
+% ============================================================================
+
+% TODO:
+% - ATA PIO 模式寄存器（I/O ports 0x1F0–0x1F7）
+% - 28-bit LBA 读扇区流程：
+%     1. 选择 drive + LBA 高 4 位 → 0x1F6
+%     2. 设置扇区数 → 0x1F2
+%     3. 设置 LBA 低/中/高 → 0x1F3/4/5
+%     4. 发送 READ SECTORS 命令 (0x20) → 0x1F7
+%     5. 等待 BSY 清除 + DRQ 置位 → 从 0x1F0 读 256 个 word
+% - IRQ14 中断驱动（可选，PIO 也可用轮询）
+% - [WHY] ATA PIO 简单但慢（CPU 全程参与数据传输），适合学习
+
+% ============================================================================
+\section{ext2 文件系统概念}
+\label{sec:diskfs-ext2-concept}
+% ============================================================================
+
+% TODO:
+% - ext2 磁盘布局图：
+%     Block 0: boot block（引导扇区，不用）
+%     Block 1: superblock（文件系统元数据）
+%     Block Group 0..N: {块组描述符, 块 bitmap, inode bitmap, inode 表, 数据块}
+% - 超级块关键字段：s_inodes_count, s_blocks_count, s_block_size
+% - inode 关键字段：i_mode, i_size, i_block[15]（直接/间接/双重/三重块指针）
+% - 目录项：{ inode, rec_len, name_len, file_type, name[] }
+
+% ============================================================================
+\section{ext2 只读后端}
+\label{sec:diskfs-ext2-ro}
+% ============================================================================
+
+% TODO:
+% - 实现 fs_ops_t：
+%     ext2_mount：读 superblock → 计算块组数 → 缓存关键表
+%     ext2_open：路径解析（逐级 readdir） → 找到目标 inode
+%     ext2_read：通过 i_block[] 定位数据块 → blkdev_read_block → 复制到 buf
+%     ext2_stat：读 inode 返回 size/mode
+%     ext2_readdir：解析目录数据块中的 dir_entry
+% - 间接块处理（文件 > 12 blocks 时需要 indirect block pointer）
+% - QEMU 磁盘镜像：qemu-img create -f raw disk.img 32M → mkfs.ext2 disk.img
+
+% ============================================================================
+\section{ext2 写入支持（进阶）}
+\label{sec:diskfs-ext2-rw}
+% ============================================================================
+
+% TODO:（进阶，可跳过）
+% - 块分配：查 block bitmap → 找空闲块 → 标记已用 → 更新 superblock
+% - inode 分配：查 inode bitmap → 同理
+% - 目录项插入：找到目录数据块末尾 → 追加 dir_entry
+% - ext2_write：分配新数据块 → 更新 inode.i_block → 写数据
+% - fsync：将缓存的 superblock/inode 写回磁盘
+
+% ============================================================================
+\section{验证}
+\label{sec:diskfs-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：ATA PIO 读写扇区 → 写入数据 → 读回对比
+% - 测试 2：挂载 ext2 → readdir("/") → 看到预置文件
+% - 测试 3：open + read 一个已知内容的文件 → 内容正确
+% - shell 命令：disk read <lba> / mount / ls / cat
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+通过可插拔 \texttt{blkdev\_ops\_t} 和 \texttt{fs\_ops\_t} 双层抽象，
+磁盘驱动与文件系统格式完全解耦——ATA PIO 可替换为 virtio-blk，ext2 可替换为 FAT32。
+下一章实现字符设备框架，将串口、键盘等硬件也纳入``一切皆文件''的统一模型。

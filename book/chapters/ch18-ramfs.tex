@@ -1,40 +1,91 @@
 % ============================================================================
-\chapter{initrd / ramfs：内存文件系统}
+\chapter{ramfs：内存文件系统}
 \label{ch:ramfs}
-% Stage 16 — 待实现
+% Stage E-2 ~ E-3
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 ramfs（内存中的简易文件系统）
-  \item 将初始文件打包进内核镜像（initrd）
+  \item 实现 ramfs 后端：内存中的简易文件系统
+  \item 实现 initrd 加载：GRUB Multiboot2 module → ramfs 根目录
   \item ELF 加载器通过 VFS 读取文件，而非硬编码内存地址
+  \item 验证 \texttt{exec("/hello")} 从 initrd 加载 ELF 并运行
 \end{itemize}
 
-\section{背景知识：initrd}
+% ============================================================================
+\section{概念：initrd 与内存文件系统}
+\label{sec:ramfs-concept}
+% ============================================================================
 
 % TODO:
-% - Linux 的 initramfs / initrd 概念
-% - GRUB 的 module 加载（Multiboot2 module tag）
-% - 打包格式选择（tar? 自定义? cpio?）
+% - 鸡生蛋问题：磁盘驱动还没实现，用户程序放在哪里？
+%     答案：打包进内核镜像（initrd = initial ramdisk）
+% - Linux 方案：initramfs（CPIO 格式的压缩包，解压到 ramfs）
+% - 我们的方案：GRUB 以 Multiboot2 module 加载 initrd → 解析到 ramfs
+% - ramfs = 纯内存文件系统：文件内容和目录结构都在 RAM 中
+%     优点：简单快速，无需磁盘驱动
+%     缺点：断电即丢失，大小受限于内存
 
-\section{Ramfs 实现}
+\subsection{打包格式选择}
 
 % TODO:
-% - 简单的目录树结构（静态数组或链表）
-% - 文件内容直接存在内存中
-% - 实现 vfs_ops_t 的 open/read/stat/readdir
+% - 方案对比：
+%     CPIO（newc 格式）：Linux 标准，工具支持好，解析简单
+%     tar：通用但解析稍复杂（header 512 bytes 对齐）
+%     自定义格式：最简单但不通用
+% - 推荐 CPIO newc：定长 ASCII header，字段含义清晰
+% - CPIO header 结构图
 
-\section{GRUB Module 加载}
+% ============================================================================
+\section{ramfs 后端实现}
+\label{sec:ramfs-impl}
+% ============================================================================
 
-% TODO: Multiboot2 module tag 解析 → 获取 initrd 的物理地址和大小
+% TODO:
+% - 内部数据结构：
+%     ramfs_node { name, type(FILE/DIR), data_ptr, data_size, children_list }
+% - 实现 fs_ops_t 全部方法：
+%     ramfs_mount：初始化根节点
+%     ramfs_open：路径查找 → 返回 file
+%     ramfs_read：从 data_ptr + offset 复制到 buf
+%     ramfs_write：扩展 data（kmalloc 重新分配）
+%     ramfs_stat：返回 size/mode
+%     ramfs_readdir：遍历 children_list
+% - ramfs_get_ops() 返回 fs_ops_t 指针 → 注册到 VFS
 
+% ============================================================================
+\section{initrd 加载}
+\label{sec:ramfs-initrd}
+% ============================================================================
+
+% TODO:
+% - Multiboot2 module tag 解析：
+%     tag type 3 (MODULE): mod_start, mod_end, cmdline
+%     物理地址 → PHYS_TO_VIRT 转换
+% - CPIO 解析器：
+%     遍历 CPIO entries → 对每个文件调用 ramfs_create(path, data, size)
+%     遇到 "TRAILER!!!" 结束
+% - grub.cfg 配置：
+%     module2 /boot/initrd.cpio
+% - 构建脚本：
+%     find user_programs/ | cpio -o -H newc > initrd.cpio
+
+% ============================================================================
 \section{验证}
+\label{sec:ramfs-verify}
+% ============================================================================
 
-% TODO: 打包一个 hello.elf 到 initrd → exec("/hello") → 运行成功
+% TODO:
+% - 测试 1：ramfs 挂载 → readdir("/") → 看到 initrd 中的文件列表
+% - 测试 2：open("/hello") → read 完整内容 → 与原文件对比
+% - 测试 3：exec("/hello") → 通过 VFS 读取 ELF → 加载执行 → 串口输出
+% - shell 命令：ls / cat / fs test
 
+% ============================================================================
 \section{本章小结}
+% ============================================================================
 
-有了 ramfs，用户程序可以通过标准文件系统接口访问文件。
-这为将来移植更复杂的文件系统（FAT32、ext2）和用户态工具链奠定基础。
+ramfs 是 \texttt{fs\_ops\_t} 的第一个具体后端，证明了 VFS 可插拔架构的可行性。
+配合 initrd，用户程序无需磁盘驱动即可被加载执行。
+下一章实现块设备抽象和磁盘文件系统，让内核能访问持久化存储。

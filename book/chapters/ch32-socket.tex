@@ -1,22 +1,95 @@
 % ============================================================================
 \chapter{Socket API}
 \label{ch:socket}
-% 里程碑 H-3 — 待实现
+% Stage H-7 ~ H-8
 % ============================================================================
 
 \section{本章目标}
 
 \begin{itemize}
-  \item 实现 BSD Socket 接口：\texttt{socket}/\texttt{bind}/\texttt{listen}/\texttt{accept}/\texttt{connect}/\texttt{send}/\texttt{recv}
-  \item 支持 \texttt{AF\_INET} 地址族
-  \item 支持 \texttt{SOCK\_STREAM}（TCP）和 \texttt{SOCK\_DGRAM}（UDP）
-  \item 与 VFS 集成：socket 作为文件描述符
+  \item 理解 BSD Socket 抽象模型（地址族 / Socket 类型）
+  \item 设计可插拔 \texttt{socket\_ops\_t} 接口（AF\_INET / AF\_UNIX 可扩展）
+  \item 实现 INET Socket 后端（TCP + UDP）
+  \item 将 Socket fd 纳入 VFS 文件描述符体系
+  \item 验证 echo server
 \end{itemize}
 
-\section{背景知识}
+% ============================================================================
+\section{概念：BSD Socket}
+\label{sec:socket-concept}
+% ============================================================================
 
 % TODO:
-% - BSD Socket API 概览
-% - socket 在内核中的表示（struct socket）
-% - 协议族与地址族
-% - 阻塞 vs 非阻塞 I/O
+% - Socket = 网络通信的端点抽象
+% - 地址族 (Address Family)：
+%     AF_INET：IPv4 网络通信
+%     AF_UNIX：本地进程间通信（通过文件路径）
+% - Socket 类型：
+%     SOCK_STREAM：面向连接的可靠字节流（TCP）
+%     SOCK_DGRAM：无连接的数据报（UDP）
+%     SOCK_RAW：原始 IP 数据包（ping 用到）
+% - 典型 TCP 服务端流程：
+%     socket → bind → listen → accept → read/write → close
+% - 典型 TCP 客户端流程：
+%     socket → connect → read/write → close
+% - Socket 在内核中的表示：struct socket { proto_ops_t*, sockaddr, state, ... }
+% - 与 VFS 集成：socket fd 行为与普通文件 fd 一致（可 read/write/close/select）
+
+% ============================================================================
+\section{可插拔接口：\texttt{socket\_ops\_t}}
+\label{sec:socket-interface}
+% ============================================================================
+
+% TODO:
+% - 接口设计：
+%     typedef struct socket_ops {
+%         const char* name;                              // "inet"
+%         int (*create)(int type, struct socket* sock);  // SOCK_STREAM / SOCK_DGRAM
+%         int (*bind)(struct socket* sock, struct sockaddr* addr);
+%         int (*listen)(struct socket* sock, int backlog);
+%         int (*accept)(struct socket* sock, struct socket* new_sock);
+%         int (*connect)(struct socket* sock, struct sockaddr* addr);
+%         int (*send)(struct socket* sock, const void* buf, size_t len, int flags);
+%         int (*recv)(struct socket* sock, void* buf, size_t len, int flags);
+%         int (*close)(struct socket* sock);
+%     } socket_ops_t;
+% - 注册：socket_register_family(AF_INET, inet_get_ops())
+% - 为什么可插拔：未来可扩展 AF_UNIX（本地 IPC）、AF_PACKET（原始帧）
+
+% ============================================================================
+\section{INET Socket 后端}
+\label{sec:socket-inet}
+% ============================================================================
+
+% TODO:
+% - sys_socket(AF_INET, SOCK_STREAM, 0)：
+%     分配 struct socket → 关联 TCP proto_ops → 分配 fd → 返回 fd
+% - sys_bind(fd, sockaddr_in, sizeof)：
+%     绑定本地 IP + port → 注册到 TCP/UDP 端口表
+% - sys_listen(fd, backlog)：
+%     TCP LISTEN 状态 → 创建 accept 队列
+% - sys_accept(fd, &addr, &addrlen)：
+%     等待 TCP 三次握手完成 → 从 accept 队列取出新连接 → 分配新 fd
+% - sys_connect(fd, sockaddr_in, sizeof)：
+%     发起 TCP 三次握手 → 阻塞直到 ESTABLISHED
+% - sys_send/sys_recv → 通过 TCP/UDP 协议栈发送/接收
+% - fd 集成：socket fd 可用 sys_read/sys_write/sys_close
+
+% ============================================================================
+\section{验证}
+\label{sec:socket-verify}
+% ============================================================================
+
+% TODO:
+% - 测试 1：TCP echo server → 接受连接 → 收到数据 → 原样发回
+% - 测试 2：UDP echo → sendto → recvfrom → 正确
+% - 测试 3：socket fd 可 close + 被 fork 继承
+% - shell 命令：socket test
+
+% ============================================================================
+\section{本章小结}
+% ============================================================================
+
+Socket API 通过可插拔 \texttt{socket\_ops\_t} 接口，将网络能力暴露给用户态程序。
+INET Socket 后端桥接了 BSD Socket 语义和底层 TCP/UDP 协议栈。
+下一章实现用户态网络工具——ping 和 HTTP client，完成 OS 联网的最后一步。
