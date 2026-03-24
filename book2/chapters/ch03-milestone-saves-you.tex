@@ -1,0 +1,129 @@
+\chapter{里程碑拯救了我}
+
+\section{刹车}
+
+里程碑 B 结束后，我做了一个关键决定：\textbf{停下来，先写 roadmap}。
+
+不是因为我很有纪律——是因为我已经不知道接下来该做什么了。VMM 要分页，分页要页表，页表要物理内存，但我已经有了 PMM，下一步是先做虚拟内存还是先做 High-Half Kernel？
+
+当你连下一步是什么都想不清楚的时候，说明你需要一张地图。
+
+我打开一个空文件 \texttt{docs/roadmap.md}，开始写：
+
+\begin{lstlisting}[style=yamlstyle]
+# SZY-KERNEL 项目愿景与路线图
+
+## 终极目标
+构建一个 x86 微内核操作系统，最终能：
+- 自举移植 GCC 编译器
+- 运行 Vim 文本编辑器
+- 支持 TCP/IP 网络访问
+
+## 里程碑 A：裸机基础设施  [已完成]
+## 里程碑 B：物理内存管理  [已完成]
+## 里程碑 C：高级内存      [进行中]
+## 里程碑 D：进程与用户态  [计划]
+## 里程碑 E：文件系统      [计划]
+...
+\end{lstlisting}
+
+这个文件改变了一切。
+
+\section{为什么 Roadmap 有效}
+
+Roadmap 解决了三个问题：
+
+\subsection{问题 1：我不知道下一步做什么}
+
+之前：每次打开项目都要想「今天做什么」。选择焦虑导致我经常挑简单的（调个配色）而不是重要的（实现 VMM）。
+
+之后：Roadmap 里的 Stage 是有序的。打开文件，找到第一个非 ✅ 的 Stage，开工。
+
+\subsection{问题 2：AI 不知道项目全貌}
+
+之前：每次对话都要重新解释「这是一个 OS 项目，目前做到了 XXX，下一步要做 YYY」。
+
+之后：把 \texttt{docs/roadmap.md} 丢给 AI，它 30 秒就能理解项目的完整上下文——过去做了什么、现在在做什么、将来要做什么。
+
+\begin{promptbox}
+Roadmap 是你能给 AI 的\textbf{最高杠杆率的上下文}。一份 100 行的 roadmap，比 1000 行的对话历史更有信息量。因为 roadmap 是结构化的、有序的、去噪的。
+\end{promptbox}
+
+\subsection{问题 3：不知道什么时候算「做完了」}
+
+之前：一个功能可以无限打磨。PMM 能跑就算完了？还是要加多区域支持？还是要写测试？
+
+之后：每个 Stage 有明确的「内容」和「状态」。完成了标 ✅，没完成标空。完成标准是 Stage 描述里列出的东西——不多做也不少做。
+
+\section{第一次让 AI 帮我规划}
+
+有了 roadmap 的框架之后，我做了一个有意思的实验：让 AI 来细化里程碑。
+
+\begin{humanmsg}
+阅读 docs/roadmap.md，帮我把里程碑 D（进程与用户态）从目前的 4 个粗粒度 Stage 细化为递进的子步骤。参考里程碑 B/C 的"概念→接口→后端"模式。
+\end{humanmsg}
+
+AI 读完 roadmap 和已有代码后，把里程碑 D 从 4 个 Stage 扩展到了 12 个，按 α/β/γ/δ/ε/ζ 子阶段分组。这个结果非常好——因为 AI 能看到整个 roadmap 的模式并复用。
+
+但更重要的是这个过程揭示的\textbf{方法论}：
+
+\begin{enumerate}
+  \item \textbf{人定目标}：终极目标（跑 GCC/Vim/TCP）是我定的，AI 没有资格替你决定做什么项目
+  \item \textbf{人划里程碑}：粗粒度的 A/B/C/D/E 划分是我做的，基于我对 OS 知识体系的理解
+  \item \textbf{AI 细化 Stage}：每个里程碑内部的具体步骤和排序，AI 做得比我好——它能看到更多的模式和依赖
+\end{enumerate}
+
+\begin{lessonbox}
+\textbf{战略人定，战术 AI 定。}你决定去哪里，AI 帮你选最佳路径。反过来不行——如果让 AI 决定你要做什么项目、做几个里程碑，结果会是一份看起来很漂亮但跟你的能力和兴趣完全对不上的计划。
+\end{lessonbox}
+
+\section{Changelog：对抗遗忘}
+
+Roadmap 告诉我「将来要做什么」，但还需要一个东西告诉我「过去做了什么」。
+
+于是我开始维护 \texttt{docs/changelog.md}——每次完成一个 Stage，记录：
+
+\begin{itemize}
+  \item 新增/修改了哪些文件
+  \item 关键的技术决策和理由
+  \item 验证方法和结果
+\end{itemize}
+
+这个文件后来成为了整个项目最有价值的文档之一。原因是：
+
+\begin{enumerate}
+  \item \textbf{AI 的上下文窗口}比你的记忆更可靠。把 changelog 丢给 AI，它能精确回忆「上次改 vmm.c 是因为什么」。
+  \item \textbf{写书时的素材}。书稿的很多段落直接从 changelog 里改写的——因为 changelog 记录了每个决策的 WHY。
+  \item \textbf{Debug 的线索}。当某个功能突然不工作时，倒着翻 changelog 找「哪次改动可能破坏了它」。
+\end{enumerate}
+
+\section{收敛的感觉}
+
+有了 Roadmap + Changelog 之后，项目从「漫无目的地写代码」变成了：
+
+\begin{lstlisting}[style=shellstyle]
+1. 打开 roadmap.md，找到当前 Stage
+2. 告诉 AI "实现 Stage C-2: 内核堆 first-fit"
+3. AI 读 roadmap + 已有代码，实现
+4. 测试通过
+5. changelog.md 追加记录
+6. roadmap.md 标 ✅
+7. 下一个 Stage
+\end{lstlisting}
+
+\textbf{这就是「收敛」的感觉}——你知道自己在哪里、要去哪里、刚才做了什么。不再有选择焦虑，不再有「我是不是在做无用功」的怀疑。
+
+但这只是第一次收敛。新的问题很快会出现：代码质量的规范化、AI 反复犯同一个错误的问题、以及书稿和代码无法并行的瓶颈。
+
+这些问题将催生下一个进化——可插拔接口模式，和让 AI 「记住规则」的需求。
+
+\begin{exercise}
+为你的项目写一份 roadmap。规则：
+\begin{enumerate}
+  \item 用一段话定义终极目标
+  \item 划分 3-5 个里程碑（先粗后细）
+  \item 每个里程碑用一张表列出 Stage（名称 + 内容 + 状态）
+  \item 把这份 roadmap 给 AI 看，让它帮你细化其中一个里程碑
+  \item 对比 AI 的细化和你自己想的——哪些是你没想到的？
+\end{enumerate}
+\end{exercise}

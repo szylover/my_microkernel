@@ -1,0 +1,133 @@
+\chapter{Design Spec：Agent 之间的契约}
+
+\section{Architect 的输出需要标准化}
+
+有了 Agent 之后，新的问题出现了：\texttt{@Architect} 输出的设计方案\textbf{格式不统一}。
+
+第一次调用它设计 \texttt{syscall\_ops\_t} 时，它输出了一大段散文——「首先我们需要定义一个接口……然后要有一个 dispatch 层……」。信息是对的，但 \texttt{@Kernel} 读起来很费劲——它需要从散文中提取「新建哪些文件」「接口长什么样」「怎么测试」。
+
+第二次调用它设计别的东西时，格式又变了——这次是列表形式，但缺少了测试部分。
+
+我需要让 Architect 的输出\textbf{模板化}，这样 Kernel 和 Author 可以机械地解析，而不是猜测「设计方案里到底包不包含测试计划」。
+
+\section{Design Spec 模板的演化}
+
+最终固化的模板来自十几次迭代。让我还原这个演化过程，因为每一次修改都对应一个真实的教训：
+
+\subsection{v1：最小可用}
+
+\begin{lstlisting}[style=yamlstyle]
+# Design Spec: <name>
+## 接口定义
+## 文件清单
+\end{lstlisting}
+
+问题：没有测试计划。Kernel Agent 实现完了不知道怎么验证。
+
+\subsection{v2：加了 Verification}
+
+\begin{lstlisting}[style=yamlstyle]
+# Design Spec: <name>
+## 接口定义
+## 文件清单
+## Verification
+- 测试命令
+- 期望输出
+\end{lstlisting}
+
+好多了。但 Author Agent 说「你没告诉我写哪个章节、需要几张图」。
+
+\subsection{v3：拆分 Kernel Plan 和 Book Plan}
+
+\begin{lstlisting}[style=yamlstyle]
+# Design Spec: <name>
+## 接口定义
+## Kernel Implementation Plan (@Kernel)
+### New Files | Modified Files | kconfig
+## Book Plan (@Author)
+### Chapter | Figures | Code Listings
+## Verification
+## Dependencies
+\end{lstlisting}
+
+这就是最终版。关键改进是\textbf{用 \texttt{@Kernel} 和 \texttt{@Author} 标签显式标注每个 section 的目标消费者}。Agent 只需要看有自己名字的部分。
+
+\section{实例：Stage D-1 TSS + Ring 3}
+
+让我展示一个真实流程。用户需求：
+
+\begin{humanmsg}
+@Architect 设计 Stage D-1: TSS 与 Ring 3 特权级切换
+\end{humanmsg}
+
+Architect 读完 roadmap 和现有代码后，输出了：
+
+\begin{lstlisting}[style=yamlstyle]
+# Design Spec: TSS + Ring 3
+Stage: D-1
+Date: 2026-03-17
+
+## Interface Definition
+- tss_t: 104-byte TSS structure (SS0, ESP0, iomap_base...)
+- gdt_set_tss_entry(): set GDT[5] as TSS descriptor
+- tss_init(): zero TSS + set SS0:ESP0 + ltr
+- jump_to_ring3(eip, esp): build iret frame + iret
+
+Selectors: SEL_USER_CODE=0x1B, SEL_USER_DATA=0x23, SEL_TSS=0x28
+
+## Kernel Implementation Plan (@Kernel)
+### New Files
+| File | Purpose |
+|------|---------|
+| include/arch/tss.h | TSS struct + selector enum + API |
+| kernel/arch/tss.c | tss_init + tss_set_kernel_stack |
+| kernel/arch/tss_flush.asm | jump_to_ring3 asm stub |
+| kernel/cmds/cmd_ring3.c | "ring3 panic" shell command |
+
+### Modified Files
+| File | Change |
+|------|--------|
+| gdt.h/gdt.c | Extend to 6 entries + gdt_set_tss_entry |
+| idt.c | Add user_esp/user_ss to regs_t |
+| vmm.c | PDE_USER flag propagation |
+
+## Book Plan (@Author)
+### Chapter: ch12-tss-ring3.tex (9 sections)
+### Figures
+| fig01-protection-rings | 保护环模型 |
+| fig02-tss-layout | TSS 104 字节结构 |
+| fig03-gdt-extended | 6 项 GDT 布局 |
+| fig04-iret-frame | iret 栈帧构造 |
+
+## Verification
+- Command: ring3 panic
+- Expected: ISR reports GP Fault from Ring 3 (CS=0x1B)
+- Regression: pmm test, heap test, vma test must pass
+\end{lstlisting}
+
+有了这份 Spec，Kernel 和 Author 各取所需：
+
+\begin{itemize}
+  \item \texttt{@Kernel} 只看 ``Kernel Implementation Plan''——它知道要创建 4 个文件、修改 3 个文件，接口签名已经定义好
+  \item \texttt{@Author} 只看 ``Book Plan''——它知道写 ch12，9 个 section，4 张 TikZ 图
+  \item 两者\textbf{没有数据依赖}，可以并行
+\end{itemize}
+
+\section{Design Spec 的核心价值}
+
+回过头看，Design Spec 解决了几个层次的问题：
+
+\begin{description}
+  \item[对 Kernel] 它替代了「程序员自己想接口」这个步骤。AI 不需要边写代码边设计——设计已经做完了，它只需要实现。
+  \item[对 Author] 它提供了精确的写作大纲。Author 不需要自己决定「这一章写几个 section、需要几张图」——Spec 里已经列好了。
+  \item[对人类] 它是一个可审查的中间产物。在 Agent 动手之前，你可以检查设计是否合理，发现问题改 Spec 比改代码便宜得多。
+  \item[对项目] 它把「一个大任务」拆成了「可以并行的小任务」。这是并行化的前提。
+\end{description}
+
+\begin{lessonbox}
+\textbf{Design Spec 的成本很低（Architect 5 分钟就能输出），但收益很高（避免了 Kernel 和 Author 的返工）。} 如果你在 AI 辅助开发中跳过设计直接实现，你省的是 5 分钟，付出的是可能几小时的重构。
+\end{lessonbox}
+
+\begin{exercise}
+用 \texttt{@Architect}（或者手动模拟一个只读的设计角色）为你项目的下一个功能写一份 Design Spec。然后把这份 Spec 和你之前直接让 AI 实现的方式对比——有没有在 Spec 阶段就发现了设计问题？
+\end{exercise}

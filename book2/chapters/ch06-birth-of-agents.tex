@@ -1,0 +1,157 @@
+\chapter{Agent 诞生}
+
+\section{拆分}
+
+解决方案出奇地简单：\textbf{把一个大文件拆成多个小文件，每个文件定义一个角色}。
+
+VS Code 的 Agent 系统支持 \texttt{.agent.md} 文件，每个文件定义一个独立的 AI 角色——有自己的名字、工具权限和行为规范。用户用 \texttt{@AgentName} 来激活特定角色。
+
+我需要几个角色？回到痛点：
+
+\begin{enumerate}
+  \item 写代码时需要代码规范——\textbf{Kernel Agent}
+  \item 写书时需要 LaTeX 规范——\textbf{Author Agent}
+  \item 提交/发布时需要检查清单——\textbf{Ship Prompt}
+\end{enumerate}
+
+但还少了一个。在里程碑 C 的经验告诉我，动手之前需要先\textbf{设计接口}——决定 \texttt{xxx\_ops\_t} 长什么样、文件怎么划分。如果 AI 在写代码时「顺手」设计接口，常常会做出短视的决策（比如 GDT 只留 3 项）。
+
+设计和实现应该\textbf{分离}。于是有了第四个角色——\textbf{Architect Agent}。
+
+\section{三个 Agent 文件 + 一个 Prompt}
+
+\subsection{Architect：只读的架构师}
+
+\agentfile{.github/agents/architect.agent.md}
+\begin{lstlisting}[style=yamlstyle]
+---
+description: "Use when designing new kernel subsystems..."
+tools: [read, search, agent, todo]
+---
+\end{lstlisting}
+
+关键设计：\textbf{工具列表只有 \texttt{read} 和 \texttt{search}，没有 \texttt{edit}}。
+
+这是一个硬约束——Architect 物理上不能编辑文件。它只能读代码、读 roadmap，然后输出设计方案。这不是「建议它不要编辑」，而是「它没有编辑工具」。
+
+为什么这么激进？因为我发现，如果一个 AI 角色\textbf{既能设计又能实现}，它会跳过设计直接写代码。人类也有同样的问题——程序员倾向于「边想边写」而不是「先想后写」。给 Architect 去掉编辑权限，就是强制它只做设计。
+
+\begin{designbox}
+\textbf{工具权限是硬边界，Body 里的文字约束是软边界。} 如果你真的不想让 Agent 做某件事，不要在 Body 里写 NEVER——直接从工具列表里删掉。
+\end{designbox}
+
+\subsection{Kernel：受约束的开发者}
+
+\agentfile{.github/agents/kernel.agent.md}
+\begin{lstlisting}[style=yamlstyle]
+---
+description: "Use when implementing kernel code..."
+tools: [read, edit, search, execute, todo]
+---
+\end{lstlisting}
+
+Kernel Agent 有完整的工具集（读、写、搜索、执行），但它的 Body 里有大量约束：
+
+\begin{itemize}
+  \item 只能修改 \texttt{src/} 和构建文件
+  \item 必须加 \texttt{[WHY]}/\texttt{[CPU STATE]}/\texttt{[BITFIELDS]} 注释
+  \item 必须遵循可插拔接口模式
+  \item 完成后跑 \texttt{make iso} 编译验证
+\end{itemize}
+
+所有我之前在对话里反复说的 18 条规则，\textbf{相关的部分} 被写进了这个文件。不相关的（LaTeX 规范）不在这里——它们在 Author Agent 里。
+
+\subsection{Author：限域的作家}
+
+\agentfile{.github/agents/author.agent.md}
+\begin{lstlisting}[style=yamlstyle]
+---
+description: "Use when writing book chapters..."
+tools: [read, edit, search, execute, todo]
+---
+\end{lstlisting}
+
+Author Agent 只能修改 \texttt{book/} 目录。它的 Body 里是 LaTeX 和 TikZ 的全部规范：
+
+\begin{itemize}
+  \item \texttt{frame=l}，永远不要 \texttt{frame=single}
+  \item \texttt{\textbackslash codefile\{\}} 标注源文件路径
+  \item TikZ 图放 \texttt{figures/chNN/}，不内联
+  \item 写作流程：概念→设计→实现→验证
+\end{itemize}
+
+\subsection{Ship：一次性的检查员}
+
+\agentfile{.github/prompts/ship.prompt.md}
+
+Ship 不是 Agent（常驻角色），而是 Prompt（一次性任务模板）。它的工作是执行 Merge 前的检查清单——编译验证、更新 changelog、更新 roadmap、提交 PR。
+
+为什么用 Prompt 而不是 Agent？因为 Ship 的任务是\textbf{固定流程}——每次做的事情一模一样（检查清单 → git 操作），不需要「角色持续在线」。
+
+\section{copilot-instructions.md 瘦身}
+
+Agent 文件创建后，\texttt{copilot-instructions.md} 从 200 行瘦身到约 50 行——只保留了两样东西：
+
+\begin{enumerate}
+  \item \textbf{Agent 工作流总览}：解释 4 个角色各自的职责和调用方式
+  \item \textbf{项目文件结构}：目录树——这个所有角色都需要
+\end{enumerate}
+
+规则分发的逻辑：
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+\textbf{原规则} & \textbf{去向} \\
+\midrule
+代码注释规范（WHY/CPU STATE/BITFIELDS） & → \texttt{@Kernel} \\
+内存管理准则（禁止硬编码、对齐） & → \texttt{@Kernel} \\
+可插拔接口设计模式 & → \texttt{@Kernel}（实现）+ \texttt{@Architect}（设计） \\
+LaTeX 代码框规范 & → \texttt{@Author} \\
+TikZ 图管理规范 & → \texttt{@Author} \\
+Git 工作流 & → \texttt{/ship} \\
+Merge 检查清单 & → \texttt{/ship} \\
+项目文件结构 & 留在 \texttt{copilot-instructions.md} \\
+\bottomrule
+\end{tabularx}
+\caption{规则分发表}
+\end{table}
+
+\section{效果验收}
+
+Agent 文件上线后，我做了一个测试：不说任何额外的话，直接调用 \texttt{@Kernel}：
+
+\begin{humanmsg}
+@Kernel 实现 Stage D-2: syscall\_ops\_t 接口 + dispatch 层
+\end{humanmsg}
+
+结果：
+
+\begin{enumerate}
+  \item Kernel Agent 自动去读了 \texttt{docs/roadmap.md}（因为 Body 里写了参考 roadmap）
+  \item 生成的 \texttt{syscall.h} 自带 \texttt{[WHY]} 和 \texttt{[BITFIELDS]} 注释
+  \item \texttt{syscall.c} 遵循了可插拔接口模式（\texttt{syscall\_ops\_t} + dispatch）
+  \item 最后自动跑了 \texttt{make iso} 验证编译通过
+  \item 没有碰 \texttt{book/} 目录
+\end{enumerate}
+
+\textbf{零手动提醒。18 条规则全部自动执行。}
+
+这是整个项目的一个转折点。从此以后，我的工作方式从「给 AI 布置任务 + 叮嘱规则」变成了「@AgentName + 一句话需求」。
+
+\begin{lessonbox}
+\textbf{Agent 配置文件的本质是「团队手册」。} 就像新员工入职时会读一本员工手册（编码规范、Git 分支策略、代码审查流程），Agent 配置文件就是 AI ``入职'' 时读的手册。区别是：人类可能不读手册，但 AI 每次都会读。
+\end{lessonbox}
+
+\begin{exercise}
+为你的项目创建第一个 Agent 配置文件。从最简单的开始：
+\begin{enumerate}
+  \item 创建 \texttt{.github/agents/dev.agent.md}
+  \item 写 3 条你最常对 AI 重复说的规则
+  \item 测试：不说额外的话，直接用 \texttt{@dev} 布置一个任务
+  \item 检查输出是否遵守了这 3 条规则
+  \item 如果没有，调整 Body 里的措辞（提示：用 MUST 和 NEVER 比用"建议"更有效）
+\end{enumerate}
+\end{exercise}

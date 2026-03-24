@@ -1,4 +1,11 @@
 
+## 2026-03-24 (Book 2: 如何用 AI Agent 编写自己的操作系统)
+- 新增 `book2/` 目录：第二本书《如何用 AI Agent 编写自己的操作系统》完整 LaTeX 框架。
+- 成长叙事结构（4 Part / 10 章 / 2 附录 / 53 页）：天真期→失控→里程碑收敛→发现模式→规则文件→Agent 化→Design Spec→并行→持续演进→复盘。
+- 复用 book1 的 preamble 样式（ctex/TikZ/listings/tcolorbox），新增 Agent 工作流专用 TikZ 样式（agentbox/humanbox/aibox）和对话记录框（humanmsg/aimsg）。
+- `book2/Makefile`：独立 xelatex 构建。
+- 编译通过，PDF 生成正常。
+
 ## 2026-03-24 (Agent workflow refactor)
 - 新增 `.github/agents/architect.agent.md`：只读架构师 Agent，输出结构化 Design Spec（接口定义 + 内核实现计划 + 书稿计划 + 验证方案），供 @Kernel 和 @Author 并行消费。
 - 新增 `.github/agents/kernel.agent.md`：内核开发 Agent，限定只修改 `src/` 和构建文件，含 [WHY]/[CPU STATE]/[BITFIELDS] 注释规范、内存准则、可插拔接口设计模式。

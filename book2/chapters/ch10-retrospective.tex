@@ -1,0 +1,133 @@
+\chapter{复盘：可迁移的经验}
+
+\section{回顾旅程}
+
+让我们把整个旅程压缩到一张图里：
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  node distance=0.8cm,
+  phase/.style={draw, rounded corners, minimum width=10cm, minimum height=1.2cm,
+    font=\small, align=left, anchor=west},
+]
+  \node[phase, fill=red!10] (p1) at (0,0)
+    {\textbf{天真期} — 直接问 AI 写代码，无计划、无规范、无测试};
+  \node[phase, fill=orange!10, below=of p1] (p2)
+    {\textbf{撞墙} — 硬编码、零注释、书稿不同步、每次都要复述规则};
+  \node[phase, fill=yellow!10, below=of p2] (p3)
+    {\textbf{第一次收敛} — 引入 Roadmap + Changelog，知道在哪、去哪};
+  \node[phase, fill=green!10, below=of p3] (p4)
+    {\textbf{发现模式} — 可插拔接口，但每次要提醒 AI};
+  \node[phase, fill=cyan!10, below=of p4] (p5)
+    {\textbf{规则文件} — copilot-instructions.md，一次写入、永久生效};
+  \node[phase, fill=blue!10, below=of p5] (p6)
+    {\textbf{Agent 化} — 按角色拆分（Architect/Kernel/Author/Ship）};
+  \node[phase, fill=purple!10, below=of p6] (p7)
+    {\textbf{Design Spec} — 标准化中间产物，解锁并行};
+  \node[phase, fill=violet!10, below=of p7] (p8)
+    {\textbf{持续演进} — 每次犯错就更新 Agent 配置};
+
+  \foreach \a/\b in {p1/p2, p2/p3, p3/p4, p4/p5, p5/p6, p6/p7, p7/p8} {
+    \draw[-{Stealth[length=4pt]}, thick] (\a.south) -- (\b.north);
+  }
+\end{tikzpicture}
+\caption{从天真到成熟的演化路径}
+\end{figure}
+
+这条路径不是一开始就规划好的。每一步都是被\textbf{痛点驱动}的——撞了墙才知道该拐弯。
+
+\section{七条可迁移的经验}
+
+以下经验不限于 OS 开发，适用于任何用 AI Agent 做的大型项目。
+
+\subsection{经验 1：先裸奔，后穿衣}
+
+不要在第一天就设计 5 个 Agent + 3 个 Prompt + Design Spec 模板。那会让你在项目还没开始时就被元工作（meta-work）淹没。
+
+正确的做法：\textbf{先用最原始的方式写代码}。等你感受到痛点——重复复述规则、代码质量不可控、串行瓶颈——再一个一个地引入工具。
+
+每个工具都应该是对一个\textbf{具体痛点}的回应，而不是「因为最佳实践」而引入。
+
+\subsection{经验 2：战略人定，战术 AI 定}
+
+\textbf{你}决定做什么项目、定大的里程碑、审查设计方案。\textbf{AI} 细化步骤、实现代码、写文档。
+
+永远不要让 AI 替你做战略决策——它不了解你的目标、能力和兴趣。但在战术层面，AI 通常比你更全面（它能读完整个 codebase + roadmap 然后做前瞻性设计）。
+
+\subsection{经验 3：工具权限是硬边界}
+
+如果你不想让 Agent 做某件事，\textbf{从工具列表里删掉}，而不是在 Body 里写 NEVER。
+
+\begin{itemize}
+  \item Architect 不该编辑文件？\texttt{tools: [read, search]}——没有 \texttt{edit}。
+  \item Author 不该跑终端命令？从 tools 里删掉 \texttt{execute}。
+\end{itemize}
+
+Body 里的文字约束是"建议"，工具列表是"权限"。前者可以被忽略，后者不能。
+
+\subsection{经验 4：中间产物标准化}
+
+Agent 之间的通信应该通过\textbf{结构化的中间产物}（Design Spec），而不是自由文本。
+
+结构化的好处：消费者（Kernel/Author）可以机械地解析——直接找到 ``Kernel Implementation Plan'' 部分，不需要从一堆散文里提取信息。
+
+\subsection{经验 5：规则从反馈中长出来}
+
+不要试图在第一天就写出完美的 Agent 配置。用最小可用版本启动，然后通过「使用→发现问题→更新配置」的反馈循环来迭代。
+
+判断标准：如果一个问题出现了两次，加规则。一次，不加。
+
+\subsection{经验 6：并行需要不重叠的写入范围}
+
+两个 Agent 能并行的充要条件是：它们的\textbf{写入范围不重叠}。
+
+Kernel 写 \texttt{src/}，Author 写 \texttt{book/}——没有交集，安全并行。如果两个 Agent 都要修改 \texttt{src/}，就不能并行（或者需要更细粒度的文件锁定，实践中太复杂了不值得）。
+
+设计 Agent 角色时，\textbf{先画写入范围}，确保没有重叠，再决定并行策略。
+
+\subsection{经验 7：Roadmap 是最高杠杆率的上下文}
+
+一份 100 行的 Roadmap 比 10 次对话的历史更有信息量。因为 Roadmap 是结构化的、去噪的、有时序的。
+
+给 AI 任何任务之前，确保它能访问到 Roadmap。这一个文件就能让 AI 理解「过去做了什么、现在在做什么、将来要做什么」。
+
+\section{这个方法论的局限}
+
+诚实地说，这套方法也有做不到的事情：
+
+\begin{itemize}
+  \item \textbf{跨 Agent 的复杂协调}。如果一个任务需要 Kernel 和 Author 反复来回修改（不是各自独立完成），并行模型就不适用了。实践中这种情况不常见，但确实存在。
+  \item \textbf{Agent 不能真正「理解」}。它遵循规则，但不理解规则背后的原因。当出现规则没覆盖的新情况时，它可能做出错误决策。人类还是需要审查所有输出。
+  \item \textbf{初始设置有成本}。写 Agent 文件、设计 Spec 模板、建立测试框架——这些不是免费的。对于小项目（<3 个 Stage），直接用裸 AI 可能更高效。
+\end{itemize}
+
+\begin{designbox}
+\textbf{适用条件}：项目有 5 个以上的 Stage、需要代码 + 非代码产物（文档/书稿）、有可复用的结构模式。如果你的项目是一个 200 行的脚本，不需要这套方法。
+\end{designbox}
+
+\section{下一步}
+
+这本书记录的是从零到 Agent 工作流的旅程。但旅程还在继续——我的 OS 项目还有文件系统、进程管理、网络、GCC 移植等大量未完成的工作。
+
+每一个新里程碑都会带来新的挑战，Agent 配置会继续演化，新的模式会被发现。这不是一个有终点的故事——这是一个\textbf{持续改进}的过程。
+
+如果你从这本书里只记住一句话，我希望是这句：
+
+\begin{center}
+\Large\bfseries
+不要让 AI 适应你的工作方式；\\
+设计一个工作方式，让 AI 和你一起变强。
+\end{center}
+
+\begin{exercise}
+现在是你动手的时候了。选择一个你想做的项目（或者你正在做的项目），按照本书的路径走一遍：
+\begin{enumerate}
+  \item 写一份 Roadmap（3-5 个里程碑）
+  \item 完成第一个 Stage（不用 Agent，感受痛点）
+  \item 把痛点整理成规则，写第一个 \texttt{.agent.md} 文件
+  \item 用 Agent 完成第二个 Stage，对比效率
+  \item 遇到新问题时，更新 Agent 配置
+\end{enumerate}
+在这个过程中，记录你自己的「演化时间线」——什么时候引入了什么工具，解决了什么问题。那就是你自己版本的这本书。
+\end{exercise}

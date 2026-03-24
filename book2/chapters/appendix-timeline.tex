@@ -1,0 +1,82 @@
+\chapter{项目时间线}
+
+本附录按时间顺序记录了 SZY-KERNEL 项目的关键事件，重点标注了方法论的演进节点。
+
+\section{完整时间线}
+
+\begin{longtable}{lp{9cm}l}
+\toprule
+\textbf{日期} & \textbf{事件} & \textbf{方法论变化} \\
+\midrule
+\endhead
+
+03-13 & 项目启动。Multiboot2 引导、GDT、IDT、PIC、键盘驱动、Shell。一天内完成里程碑 A 全部 4 个 Stage。 & 天真期：无计划、无规范 \\
+\midrule
+
+03-13 & PMM bitmap 实现。发现硬编码 \hex{100000} 问题，花 3 轮对话修复。 & 第一次感受到痛点 \\
+\midrule
+
+03-13 & 创建 \texttt{docs/roadmap.md}。把 ``想到什么做什么'' 变成 ``有序的里程碑 + Stage 列表''。 & \textbf{引入 Roadmap} \\
+\midrule
+
+03-13 & kconfig.h 集中管理编译配置。slab 堆分配器。 & \\
+\midrule
+
+03-16 & PMM buddy 后端。第一次重构为可插拔接口（\texttt{pmm\_ops\_t}）。 & \textbf{发现可插拔模式} \\
+\midrule
+
+03-16 & VMA 接口 + sorted-array/rbtree/maple-tree 三后端。模式复用。 & 模式固化 \\
+\midrule
+
+03-16 & 创建 LaTeX 书稿框架。发现 \texttt{frame=single} 跨页问题，改为 \texttt{frame=l}。 & \\
+\midrule
+
+03-16 & 章节拆分、TikZ 图提取到 \texttt{figures/}。60 张图、15 张需修复重叠。 & \\
+\midrule
+
+03-16 & 创建 \texttt{copilot-instructions.md}。18 条规则第一次被写成文件。 & \textbf{引入规则文件} \\
+\midrule
+
+03-17 & 里程碑 D--H 路线图细化为 55 个递进 Stage。11 个可插拔接口设计。 & AI 辅助规划 \\
+\midrule
+
+03-17 & Stage D-1: TSS + Ring 3。Stage D-2: syscall\_ops\_t 接口 + dispatch。 & \\
+\midrule
+
+03-17 & 测试框架完善：pmm test (5项)、heap test (8项)、vma test (9项)。 & \textbf{引入自动化测试} \\
+\midrule
+
+03-24 & 发现 \texttt{copilot-instructions.md} 膨胀到 200 行，规则混杂。 & \\
+\midrule
+
+03-24 & 拆分为 3 个 Agent 文件 + 1 个 Prompt。\texttt{copilot-instructions.md} 瘦身。 & \textbf{Agent 化} \\
+\midrule
+
+03-24 & 创建 Design Spec 模板，固化到 Architect Agent 的 Body 中。 & \textbf{标准化中间产物} \\
+\midrule
+
+03-24 & 开始写第二本书《如何用 AI Agent 编写自己的操作系统》。 & 方法论输出 \\
+
+\bottomrule
+\end{longtable}
+
+\section{演化阶段总结}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{阶段} & \textbf{持续时间} & \textbf{触发因素} & \textbf{引入的工具} \\
+\midrule
+天真期 & 第 1 天 & 项目启动 & 无 \\
+Roadmap 期 & 第 1 天 & 不知道下一步做什么 & roadmap.md \\
+模式期 & 第 2-4 天 & 重构 PMM & 可插拔接口模式 \\
+规则文件期 & 第 4 天 & 每次都要复述规则 & copilot-instructions.md \\
+Agent 期 & 第 12 天 & 规则文件膨胀 & .agent.md 文件 \\
+Spec 期 & 第 12 天 & Agent 间需要通信 & Design Spec 模板 \\
+\bottomrule
+\end{tabular}
+\caption{方法论演化阶段}
+\end{table}
+
+每个阶段的切换都不是计划好的——而是被痛点\textbf{逼出来的}。这就是本书想传达的核心信息：\textbf{方法论应该从实践中涌现，而不是从理论中演绎}。

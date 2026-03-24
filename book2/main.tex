@@ -1,0 +1,92 @@
+% ============================================================================
+% main.tex — 《如何用 AI Agent 编写自己的操作系统》
+% ============================================================================
+\documentclass[12pt, a4paper, openany]{book}
+
+\input{preamble}
+
+% ============================================================================
+\begin{document}
+
+\raggedbottom
+
+% --- 封面 ---
+\begin{titlepage}
+  \begin{tikzpicture}[remember picture, overlay]
+    \fill[orange!70!black] (current page.north west) rectangle
+      ([yshift=-0.6cm]current page.north east);
+    \fill[orange!80!red] ([yshift=-2.5cm]current page.north west) rectangle
+      ([yshift=-7.5cm]current page.north east);
+    \fill[orange!70!black] ([yshift=1.8cm]current page.south west) rectangle
+      ([yshift=2.2cm]current page.south east);
+  \end{tikzpicture}
+
+  \centering
+  \vspace*{2.2cm}
+
+  {\color{white}\fontsize{34}{42}\selectfont\bfseries
+    如何用 AI Agent\par
+    编写自己的操作系统\par}
+  \vspace{0.5cm}
+  {\color{white!90}\LARGE Building an OS with Multi-Agent Collaboration\par}
+
+  \vspace{3cm}
+
+  {\large\itshape 从 Architect → Kernel ∥ Author → Ship 的全流程实战\par}
+
+  \vfill
+
+  {\Large\bfseries SZY\par}
+  \vspace{0.3cm}
+  {\normalsize \today\par}
+  \vspace{2.5cm}
+\end{titlepage}
+
+% --- 目录 ---
+\tableofcontents
+\newpage
+
+% ============================================================================
+% 第一部分：天真期 — 直接让 AI 写代码
+% ============================================================================
+\part{天真期：先跑起来再说}
+
+\include{chapters/ch01-start-from-scratch}
+\include{chapters/ch02-first-chaos}
+
+% ============================================================================
+% 第二部分：第一次收敛 — 里程碑与规范
+% ============================================================================
+\part{第一次收敛：引入结构}
+
+\include{chapters/ch03-milestone-saves-you}
+\include{chapters/ch04-discover-pattern}
+\include{chapters/ch05-rules-that-ai-forgets}
+
+% ============================================================================
+% 第三部分：Agent 化 — 让 AI 记住规则
+% ============================================================================
+\part{Agent 化：把规则变成配置}
+
+\include{chapters/ch06-birth-of-agents}
+\include{chapters/ch07-design-spec}
+\include{chapters/ch08-parallel-finally}
+
+% ============================================================================
+% 第四部分：新的挑战
+% ============================================================================
+\part{持续演进}
+
+\include{chapters/ch09-agents-grow-up}
+\include{chapters/ch10-retrospective}
+
+% ============================================================================
+% 附录
+% ============================================================================
+\appendix
+\part{附录}
+
+\include{chapters/appendix-agent-files}
+\include{chapters/appendix-timeline}
+
+\end{document}

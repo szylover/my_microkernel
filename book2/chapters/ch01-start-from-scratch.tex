@@ -1,0 +1,110 @@
+\chapter{从零开始：一个人和一个 AI}
+
+\section{起念}
+
+2026 年 3 月的一个周六，我打开终端，敲下了这几个命令：
+
+\begin{lstlisting}[style=shellstyle]
+mkdir my_microkernel
+cd my_microkernel
+mkdir -p src/{boot,kernel,include}
+\end{lstlisting}
+
+目标很简单也很疯狂：\textbf{写一个 x86 微内核操作系统}，从 Multiboot2 引导到最终能跑 GCC 和 Vim。
+
+我的全部装备：一台装了 Ubuntu 的电脑、QEMU 模拟器、一个 AI 编码助手（VS Code 里的 GitHub Copilot），以及从大学操作系统课上残存的模糊记忆。
+
+没有团队。没有导师。没有预先的架构设计。
+
+我打开 Copilot Chat，输入了第一句话：
+
+\begin{humanmsg}
+帮我写一个 Multiboot2 引导的最小内核，NASM 汇编入口，调用 C 语言的 kernel\_main，向 VGA 文本模式缓冲区输出 "Hello Kernel"。
+\end{humanmsg}
+
+30 秒后，AI 给了我一份 \texttt{boot.asm} 和一份 \texttt{kmain.c}。我把它们存下来，写了个 Makefile，\texttt{make iso}，扔进 QEMU——
+
+屏幕上出现了 \texttt{Hello Kernel}。
+
+\textbf{这太爽了。}
+
+此刻我犯了一个所有人都会犯的错误：我以为接下来会一直这么顺利。
+
+\section{一路狂飙：GDT、IDT、键盘}
+
+接下来几个小时，我沉浸在一种令人上瘾的节奏里：
+
+\begin{enumerate}
+  \item 问 AI：「帮我实现 GDT」
+  \item 拿到代码，塞进项目
+  \item 编译、运行、看到结果
+  \item 问 AI：「帮我实现 IDT」
+  \item 重复
+\end{enumerate}
+
+速度快得不可思议。GDT（全局描述符表）的平坦段模型、IDT（中断描述符表）的异常处理、8259 PIC 的初始化、PS/2 键盘驱动——一个下午搞定了正常情况下需要一两周的工作量。
+
+到了晚上，我有了一个能敲键盘交互的 Shell。
+
+\begin{tcblisting}{consolebox}
+«\tpk{>}» «\tin{help}»
+Available commands: help, cls, shutdown
+«\tpk{>}» «\tin{cls}»
+\end{tcblisting}
+
+这个阶段，我和 AI 之间没有任何结构——不存在设计文档、没有里程碑、没有代码规范。就是「我要什么就问什么，AI 给什么我就用什么」。
+
+用一个词概括：\textbf{即兴}。
+
+即兴的好处是启动快、心理负担低、成就感爆棚。
+
+即兴的坏处……我还不知道，但很快就会知道了。
+
+\section{已经埋下的雷}
+
+当时的我不知道，但回过头来看，前四个 Stage 的代码里已经埋了好几颗雷：
+
+\begin{enumerate}
+  \item \textbf{GDT 只有 3 项}。AI 按照我当时的需求（平坦代码seg + 数据seg）生成了 3 项 GDT。后来做特权级切换时，要加 User Code、User Data、TSS——不得不回头改。
+  \item \textbf{IDT 的 \texttt{regs\_t} 不完整}。中断帧结构体没有 \texttt{user\_esp} 和 \texttt{user\_ss} 字段。跨特权级中断时 CPU 会额外压栈两个值，但这时候的代码根本没考虑。
+  \item \textbf{零注释}。一行 \texttt{entry.access = 0x9A} 里压缩了 8 个位域的含义。我当时看得懂（因为刚写完），但一周后就忘了。
+  \item \textbf{没有测试}。代码能跑就算成功。后来改了 GDT 结构后引入回归 Bug，花了两小时才发现。
+\end{enumerate}
+
+这些问题现在说起来很明显，但在当时，沉浸在「问 AI → 代码 → 能跑」的多巴胺循环里，我完全没有意识到自己正在堆积技术债务。
+
+\begin{thinkbox}
+现在暂停一下，想想你自己的经历：你有没有过一段「AI 辅助狂飙」的体验？那个阶段最终是怎么结束的——是你主动踩刹车，还是项目本身撞墙了？
+\end{thinkbox}
+
+\section{第一本书的野心}
+
+在做完 Shell 之后，我产生了一个额外的想法：\textbf{我要同时写一本配套的教材}。
+
+理由很充分：
+\begin{itemize}
+  \item 写书能帮助我自己理解代码（「如果你不能向别人解释，说明你自己没搞懂」）
+  \item 这个项目本身就是教学导向的，有书才完整
+  \item AI 也能帮我写 LaTeX 啊！
+\end{itemize}
+
+于是我又打开 Copilot Chat：
+
+\begin{humanmsg}
+帮我写一个 LaTeX 书稿的框架，用 XeLaTeX + ctex 中文支持，O'Reilly 风格封面，每个 Stage 对应一章。
+\end{humanmsg}
+
+AI 给了我 \texttt{main.tex} 和 \texttt{preamble.tex}。我花了点时间调整样式（代码高亮配色、终端输出的深色背景框），然后开始\textbf{一边写代码一边写书}。
+
+这个决定让项目的复杂度直接翻倍——但我还没意识到。此时我的开发流程是：
+
+\begin{enumerate}
+  \item 让 AI 写一段内核代码
+  \item 测试通过
+  \item 让 AI 写对应的 LaTeX 章节
+  \item 编译 PDF，检查排版
+\end{enumerate}
+
+一切看起来很好。但这是一个\textbf{严格串行}的流程——代码写完才能写书，书写完才能下一个 Stage。而且整个过程中，AI 不记得之前的上下文——每次对话我都要重新描述项目背景。
+
+很快，我就会撞墙了。

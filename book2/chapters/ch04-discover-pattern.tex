@@ -1,0 +1,128 @@
+\chapter{发现模式：可插拔接口}
+
+\section{第一次重构}
+
+里程碑 C 是内存管理的「高级篇」——堆分配器（kmalloc）和虚拟地址空间管理（VMA）。在做堆分配器时，我想到了一个问题：
+
+PMM 已经有了 bitmap 后端。但我知道 buddy system 更好（适合大块分配、合并效率高）。如果以后要换成 buddy，所有调用 PMM 的地方都要改吗？
+
+答案是：\textbf{不用，如果你有一个接口层}。
+
+于是我做了进入这个项目以来第一次真正的\textbf{架构性重构}：
+
+\begin{enumerate}
+  \item 从 bitmap 实现中抽取出公共 API（\texttt{pmm\_alloc\_page}、\texttt{pmm\_free\_page}）
+  \item 定义一个函数指针表 \texttt{pmm\_ops\_t}，包含这些 API 的签名
+  \item 把 bitmap 的实现改成「填充 \texttt{pmm\_ops\_t}」的形式
+  \item 写一个 dispatch 层，通过全局指针转发调用
+  \item 启动时注册具体的后端
+\end{enumerate}
+
+代码长这样：
+
+\begin{lstlisting}[style=cstyle]
+// 接口定义
+typedef struct {
+    const char *name;
+    void (*init)(uint32_t mem_size);
+    uint32_t (*alloc_page)(void);
+    void (*free_page)(uint32_t addr);
+} pmm_ops_t;
+
+// Dispatch 层
+static const pmm_ops_t *g_pmm_ops = NULL;
+
+uint32_t pmm_alloc_page(void) {
+    return g_pmm_ops->alloc_page();
+}
+\end{lstlisting}
+
+重构完成后，我用同一个接口实现了 buddy 后端。切换只需要改一行 \texttt{kconfig.h}：
+
+\begin{lstlisting}[style=cstyle]
+#define KCONFIG_PMM_BACKEND  1  // 0=bitmap, 1=buddy
+\end{lstlisting}
+
+\textbf{编译、运行、pmm test 全过}。两个后端在完全不同的数据结构上实现了完全相同的接口。
+
+\section{模式不断重复}
+
+做完 PMM 之后，堆分配器（kmalloc）也面临同样的问题：first-fit 还是 slab？
+
+答案显而易见：\textbf{再搞一个 \texttt{heap\_ops\_t}}。代码结构跟 PMM 一模一样——接口、dispatch、后端、kconfig。
+
+然后是 VMA。sorted-array 还是红黑树还是 maple tree？\texttt{vma\_ops\_t}。
+
+到里程碑 C 结束时，我有了三个可插拔接口，总共 7 个后端实现。所有后端通过相同的测试套件。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llp{7cm}}
+\toprule
+\textbf{接口} & \textbf{后端数量} & \textbf{后端} \\
+\midrule
+\texttt{pmm\_ops\_t} & 2 & bitmap, buddy \\
+\texttt{heap\_ops\_t} & 2 & first-fit, slab \\
+\texttt{vma\_ops\_t} & 3 & sorted-array, rbtree, maple-tree \\
+\bottomrule
+\end{tabular}
+\caption{里程碑 C 结束时的可插拔接口}
+\end{table}
+
+\section{AI 不会自动套用模式}
+
+这里有一个关键洞察：\textbf{虽然我发现了这个模式，但 AI 不会自动记住}。
+
+每次开始一个新的子系统，我都需要重新对 AI 说：
+
+\begin{humanmsg}
+参考 pmm\_ops\_t 的设计模式——函数指针表 + dispatch 层 + 后端实现 + kconfig 选择——给 VMA 也搞一套。
+\end{humanmsg}
+
+如果我忘了说「参考 pmm\_ops\_t」，AI 可能就直接写一个没有接口层的 monolithic 实现。然后我又要花时间重构。
+
+这个「每次都要提醒」的问题变得越来越烦人。我在 changelog 里反复写同样的话：「遵循 \texttt{xxx\_ops\_t} 可插拔接口模式」。同一个模式，同一段描述，复制粘贴了至少五次。
+
+\begin{lessonbox}
+当你发现自己在对话里反复说同一段话时，说明这段话\textbf{应该被固化成配置}。这是第五章（Agent 诞生）的直接前因。
+\end{lessonbox}
+
+\section{测试作为接口契约}
+
+另一个重要发现是：\textbf{测试用例是跟接口绑定的，不是跟实现绑定的}。
+
+PMM 的 5 项测试（alloc/free 往返、页对齐、唯一性、批量压力、写读验证）对 bitmap 和 buddy 后端都适用。VMA 的 9 项测试对 sorted-array、rbtree、maple-tree 三个后端都适用。
+
+这意味着每次实现新后端时，验证是自动化的——跑一遍 \texttt{xxx test}，全过就行。不需要为每个后端单独写测试。
+
+我把测试命令集成到了 Shell 里（\texttt{pmm test}、\texttt{heap test}、\texttt{vma test}），可以在 QEMU 运行时直接执行。后来还写了 \texttt{scripts/test.sh}，用 QEMU 的 \texttt{-serial stdio} 做自动化回归。
+
+这套测试框架在后续开发中救了我无数次——每次改了一个子系统，跑一遍全部测试，确保没有回归。
+
+\section{此时的开发流程}
+
+到里程碑 C 结束时，我的开发流程已经从最初的「即兴」进化到了：
+
+\begin{enumerate}
+  \item 打开 \texttt{roadmap.md}，确定当前 Stage
+  \item 对 AI 说：「实现 Stage C-5: VMA 红黑树后端。参考 \texttt{vma\_ops\_t} 接口和 \texttt{vma\_sorted\_array.c} 的结构。」
+  \item AI 实现代码
+  \item 编译 \texttt{make iso}
+  \item QEMU 里跑 \texttt{vma test}，全部通过
+  \item 对 AI 说：「写 ch11-vma.tex 的红黑树后端章节。\texttt{frame=l}，\texttt{\textbackslash codefile\{\}} 标注，TikZ 图放 \texttt{figures/ch11/}。」
+  \item 编译 PDF
+  \item 更新 changelog + roadmap 状态
+\end{enumerate}
+
+比起里程碑 A 时代的「裸奔」，这已经好多了。但仍然有两个痛点：
+
+\begin{enumerate}
+  \item 每次都要在对话里\textbf{复述规则}（接口模式、注释规范、TikZ 目录）——AI 没有持久记忆
+  \item 代码和书稿\textbf{必须串行}——先写代码，再写书稿，不能同时进行
+\end{enumerate}
+
+解决这两个问题，就需要一个全新的东西：\textbf{Agent 配置文件}。
+
+\begin{exercise}
+在你的项目中识别一个「重复出现的结构模式」（比如：每个 API endpoint 都有 handler + validator + test）。写下这个模式的检查清单。然后数一数：你跟 AI 重复描述过这个模式几次？
+\end{exercise}

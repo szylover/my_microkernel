@@ -1,0 +1,118 @@
+\chapter{Agent 也需要成长}
+
+\section{不是一次性的}
+
+如果你以为写完 Agent 配置文件就万事大吉了——我有坏消息。
+
+Agent 配置文件不是写完就不动的；它是一个\textbf{活文档}，需要随着项目一起演化。每次你发现 Agent 犯了一个新类型的错误，就应该更新配置。每次项目进入新阶段（比如从内存管理到进程管理），新的领域知识需要被注入。
+
+让我用真实案例展示这个演化过程。
+
+\section{案例 1：TikZ 图内联问题}
+
+\textbf{发现}：Author Agent 有时候把 TikZ 代码直接写在章节文件里，而不是放到 \texttt{figures/chNN/} 目录下。
+
+\textbf{诊断}：Author 的 Body 里只写了「TikZ 图放 \texttt{figures/} 目录」，但没有明确说\textbf{不要}内联。AI 的逻辑是：你说了该做什么，但没说不该做什么，所以内联也可以。
+
+\textbf{修复}：在 Author 的 Body 里加了一行：
+
+\begin{lstlisting}[style=yamlstyle]
+- NEVER inline TikZ code in section files
+\end{lstlisting}
+
+\textbf{结果}：此后再没出现过内联 TikZ 的问题。
+
+\begin{promptbox}
+AI 对\textbf{否定指令}的理解取决于表述强度。``建议不要'' < ``不要'' < ``NEVER'' < 从工具列表里直接删除。根据规则的重要性选择合适的强度。
+\end{promptbox}
+
+\section{案例 2：compile\_commands.json 遗漏}
+
+\textbf{发现}：Kernel Agent 在添加新的 \texttt{.c} 文件后，有时忘记运行 \texttt{make compdb} 更新 \texttt{compile\_commands.json}。这导致 clangd 报错，我的编辑器里出现一堆红色波浪线。
+
+\textbf{诊断}：Build 部分只写了 ``\texttt{make iso} 必须通过''，没有提 compdb。
+
+\textbf{修复}：在 Kernel 的 Process 部分加了一个步骤：
+
+\begin{lstlisting}[style=yamlstyle]
+6. Regenerate compdb -- make compdb if new files were added
+\end{lstlisting}
+
+\section{案例 3：Architect 的前瞻性不足}
+
+\textbf{发现}：Architect 设计 syscall 接口时，只考虑了当前阶段需要的三个系统调用（write/exit/brk），没有预留 \texttt{fork}、\texttt{exec} 等未来需要的空间。
+
+\textbf{诊断}：Architect 的 Body 里只说了「read roadmap」，但没有明确要求它\textbf{基于未来的 Stage 做前瞻性设计}。
+
+\textbf{修复}：在 Architect 的 Quality Checks 里加了：
+
+\begin{lstlisting}[style=yamlstyle]
+- [ ] Design accounts for needs of future stages
+      (check roadmap for dependencies)
+\end{lstlisting}
+
+\section{演化时间线}
+
+把这些修复按时间排列，你能看到一个清晰的模式：
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{lXl}
+\toprule
+\textbf{时间} & \textbf{发现的问题} & \textbf{Agent 修改} \\
+\midrule
+第 1 天 & 创建 Agent 文件 & 初始版本 \\
+第 2 天 & TikZ 内联 & Author +NEVER inline \\
+第 2 天 & compile\_commands 遗漏 & Kernel +compdb step \\
+第 3 天 & 前瞻性不足 & Architect +quality check \\
+第 4 天 & 单文件太臃肿 & 从 1 个 copilot-instructions 拆成 3 Agent \\
+第 5 天 & Agent 之间需要通信 & 创建 Design Spec 模板 \\
+第 7 天 & Spec 格式不统一 & 固化 Spec 模板到 Architect Body \\
+\bottomrule
+\end{tabularx}
+\caption{Agent 配置的演化时间线}
+\end{table}
+
+每 1-2 天就有一次迭代。这不是因为初始设计很差——而是因为\textbf{你不可能在第一天就预见所有问题}。Agent 配置的正确工作方式是：最小可用启动 → 遇到问题 → 更新配置 → 重复。
+
+跟代码一样。
+
+\section{反馈循环}
+
+总结出来的反馈循环：
+
+\begin{enumerate}
+  \item \textbf{使用 Agent}：正常开发，让 Agent 干活
+  \item \textbf{发现问题}：Agent 的输出不符合预期
+  \item \textbf{诊断根因}：是 Body 约束不够？工具权限太多？缺少模板？
+  \item \textbf{更新配置}：修改 \texttt{.agent.md} 文件
+  \item \textbf{验证修复}：下一次使用时检查问题是否消失
+  \item 回到步骤 1
+\end{enumerate}
+
+这个循环的速度很快——不需要重新部署、不需要重新训练。改了 \texttt{.agent.md} 文件，下一次对话立刻生效。
+
+\begin{designbox}
+\textbf{Agent 配置文件相当于传统团队的「规范手册」+ 「入职培训」。} 新入职的员工（每次新对话的 AI）会自动读取最新版本的手册。你不需要每次口头传达规则的变更——改文件就行。
+\end{designbox}
+
+\section{什么时候该加规则，什么时候不该}
+
+不是每个问题都应该变成 Agent 规则。判断标准：
+
+\begin{description}
+  \item[该加规则] 问题\textbf{重复出现}（两次以上），且有明确的正确做法
+  \item[不该加规则] 问题是一次性的、context-dependent 的、或者正确做法不确定
+\end{description}
+
+例子：
+\begin{itemize}
+  \item ``AI 又用了 frame=single'' → 加规则（反复出现，正确做法明确）
+  \item ``AI 这次给红黑树的旋转写反了'' → 不加规则（一次性 Bug，不是规范问题）
+  \item ``我不确定 VMA 应该用红黑树还是跳表'' → 不加规则（设计决策，不是规范）
+\end{itemize}
+
+\begin{exercise}
+翻看你最近 10 次跟 AI 的对话记录。找出你重复说过的话（至少出现两次的指令或纠正）。把它们写成 Agent 规则，加到你的 \texttt{.agent.md} 文件中。然后跑一次任务，检查这些问题是否消失了。
+\end{exercise}

@@ -1,0 +1,115 @@
+\chapter{失控：当代码开始反噬}
+
+\section{PMM 噩梦}
+
+里程碑 B 的第一个 Stage——物理内存管理器（PMM）——是一切崩塌的开始。
+
+我对 AI 说：
+
+\begin{humanmsg}
+帮我实现物理内存管理。从 Multiboot2 memory map 解析可用区域，用 bitmap 跟踪页帧，支持 alloc\_page 和 free\_page。
+\end{humanmsg}
+
+AI 给了我大约 300 行 C 代码。编译通过，运行通过，能分配页帧。我很满意。
+
+一天后，我仔细看了一遍代码，发现了这一行：
+
+\begin{lstlisting}[style=cstyle]
+static uint8_t *bitmap = (uint8_t *)0x100000;  // Bad!
+\end{lstlisting}
+
+\textbf{位图的起始地址是硬编码的。}
+
+这意味着：如果物理内存布局不是 AI 假设的那样，内核会直接覆写有用的数据。在真实硬件上这是一个必现的内存损坏 Bug。
+
+我让 AI 修。AI 修了——但「修」的方式是把 \hex{100000} 换成了 \hex{200000}。还是硬编码。
+
+我又纠正了一轮，这次明确说「从 Multiboot2 mmap 动态计算」。第三轮才拿到正确的代码。
+
+\textbf{三轮对话解决一个问题。} 而且如果我没有仔细审查，这个 Bug 会一直待在那里。
+
+\section{注释荒漠}
+
+PMM 的代码审查还暴露了另一个问题：AI 生成的底层代码\textbf{几乎没有注释}。
+
+下面这段页表操作代码，你能一眼看出每一位的含义吗？
+
+\begin{lstlisting}[style=cstyle]
+page_table[pt_idx] = (phys_addr & 0xFFFFF000) | 0x03;
+\end{lstlisting}
+
+\texttt{0x03} 是什么？ Present + Read/Write。那 User 位呢？不设。为什么？因为这是内核页。但代码里没有任何解释。
+
+一周后写 VMM（虚拟内存管理）时，我忘了这些位域的含义，又花了 20 分钟对照 Intel 手册。两周后做用户态页表映射，又一次。
+
+\textbf{同一个知识点我查了三遍。}
+
+问题不在于 AI 写的代码不对——代码能跑。问题在于\textbf{AI 生成代码的默认行为是「最小可用」，不是「最大可维护」}。它不会主动加注释，除非你要求它。但你要求一次，下次它又忘了。
+
+\section{书稿的裂缝}
+
+与此同时，书稿开始出问题。
+
+\subsection{TikZ 图的灾难}
+
+我让 AI 画一些内存布局的 TikZ 图（内存位图、页表结构、地址分割）。AI 确实给了——但图里的文字和格子\textbf{重叠}了。bitcell 宽度太窄，长文本溢出；节点间距不够，箭头穿过文字。
+
+我修了一张→AI 忘了→第二张又重叠。修了第二张→第三张又来。
+
+总共 60 多张 TikZ 图，我返工了 15 张。
+
+\subsection{frame=single 的惨案}
+
+AI 生成的 \texttt{lstlisting} 代码框用的是 \texttt{frame=single}（四面画框）。看起来还不错——\textbf{直到代码跨页}。
+
+LaTeX 的 \texttt{frame=single} 在跨页时不会封闭矩形框的底部和顶部，导致 PDF 里出现「断开的方框」。这不是个别现象——整本书里到处都是。
+
+\begin{pitfallbox}
+教学书籍的代码块几乎必然跨页。\texttt{frame=single} 在这种场景下是一个已知的烂选择，但 AI 每次都默认用它。这就是「AI 不会犯 Bug，但会反复做出次优选择」的典型案例。
+\end{pitfallbox}
+
+我把它改成 \texttt{frame=l}（只画左侧竖线），跨页问题立刻消失。但这时候已经有 98 处代码块用了 \texttt{frame=single}——我不得不全局替换。
+
+\subsection{代码与书稿不同步}
+
+最致命的问题：当我修改了内核代码（比如给 PMM 加了多区域支持），\textbf{书稿里引用的代码还是旧版本}。
+
+因为代码和书稿是两次独立的对话，AI 不知道代码已经改了。我在书稿里写的是 v1 的 PMM 接口，但 \texttt{src/} 里已经是 v2 了。
+
+到里程碑 B 结束时，代码和书稿之间已经有了多处不一致，我花了大半天时间手动对齐。
+
+\section{痛点总结}
+
+停下来盘点一下，此时项目面临的所有问题：
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{lXl}
+\toprule
+\textbf{问题} & \textbf{表现} & \textbf{根因} \\
+\midrule
+硬编码 & 物理地址写死，换环境就崩 & AI 默认「最小可用」 \\
+注释缺失 & 位域含义反复查手册 & 没有约束 AI 必须注释 \\
+TikZ 重叠 & 15 张图需要返工 & AI 不知道我的样式参数 \\
+frame=single & 跨页方框断裂 & AI 的默认选择是次优的 \\
+代码/书稿不同步 & 书里的代码是旧版 & 串行流程 + 无版本追踪 \\
+每次都要重复背景 & 对话效率低 & AI 不记得项目上下文 \\
+没有测试 & 改 GDT 后引入回归 & 没有验证环节 \\
+没有计划 & 写到哪算哪 & 没有里程碑 \\
+\bottomrule
+\end{tabularx}
+\caption{里程碑 A-B 期间的痛点清单}
+\end{table}
+
+看着这张表，一个事实变得很清楚：\textbf{问题不在 AI 的能力，而在于我使用 AI 的方式}。
+
+我把 AI 当成了「一个什么都会的实习生」——要什么给什么，但每次都要从头解释背景，不会自己管质量，不会自己测试，不记得之前的决策。
+
+这不是 AI 的问题。这是\textbf{管理}的问题。
+
+我需要的不是更强的 AI，而是一套\textbf{工作流}——让 AI 在规则之内工作，让质量标准内化到流程里，让重复的事情不需要每次说。
+
+\begin{thinkbox}
+重新看一遍上面的痛点表。你自己的 AI 辅助开发中，遇到了哪几条？你现在是怎么处理的——每次手动纠正，还是已经找到了系统性的解决方案？
+\end{thinkbox}
