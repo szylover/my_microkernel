@@ -1,0 +1,281 @@
+% ============================================================================
+% preamble.tex — 《如何用 AI Agent 编写自己的操作系统》
+% ============================================================================
+
+% --- 中文支持 (XeLaTeX) ---
+\usepackage{ctex}
+\usepackage{fontspec}
+
+% --- 页面布局 ---
+\usepackage[
+  a4paper,
+  top=2.5cm, bottom=2.5cm,
+  left=2.5cm, right=2.5cm
+]{geometry}
+
+% --- 数学 ---
+\usepackage{amsmath, amssymb}
+
+% --- 图表 ---
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+
+% --- 绘图 ---
+\usepackage{tikz}
+\usetikzlibrary{
+  positioning, calc, arrows.meta,
+  decorations.pathreplacing, fit,
+  shapes.multipart, shapes.geometric,
+  patterns, backgrounds,
+}
+
+% Agent 工作流图专用样式
+\tikzset{
+  agentbox/.style={
+    draw, rounded corners=4pt, minimum width=2.8cm, minimum height=1cm,
+    font=\small\sffamily, align=center, thick,
+  },
+  humanbox/.style={agentbox, fill=blue!10, draw=blue!50!black},
+  aibox/.style={agentbox, fill=orange!10, draw=orange!50!black},
+  artifactbox/.style={
+    draw, dashed, rounded corners=2pt, minimum width=2.2cm, minimum height=0.7cm,
+    font=\small\ttfamily, fill=gray!5,
+  },
+  flowedge/.style={-{Stealth[length=5pt]}, thick},
+  parallededge/.style={-{Stealth[length=5pt]}, thick, dashed, blue!60},
+}
+
+% --- 颜色与代码高亮 ---
+\usepackage{xcolor}
+\usepackage{listings}
+
+% 代码样式：C 语言
+\lstdefinestyle{cstyle}{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\scriptsize\color{black!40},
+  numbersep=10pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+% 代码样式：YAML / Markdown（agent 配置文件）
+\lstdefinestyle{yamlstyle}{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\scriptsize\color{black!40},
+  numbersep=10pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
+  breaklines=true,
+  tabsize=2,
+  showstringspaces=false,
+  columns=flexible,
+  morekeywords={description, tools, name, model, agents, mode},
+}
+
+% 代码样式：x86 汇编
+\lstdefinestyle{nasmstyle}{
+  language=[x86masm]Assembler,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  numbers=left,
+  numberstyle=\scriptsize\color{black!40},
+  numbersep=10pt,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+% Shell
+\lstdefinestyle{shellstyle}{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray}\itshape,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{black!30},
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+}
+
+% Prompt / 对话记录样式
+\lstdefinestyle{chatstyle}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  tabsize=2,
+  showstringspaces=false,
+  columns=flexible,
+  frame=l,
+  framesep=6pt,
+  framerule=1.5pt,
+  rulecolor=\color{purple!40},
+}
+
+\lstset{style=cstyle}
+
+% 终端样式
+\definecolor{sol-base03}{HTML}{002B36}
+\definecolor{sol-base02}{HTML}{073642}
+\definecolor{sol-base0}{HTML}{B0BEC5}
+\definecolor{sol-cream}{HTML}{EEE8D5}
+\definecolor{sol-green}{HTML}{859900}
+\definecolor{sol-cyan}{HTML}{2AA198}
+
+\newcommand{\tin}[1]{{\color{sol-cream}\bfseries #1}}
+\newcommand{\tps}[1]{{\color{sol-green}\bfseries #1}}
+\newcommand{\tpk}[1]{{\color{sol-cyan}\bfseries #1}}
+
+\lstdefinestyle{consolestyle}{
+  basicstyle=\ttfamily\small\color{sol-base0},
+  keywordstyle=\color{sol-base0},
+  commentstyle=\color{sol-base0},
+  stringstyle=\color{sol-base0},
+  identifierstyle=\color{sol-base0},
+  numbers=none,
+  frame=none,
+  breaklines=true,
+  tabsize=4,
+  showstringspaces=false,
+  columns=flexible,
+  escapeinside={«}{»},
+}
+
+% --- 超链接 ---
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!80!black,
+  citecolor=green!50!black,
+  pdfauthor={SZY},
+  pdftitle={如何用 AI Agent 编写自己的操作系统},
+}
+
+% --- 页眉页脚 ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- 自定义命令 ---
+\newcommand{\reg}[1]{\texttt{#1}}
+\newcommand{\hex}[1]{\texttt{0x#1}}
+\newcommand{\term}[1]{\textbf{#1}}
+\newcommand{\codefile}[1]{%
+  \par\noindent{\small\ttfamily\color{blue!60!black}#1}\vspace{-0.5em}%
+}
+\newcommand{\agentfile}[1]{%
+  \par\noindent{\small\ttfamily\color{orange!60!black}#1}\vspace{-0.5em}%
+}
+
+% Agent 角色标记
+\newcommand{\agentarchitect}{\textsf{\textbf{@Architect}}}
+\newcommand{\agentkernel}{\textsf{\textbf{@Kernel}}}
+\newcommand{\agentauthor}{\textsf{\textbf{@Author}}}
+\newcommand{\agentship}{\textsf{\textbf{/ship}}}
+
+% --- tcolorbox ---
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable, skins, listings}
+
+% 终端输出框
+\tcbset{
+  consolebox/.style={
+    colback=sol-base03,
+    colframe=sol-base02,
+    coltitle=sol-cream,
+    fonttitle=\bfseries\ttfamily\small,
+    title={\textcolor{sol-green}{\$}~Terminal},
+    listing only,
+    listing options={style=consolestyle},
+    breakable,
+    sharp corners,
+    boxrule=0.5pt,
+    left=4pt, right=4pt, top=2pt, bottom=2pt,
+  }
+}
+
+% 设计决策框
+\newtcolorbox{designbox}[1][]{
+  colback=blue!3, colframe=blue!40!black,
+  fonttitle=\bfseries, title={设计决策}, breakable, #1
+}
+
+% 经验教训框
+\newtcolorbox{lessonbox}[1][]{
+  colback=green!3, colframe=green!40!black,
+  fonttitle=\bfseries, title={经验教训}, breakable, #1
+}
+
+% 反模式 / 踩坑框
+\newtcolorbox{pitfallbox}[1][]{
+  colback=red!3, colframe=red!40!black,
+  fonttitle=\bfseries, title={踩坑警告}, breakable, #1
+}
+
+% Prompt 技巧框
+\newtcolorbox{promptbox}[1][]{
+  colback=purple!3, colframe=purple!40!black,
+  fonttitle=\bfseries, title={Prompt 技巧}, breakable, #1
+}
+
+% 对话记录框（人类 / AI 交替）
+\newtcolorbox{humanmsg}[1][]{
+  colback=blue!5, colframe=blue!30,
+  fonttitle=\bfseries\small, title={🧑 Human},
+  breakable, left=4pt, right=4pt, #1
+}
+\newtcolorbox{aimsg}[1][]{
+  colback=orange!5, colframe=orange!30,
+  fonttitle=\bfseries\small, title={🤖 Agent},
+  breakable, left=4pt, right=4pt, #1
+}
+
+% --- 思考题与练习 ---
+\newcounter{thinknum}[chapter]
+\newcounter{exercisenum}[chapter]
+
+\newtcolorbox{thinkbox}[1][]{
+  colback=purple!3, colframe=purple!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{thinknum}思考 \thechapter.\thethinknum},
+  breakable, #1
+}
+
+\newtcolorbox{exercise}[1][]{
+  colback=cyan!3, colframe=cyan!40!black,
+  fonttitle=\bfseries,
+  title={\stepcounter{exercisenum}练习 \thechapter.\theexercisenum},
+  breakable, #1
+}

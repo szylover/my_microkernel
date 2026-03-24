@@ -39,7 +39,10 @@ my_microkernel/
 │       └── ship.prompt.md        #   Merge 检查清单 + Git 工作流
 ├── Makefile                       # 薄 wrapper，转发到 src/Makefile
 ├── README.md
-├── book/                          # LaTeX 书稿 《自己动手写操作系统》
+├── book/                          # LaTeX 书稿 《自己动手写操作系统》（第一本）
+│   ├── Makefile                   #   xelatex 构建（make → main.pdf）
+│   ├── main.tex                   #   主文件（\include 各章）
+│   ├── preamble.tex               #   宏包 & 样式定义
 │   ├── Makefile                   #   xelatex 构建（make → main.pdf）
 │   ├── main.tex                   #   主文件（\include 各章）
 │   ├── preamble.tex               #   宏包 & 样式定义
@@ -72,6 +75,11 @@ my_microkernel/
 │   │   ├── ch32-socket.tex        #       Socket API（socket_ops_t 可插拔）
 │   │   └── ch33-net-tools.tex     #       ping + wget
 │   └── figures/                   #   图片资源
+├── book2/                         # LaTeX 书稿 《如何用 AI Agent 编写自己的操作系统》（第二本）
+│   ├── Makefile                   #   xelatex 构建
+│   ├── main.tex                   #   主文件
+│   ├── preamble.tex               #   宏包 & 样式（含 Agent 专用 TikZ 样式）
+│   └── chapters/                  #   ch01–ch10 + 2 附录
 ├── docs/                          # 项目文档（面向人类）
 │   ├── changelog.md               #   变更日志
 │   ├── debug.md                   #   QEMU + GDB 调试指南

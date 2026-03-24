@@ -1,0 +1,92 @@
+\contentsline {part}{I\hspace {1em}天真期：先跑起来再说}{6}{part.1}%
+\contentsline {chapter}{\numberline {1}从零开始：一个人和一个 AI}{7}{chapter.1}%
+\contentsline {section}{\numberline {1.1}起念}{7}{section.1.1}%
+\contentsline {section}{\numberline {1.2}一路狂飙：GDT、IDT、键盘}{7}{section.1.2}%
+\contentsline {section}{\numberline {1.3}已经埋下的雷}{8}{section.1.3}%
+\contentsline {section}{\numberline {1.4}第一本书的野心}{9}{section.1.4}%
+\contentsline {chapter}{\numberline {2}失控：当代码开始反噬}{10}{chapter.2}%
+\contentsline {section}{\numberline {2.1}PMM 噩梦}{10}{section.2.1}%
+\contentsline {section}{\numberline {2.2}注释荒漠}{10}{section.2.2}%
+\contentsline {section}{\numberline {2.3}书稿的裂缝}{11}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}TikZ 图的灾难}{11}{subsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.3.2}frame=single 的惨案}{11}{subsection.2.3.2}%
+\contentsline {subsection}{\numberline {2.3.3}代码与书稿不同步}{12}{subsection.2.3.3}%
+\contentsline {section}{\numberline {2.4}痛点总结}{12}{section.2.4}%
+\contentsline {part}{II\hspace {1em}第一次收敛：引入结构}{13}{part.2}%
+\contentsline {chapter}{\numberline {3}里程碑拯救了我}{14}{chapter.3}%
+\contentsline {section}{\numberline {3.1}刹车}{14}{section.3.1}%
+\contentsline {section}{\numberline {3.2}为什么 Roadmap 有效}{15}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}问题 1：我不知道下一步做什么}{15}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}问题 2：AI 不知道项目全貌}{15}{subsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.2.3}问题 3：不知道什么时候算「做完了」}{15}{subsection.3.2.3}%
+\contentsline {section}{\numberline {3.3}第一次让 AI 帮我规划}{15}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Changelog：对抗遗忘}{16}{section.3.4}%
+\contentsline {section}{\numberline {3.5}收敛的感觉}{17}{section.3.5}%
+\contentsline {chapter}{\numberline {4}发现模式：可插拔接口}{18}{chapter.4}%
+\contentsline {section}{\numberline {4.1}第一次重构}{18}{section.4.1}%
+\contentsline {section}{\numberline {4.2}模式不断重复}{19}{section.4.2}%
+\contentsline {section}{\numberline {4.3}AI 不会自动套用模式}{19}{section.4.3}%
+\contentsline {section}{\numberline {4.4}测试作为接口契约}{20}{section.4.4}%
+\contentsline {section}{\numberline {4.5}此时的开发流程}{20}{section.4.5}%
+\contentsline {chapter}{\numberline {5}AI 记不住的规则}{22}{chapter.5}%
+\contentsline {section}{\numberline {5.1}重复说教的疲惫}{22}{section.5.1}%
+\contentsline {section}{\numberline {5.2}问题的本质}{23}{section.5.2}%
+\contentsline {section}{\numberline {5.3}第一次尝试：copilot-instructions.md}{23}{section.5.3}%
+\contentsline {section}{\numberline {5.4}新的问题：全塞在一起太臃肿}{24}{section.5.4}%
+\contentsline {part}{III\hspace {1em}Agent 化：把规则变成配置}{25}{part.3}%
+\contentsline {chapter}{\numberline {6}Agent 诞生}{26}{chapter.6}%
+\contentsline {section}{\numberline {6.1}拆分}{26}{section.6.1}%
+\contentsline {section}{\numberline {6.2}三个 Agent 文件 + 一个 Prompt}{26}{section.6.2}%
+\contentsline {subsection}{\numberline {6.2.1}Architect：只读的架构师}{26}{subsection.6.2.1}%
+\contentsline {subsection}{\numberline {6.2.2}Kernel：受约束的开发者}{27}{subsection.6.2.2}%
+\contentsline {subsection}{\numberline {6.2.3}Author：限域的作家}{27}{subsection.6.2.3}%
+\contentsline {subsection}{\numberline {6.2.4}Ship：一次性的检查员}{28}{subsection.6.2.4}%
+\contentsline {section}{\numberline {6.3}copilot-instructions.md 瘦身}{28}{section.6.3}%
+\contentsline {section}{\numberline {6.4}效果验收}{28}{section.6.4}%
+\contentsline {chapter}{\numberline {7}Design Spec：Agent 之间的契约}{30}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Architect 的输出需要标准化}{30}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Design Spec 模板的演化}{30}{section.7.2}%
+\contentsline {subsection}{\numberline {7.2.1}v1：最小可用}{30}{subsection.7.2.1}%
+\contentsline {subsection}{\numberline {7.2.2}v2：加了 Verification}{30}{subsection.7.2.2}%
+\contentsline {subsection}{\numberline {7.2.3}v3：拆分 Kernel Plan 和 Book Plan}{31}{subsection.7.2.3}%
+\contentsline {section}{\numberline {7.3}实例：Stage D-1 TSS + Ring 3}{31}{section.7.3}%
+\contentsline {section}{\numberline {7.4}Design Spec 的核心价值}{33}{section.7.4}%
+\contentsline {chapter}{\numberline {8}终于能并行了}{34}{chapter.8}%
+\contentsline {section}{\numberline {8.1}解锁并行的那一刻}{34}{section.8.1}%
+\contentsline {section}{\numberline {8.2}并行的安全保障}{35}{section.8.2}%
+\contentsline {subsection}{\numberline {8.2.1}第一层：文件边界}{35}{subsection.8.2.1}%
+\contentsline {subsection}{\numberline {8.2.2}第二层：Design Spec 是快照}{35}{subsection.8.2.2}%
+\contentsline {subsection}{\numberline {8.2.3}第三层：偏离报告}{35}{subsection.8.2.3}%
+\contentsline {section}{\numberline {8.3}实际的工作节奏}{35}{section.8.3}%
+\contentsline {section}{\numberline {8.4}对比：三个阶段的效率}{36}{section.8.4}%
+\contentsline {part}{IV\hspace {1em}持续演进}{37}{part.4}%
+\contentsline {chapter}{\numberline {9}Agent 也需要成长}{38}{chapter.9}%
+\contentsline {section}{\numberline {9.1}不是一次性的}{38}{section.9.1}%
+\contentsline {section}{\numberline {9.2}案例 1：TikZ 图内联问题}{38}{section.9.2}%
+\contentsline {section}{\numberline {9.3}案例 2：compile\_commands.json 遗漏}{39}{section.9.3}%
+\contentsline {section}{\numberline {9.4}案例 3：Architect 的前瞻性不足}{39}{section.9.4}%
+\contentsline {section}{\numberline {9.5}演化时间线}{39}{section.9.5}%
+\contentsline {section}{\numberline {9.6}反馈循环}{40}{section.9.6}%
+\contentsline {section}{\numberline {9.7}什么时候该加规则，什么时候不该}{40}{section.9.7}%
+\contentsline {chapter}{\numberline {10}复盘：可迁移的经验}{42}{chapter.10}%
+\contentsline {section}{\numberline {10.1}回顾旅程}{42}{section.10.1}%
+\contentsline {section}{\numberline {10.2}七条可迁移的经验}{43}{section.10.2}%
+\contentsline {subsection}{\numberline {10.2.1}经验 1：先裸奔，后穿衣}{43}{subsection.10.2.1}%
+\contentsline {subsection}{\numberline {10.2.2}经验 2：战略人定，战术 AI 定}{44}{subsection.10.2.2}%
+\contentsline {subsection}{\numberline {10.2.3}经验 3：工具权限是硬边界}{44}{subsection.10.2.3}%
+\contentsline {subsection}{\numberline {10.2.4}经验 4：中间产物标准化}{44}{subsection.10.2.4}%
+\contentsline {subsection}{\numberline {10.2.5}经验 5：规则从反馈中长出来}{44}{subsection.10.2.5}%
+\contentsline {subsection}{\numberline {10.2.6}经验 6：并行需要不重叠的写入范围}{44}{subsection.10.2.6}%
+\contentsline {subsection}{\numberline {10.2.7}经验 7：Roadmap 是最高杠杆率的上下文}{45}{subsection.10.2.7}%
+\contentsline {section}{\numberline {10.3}这个方法论的局限}{45}{section.10.3}%
+\contentsline {section}{\numberline {10.4}下一步}{45}{section.10.4}%
+\contentsline {part}{V\hspace {1em}附录}{47}{part.5}%
+\contentsline {chapter}{\numberline {A}Agent 配置文件完整参考}{48}{appendix.A}%
+\contentsline {section}{\numberline {A.1}Architect Agent}{48}{section.A.1}%
+\contentsline {section}{\numberline {A.2}Kernel Agent}{49}{section.A.2}%
+\contentsline {section}{\numberline {A.3}Author Agent}{49}{section.A.3}%
+\contentsline {section}{\numberline {A.4}Ship Prompt}{50}{section.A.4}%
+\contentsline {section}{\numberline {A.5}copilot-instructions.md（全局共享）}{51}{section.A.5}%
+\contentsline {chapter}{\numberline {B}项目时间线}{52}{appendix.B}%
+\contentsline {section}{\numberline {B.1}完整时间线}{52}{section.B.1}%
+\contentsline {section}{\numberline {B.2}演化阶段总结}{53}{section.B.2}%

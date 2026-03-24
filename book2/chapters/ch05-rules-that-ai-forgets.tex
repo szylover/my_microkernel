@@ -1,0 +1,117 @@
+\chapter{AI 记不住的规则}
+
+\section{重复说教的疲惫}
+
+到里程碑 C 结束时，我在每次新 Stage 的对话里都要说一大段「开场白」：
+
+\begin{humanmsg}
+帮我实现 Stage D-1: TSS 和 Ring 3。
+
+注意事项：
+\begin{itemize}
+\item 涉及硬件的代码必须加 [WHY]、[CPU STATE]、[BITFIELDS] 注释
+\item 遵循 xxx\_ops\_t 可插拔接口模式
+\item 所有地址不能硬编码
+\item 页操作必须 4096 对齐
+\item 结束后跑 make iso 验证
+\end{itemize}
+
+书稿注意事项：
+\begin{itemize}
+\item frame=l，不要 frame=single
+\item \textbackslash codefile\{\} 标注源文件路径
+\item TikZ 图放 figures/chNN/ 目录
+\item 不要在章节文件里内联 TikZ 代码
+\end{itemize}
+\end{humanmsg}
+
+每次。每个 Stage。同样的话。
+
+这不仅浪费时间，更危险的是：当我疲惫或者着急时，\textbf{会忘记说其中某一条}。有一次我忘了说「frame=l」，结果 AI 又用了 \texttt{frame=single}，生成了一整章的代码框——我不得不全部改。
+
+\section{问题的本质}
+
+让我把问题说得更精确：
+
+AI 聊天是\textbf{无状态的}。每次新对话，AI 不记得上一次我们约定的规则。它不知道这个项目有一个「可插拔接口模式」的设计规范，不知道代码要加三种注释，不知道 TikZ 图不能内联。
+
+我一直在用\textbf{人肉记忆}来弥补 AI 的无状态性。每次对话开头复述规则，本质上是我在充当AI 和项目之间的 ``session storage''。
+
+但人的记忆是不可靠的。而且随着规则越来越多——
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{类别} & \textbf{规则数量} \\
+\midrule
+代码注释规范 & 3 条（WHY / CPU STATE / BITFIELDS） \\
+内存管理准则 & 2 条（禁止硬编码、对齐要求） \\
+设计模式 & 5 步（接口→dispatch→后端→注册→kconfig） \\
+LaTeX 代码框 & 2 条（frame=l、\textbackslash codefile） \\
+TikZ 管理 & 4 条（目录规范、命名、内容隔离、引用方式） \\
+构建验证 & 2 条（make iso、make compdb） \\
+\bottomrule
+\textbf{总计} & \textbf{18 条规则} \\
+\end{tabular}
+\caption{需要在每次对话中传达的规则}
+\end{table}
+
+18 条规则。每次新对话都要传达全部（或至少相关的子集）。这不是一个可持续的工作方式。
+
+\section{第一次尝试：copilot-instructions.md}
+
+VS Code 的 GitHub Copilot 有一个功能：你可以在项目根目录放一个 \texttt{.github/copilot-instructions.md} 文件，内容会被\textbf{自动注入到每次对话的上下文}里。
+
+这就是答案——把规则写成文件，让 AI 自己去读！
+
+我立刻写了第一版 \texttt{copilot-instructions.md}，把前面表格里的 18 条规则全塞了进去。然后加上了 Git 工作流、Merge 检查清单、项目文件结构目录树。
+
+\begin{lstlisting}[style=yamlstyle]
+# 代码规范
+
+## 学习级注释规范（强制）
+- [WHY]: 为什么要操作这个寄存器/标志位
+- [CPU STATE]: 此操作后 CPU 的特权级...
+- [BITFIELDS]: 对页表项或描述符位定义的逐位解释
+
+## 内存管理准则
+- 禁止 Hardcode
+- 对齐要求: 4096
+
+## Book / LaTeX 图片管理规范（强制）
+- TikZ 图片必须放在 book/figures/chNN/ 目录下
+...
+\end{lstlisting}
+
+效果立竿见影。我不再需要在每次对话里复述规则了。AI 自动读取了 instructions 文件，生成的代码带上了 \texttt{[WHY]} 注释，LaTeX 代码框用了 \texttt{frame=l}。
+
+\textbf{18 条规则从「我的脑子」搬到了「一个文件」里。}
+
+\section{新的问题：全塞在一起太臃肿}
+
+很快，\texttt{copilot-instructions.md} 膨胀到了 200 行。包括：
+
+\begin{itemize}
+  \item 代码规范（给写代码的场景用）
+  \item LaTeX 规范（给写书的场景用）
+  \item Git 工作流（给提交的场景用）
+  \item 项目文件结构（给所有场景用）
+\end{itemize}
+
+问题来了：当我让 AI 写代码时，它的 context window 里塞了一堆 LaTeX 规范——\textbf{这些信息是噪音}。反过来，写书时，代码注释规范也是噪音。
+
+更严重的是，一个超长的 instructions 文件导致 AI 的注意力被分散。规则越多，每条规则被遵守的概率越低——不是因为 AI 故意违反，而是因为 context 太长，部分规则被「注意力稀释」了。
+
+我需要一种方法，让\textbf{不同场景加载不同的规则}。
+
+这就是 Agent 配置文件的由来——下一章的故事。
+
+\begin{pitfallbox}
+\textbf{Anti-pattern: ``把所有规则写在一个文件里''。} 这是你从 0 条规则进化到 ``有规则'' 时的第一站，但不应该是终点。当规则超过 20 条时，就该考虑按角色拆分了。
+\end{pitfallbox}
+
+\begin{thinkbox}
+你的项目有没有类似的 ``配置文件膨胀'' 现象？比如一个 \texttt{.eslintrc} 或 \texttt{Makefile} 变得超长，不同的关注点混在一起？你是怎么解决的？
+\end{thinkbox}

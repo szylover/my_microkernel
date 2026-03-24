@@ -1,0 +1,113 @@
+\chapter{终于能并行了}
+
+\section{解锁并行的那一刻}
+
+有了 Design Spec、有了分离的 Agent，并行工作终于成为可能。
+
+让我用一个真实的时间线来展示这件事的威力。Stage D-1（TSS + Ring 3）的开发：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{步骤} & \textbf{Agent} & \textbf{耗时} \\
+\midrule
+1. Architect 出 Spec & @Architect & $\sim$5 min \\
+2. 我审查 Spec & 人类 & $\sim$3 min \\
+3a. Kernel 写代码 & @Kernel & $\sim$20 min \\
+3b. Author 写概念/设计部分 & @Author & $\sim$15 min \\
+4. Author 补完实现/验证部分 & @Author & $\sim$10 min \\
+5. Ship 检查 + 提交 & /ship & $\sim$5 min \\
+\midrule
+\textbf{总计} & & $\sim$43 min \\
+\bottomrule
+\end{tabular}
+\caption{Stage D-1 的实际开发时间线}
+\end{table}
+
+关键看步骤 3a 和 3b——它们是\textbf{同时进行的}。如果串行做，Kernel 20 min + Author 25 min = 45 min。并行后只需要 max(20, 15) + 10 = 30 min（加上 Author 需要等代码就绪后补完的 10 min）。
+
+节省了 15 分钟？看起来不多。但这是\textbf{每个 Stage} 的节省。项目有 55 个计划中的 Stage。累积起来是几十小时的差异。
+
+更重要的是心理上的变化：\textbf{不再觉得写书是「浪费开发时间」}。以前串行做时，每次从代码切到书稿都有一种「我本来可以在写代码」的焦虑。现在它们同时进行，焦虑消失了。
+
+\section{并行的安全保障}
+
+并行之所以安全，是因为三层保障：
+
+\subsection{第一层：文件边界}
+
+Kernel 只能改 \texttt{src/}，Author 只能改 \texttt{book/}。两者的写入范围\textbf{物理上不重叠}。即使它们同时运行，也不会产生文件冲突。
+
+这不是「约定」——Kernel Agent 的 Body 里写着 ``ONLY modify files under \texttt{src/}''，Author 的 Body 里写着 ``ONLY modify files under \texttt{book/}''。加上工具权限的限制，这是一个硬保障。
+
+\subsection{第二层：Design Spec 是快照}
+
+两个 Agent 读的是\textbf{同一份} Design Spec（Architect 输出的那份）。Spec 一旦生成就不再修改——它是一个不可变的快照。这消除了「两个 Agent 看到不同版本的设计」的风险。
+
+\subsection{第三层：偏离报告}
+
+Kernel Agent 的 Body 里要求它在完成后报告「any deviations from the Design Spec」。如果 Kernel 在实现过程中发现 Spec 的接口需要调整（比如多一个参数），它会在输出中说明。Author 据此在步骤 4 中修正书稿。
+
+\section{实际的工作节奏}
+
+并行化之后，我的日常开发节奏变成了：
+
+\begin{lstlisting}[style=shellstyle]
+# 早上：选一个 Stage
+> 打开 roadmap.md，找到下一个 Stage
+
+# 调用 Architect
+> @Architect 设计 Stage D-2: syscall_ops_t 接口
+
+# 花 3 分钟审查 Spec
+# (确认接口合理、文件规划正确、测试方案具体)
+
+# 开两个窗口
+# 窗口 1: @Kernel 实现 Stage D-2
+# 窗口 2: @Author 写 ch13-syscall 章节
+
+# 两个 Agent 同时工作，互不干扰
+# Kernel 完成后，Author 补完代码引用部分
+
+# 最后一步
+> /ship
+# Ship 检查清单 → commit → push → PR → merge
+\end{lstlisting}
+
+一个 Stage 从设计到合并入 \texttt{main}，通常在 30-60 分钟内完成。
+
+\section{对比：三个阶段的效率}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{llll}
+\toprule
+& \textbf{天真期} & \textbf{Roadmap 期} & \textbf{Agent 期} \\
+\midrule
+规则传达 & 每次口述 & 每次口述 & 自动加载 \\
+设计 & 边写边想 & 边写边想 & 先 Spec 再写 \\
+代码+书稿 & 串行 & 串行 & 并行 \\
+质量保障 & 人工检查 & 人工检查 & Agent 自验 \\
+提交流程 & 随意 & 手动检查清单 & /ship 自动化 \\
+\midrule
+每 Stage 耗时 & 2-4 小时 & 1-2 小时 & 30-60 分钟 \\
+\bottomrule
+\end{tabular}
+\caption{三个阶段的效率对比}
+\end{table}
+
+效率提升约 3-4 倍。但更重要的不是速度——是\textbf{可持续性}。天真期的速度依赖于肾上腺素（兴奋时快、疲惫时慢），Agent 期的速度依赖于流程（每次都一样）。
+
+\begin{lessonbox}
+\textbf{可持续输出 > 峰值速度。} 天真期第一天可以飙出 4 个 Stage，但第三天就累了只做 1 个。Agent 期每天稳定 3-4 个，一周下来总量远远领先。
+\end{lessonbox}
+
+\begin{exercise}
+回顾你项目中「代码」和「文档」（或其他非代码产物）的关系：
+\begin{enumerate}
+  \item 它们目前是串行还是并行？
+  \item 如果是串行，找出它们之间的数据依赖——哪些部分真的需要代码写完才能写文档？哪些部分不需要？
+  \item 尝试把"可以并行的部分"拆出来，设计一个类似的并行工作流。
+\end{enumerate}
+\end{exercise}
