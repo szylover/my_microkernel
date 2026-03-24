@@ -1,86 +1,27 @@
-# Git / PR 工作流
+# Agent 工作流
 
-当用户说"提交"、"commit"、"推送"、"push"、"PR"、"合并"、"merge" 等关键词时，按以下流程操作：
+本项目使用 3 个 Agent + 1 个 Prompt 协作：
 
-## 提交 + 推送 + 创建 PR
+| 角色 | 文件 | 职责 | 工具 |
+|------|------|------|------|
+| **@Architect** | `.github/agents/architect.agent.md` | 设计接口、输出 Design Spec（只读） | read, search |
+| **@Kernel** | `.github/agents/kernel.agent.md` | 实现 `src/` 下的 C/ASM 代码 | read, edit, search, execute |
+| **@Author** | `.github/agents/author.agent.md` | 写 `book/` 下的 LaTeX 章节和 TikZ 图 | read, edit, search, execute |
+| **/ship** | `.github/prompts/ship.prompt.md` | Merge 检查清单 + Git 工作流 | read, edit, search, execute |
 
-1. **创建分支**：从当前 `main` 分支创建新的 feature 分支，命名格式 `stage-N/简短描述`（如 `stage-9/vma-interface`）
-2. **暂存 + 提交**：`git add -A && git commit -m "描述"`，commit message 用英文，简洁明了
-3. **推送**：`git push -u origin <branch>`
-4. **创建 PR**：使用 `gh pr create --base main --head <branch> --title "标题" --body "描述"`
-5. **输出 PR 链接**给用户
-
-## 仅合并（用户说"merge"）
-
-在创建 PR 后（或用户指定已有 PR 时），执行：
-```
-gh pr merge <pr-number-or-url> --squash --delete-branch
-```
-
-## 注意事项
-
-- 创建 PR 前先确认 `make iso` 编译通过（在 `src/` 目录下）
-- commit message 格式：`stage N: 简短英文描述`（如 `stage 9: add VMA pluggable interface + dispatch + cmd`）
-- PR title 和 commit message 保持一致
-- PR body 用中文列出本次改动要点（新增文件、修改文件、关键变更）
-- 如果用户同时说了 push 和 merge，一步到位全做完
-
----
-
-# Merge 前置检查清单（强制）
-
-每次创建 PR 或执行 merge 之前，必须逐项确认：
-
-- [ ] `docs/changelog.md` — 新增/删除文件、改接口、改行为时，必须追加当日记录
-- [ ] `docs/roadmap.md` — Stage 状态变化时，更新对应行的状态标记（如 ✅）
-- [ ] `compile_commands.json` — 新增/删除 `.c`/`.asm` 文件时，运行 `make compdb` 重新生成
-- [ ] `book/main.pdf` — 修改了 `book/` 下任何 `.tex` 文件时，在 `book/` 目录运行 `make` 重新生成 PDF
-- [ ] 下方"项目文件结构"中的目录树 — 目录或文件有变化时同步更新
-
----
-
-# 代码规范
-
-## 学习级注释规范（强制）
-
-生成涉及底层硬件（分页、TSS、中断门）的代码时，必须包含以下注释：
-
-- **[WHY]**：为什么要操作这个寄存器/标志位？
-- **[CPU STATE]**：此操作后 CPU 的特权级、地址空间或堆栈发生了什么变化？
-- **[BITFIELDS]**：对页表项 (PTE) 或描述符位定义的逐位解释
-
-## 内存管理准则
-
-- **禁止 Hardcode**：位图位置必须根据 mmap 动态计算，不能硬编码物理地址
-- **对齐要求**：所有 Page 级别操作必须满足 4096 字节对齐
-
-## clangd / compile_commands 同步规则（强制）
-
-- **每次新增/删除/移动 C/ASM 源文件**后，必须更新 `compile_commands.json`
-- 更新方式：`make compdb`（依赖 `bear`）或 `AUTO_COMPDB=1 make iso`
-
-## Book / LaTeX 图片管理规范（强制）
-
-所有 TikZ 图片代码**必须**放在 `book/figures/chNN/` 目录下，按章节子目录组织：
+## 典型流程
 
 ```
-figures/
-├── ch02/   # fig01-xxx.tex, fig02-xxx.tex, …
-├── ch03/
-├── …
-└── ch11/
+用户: "实现 D-3 int 0x80 后端"
+1. @Architect  → 输出 Design Spec
+2. @Kernel ║ @Author  ← 并行消费同一份 spec
+3. /ship  → 检查清单 → commit → push → PR
 ```
 
-- **命名规则**：`figNN-<label-slug>.tex`（如 `fig01-vaddr-split.tex`）
-- **文件内容**：仅包含 `\begin{tikzpicture}...\end{tikzpicture}` 绘图代码，不含 `\begin{figure}` / `\caption` / `\label`
-- **章节引用方式**：在 section `.tex` 文件中用 `\begin{figure}[H]\centering\input{figures/chNN/figNN-slug}\caption{...}\label{...}\end{figure}`
-- **新增/修改图片时**：直接编辑 `figures/chNN/` 下的文件，不要在 section 文件中内联 TikZ 代码
-- **遍历所有图片**：只需扫描 `figures/` 目录即可，无需遍历所有章节源码
+## 设计原则
 
-## 变更记录同步（强烈推荐）
-
-- 改动对外接口/行为时，在 `docs/changelog.md` 追加当日记录
-- 目录结构变化时，同步更新下方"项目文件结构"
+- **概念→可插拔接口→多后端实现**：每个子系统都有 `xxx_ops_t` 函数指针表 + dispatch 层
+- 详细的代码规范见 `@Kernel`，书稿规范见 `@Author`，发布检查清单见 `/ship`
 
 ---
 
@@ -89,7 +30,13 @@ figures/
 ```text
 my_microkernel/
 ├── .github/
-│   └── copilot-instructions.md   # 本文件 — AI Agent 协作规约
+│   ├── copilot-instructions.md   # 本文件 — Agent 工作流 + 项目结构
+│   ├── agents/
+│   │   ├── architect.agent.md    #   只读架构师，输出 Design Spec
+│   │   ├── kernel.agent.md       #   内核开发，实现 src/ 下代码
+│   │   └── author.agent.md       #   书稿作者，写 book/ 下 LaTeX
+│   └── prompts/
+│       └── ship.prompt.md        #   Merge 检查清单 + Git 工作流
 ├── Makefile                       # 薄 wrapper，转发到 src/Makefile
 ├── README.md
 ├── book/                          # LaTeX 书稿 《自己动手写操作系统》
