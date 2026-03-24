@@ -1,21 +1,30 @@
 # Agent 工作流
 
-本项目使用 3 个 Agent + 1 个 Prompt 协作：
+本项目使用 5 个 Agent + 1 个 Prompt 协作：
 
 | 角色 | 文件 | 职责 | 工具 |
 |------|------|------|------|
 | **@Architect** | `.github/agents/architect.agent.md` | 设计接口、输出 Design Spec（只读） | read, search |
 | **@Kernel** | `.github/agents/kernel.agent.md` | 实现 `src/` 下的 C/ASM 代码 | read, edit, search, execute |
 | **@Author** | `.github/agents/author.agent.md` | 写 `book/` 下的 LaTeX 章节和 TikZ 图 | read, edit, search, execute |
+| **@Professor** | `.github/agents/professor.agent.md` | 解释概念、审查教学质量、答疑引导（只读） | read, search |
+| **@Progress** | `.github/agents/progress.agent.md` | 维护进度看板 `docs/progress.md` | read, edit, search |
 | **/ship** | `.github/prompts/ship.prompt.md` | Merge 检查清单 + Git 工作流 | read, edit, search, execute |
 
 ## 典型流程
 
 ```
 用户: "实现 D-3 int 0x80 后端"
-1. @Architect  → 输出 Design Spec
-2. @Kernel ║ @Author  ← 并行消费同一份 spec
-3. /ship  → 检查清单 → commit → push → PR
+1. @Architect  → 输出 Design Spec → 更新 progress.md
+2. @Kernel ║ @Author  ← 并行消费同一份 spec → 各自更新 progress.md
+3. /ship  → 检查清单（含 progress.md）→ commit → push → PR
+```
+
+### 新会话恢复
+
+```
+用户: "我上次做到哪了" / "下一步做什么"
+→ 读 docs/progress.md → 快速定位当前状态
 ```
 
 ## 设计原则
@@ -34,7 +43,9 @@ my_microkernel/
 │   ├── agents/
 │   │   ├── architect.agent.md    #   只读架构师，输出 Design Spec
 │   │   ├── kernel.agent.md       #   内核开发，实现 src/ 下代码
-│   │   └── author.agent.md       #   书稿作者，写 book/ 下 LaTeX
+│   │   ├── author.agent.md       #   书稿作者，写 book/ 下 LaTeX
+│   │   ├── professor.agent.md    #   只读导师，概念讲解 + 教学审查
+│   │   └── progress.agent.md     #   进度看板维护（docs/progress.md）
 │   └── prompts/
 │       └── ship.prompt.md        #   Merge 检查清单 + Git 工作流
 ├── Makefile                       # 薄 wrapper，转发到 src/Makefile
@@ -85,8 +96,10 @@ my_microkernel/
 │   ├── debug.md                   #   QEMU + GDB 调试指南
 │   ├── howto.md                   #   构建 & 运行指南
 │   ├── memory-commands.md         #   内存调试命令速查
+│   ├── progress.md                #   实时进度看板（@Progress 维护）
 │   ├── roadmap.md                 #   项目愿景与路线图
-│   └── shell.md                   #   Shell 设计文档
+│   ├── shell.md                   #   Shell 设计文档
+│   └── specs/                     #   Agent 产出文档（Design Spec / Review）
 ├── scripts/                       # 构建/调试/测试脚本
 └── src/
     ├── Makefile                   # 真正的构建系统

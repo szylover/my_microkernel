@@ -1,4 +1,16 @@
 
+## 2026-03-24 (Multi-agent workflow: Professor + Progress + specs)
+- 新增 `.github/agents/professor.agent.md`：只读导师 Agent，四层递进讲解（概念→设计→实现→验证），审查代码注释和书稿教学质量，答疑引导。
+- 新增 `.github/agents/progress.agent.md`：进度看板 Agent，维护 `docs/progress.md`——介于 roadmap（阶段级）和 changelog（文件级）之间的会话恢复存档点。
+- 新增 `docs/progress.md`：实时进度看板，D-3 已拆解为 14 个子任务，完整历史阶段（A-1 ~ D-2）记录。
+- 新增 `docs/specs/` 目录 + `docs/specs/D-3-int0x80.md`：@Architect 输出的 D-3 Design Spec（int 0x80 后端完整设计——IDT gate / 汇编 stub / C handler / 用户态宏 / 验证方案）。
+- `@Architect`/`@Kernel`/`@Author` 三个 Agent 新增 **Progress Update (Mandatory)** 规则：每次完成工作后必须更新 `docs/progress.md`。
+- `@Architect` 可写范围扩展到 `docs/specs/` + `docs/progress.md`。
+- `@Kernel` 可写范围扩展到 `docs/progress.md`。
+- `@Author` 可写范围扩展到 `docs/progress.md`。
+- `/ship` 检查清单新增 `docs/progress.md` 检查项（已完成阶段移入 Completed Stages 表）。
+- `.github/copilot-instructions.md`：Agent 数量 3→5，典型流程加入 progress 更新，新增"新会话恢复"说明，目录树同步更新。
+
 ## 2026-03-24 (Book 2: 如何用 AI Agent 编写自己的操作系统)
 - 新增 `book2/` 目录：第二本书《如何用 AI Agent 编写自己的操作系统》完整 LaTeX 框架。
 - 成长叙事结构（4 Part / 10 章 / 2 附录 / 53 页）：天真期→失控→里程碑收敛→发现模式→规则文件→Agent 化→Design Spec→并行→持续演进→复盘。

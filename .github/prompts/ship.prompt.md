@@ -12,6 +12,7 @@ Run the full pre-merge checklist and git workflow for this project.
 2. **Checklist** — verify each item and fix if needed:
    - [ ] `docs/changelog.md` — append today's entry if files/interfaces/behavior changed
    - [ ] `docs/roadmap.md` — update stage status markers (✅) if a stage was completed
+   - [ ] `docs/progress.md` — move completed stage to "Completed Stages" table, set up next stage breakdown
    - [ ] `compile_commands.json` — run `make compdb` if any `.c`/`.asm` files were added/removed
    - [ ] `book/main.pdf` — run `make` in `book/` if any `.tex` files were modified
    - [ ] `.github/copilot-instructions.md` project tree — update if directory structure changed
