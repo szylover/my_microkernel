@@ -1,4 +1,11 @@
 
+## 2026-03-24 (Agent workflow refactor)
+- 新增 `.github/agents/architect.agent.md`：只读架构师 Agent，输出结构化 Design Spec（接口定义 + 内核实现计划 + 书稿计划 + 验证方案），供 @Kernel 和 @Author 并行消费。
+- 新增 `.github/agents/kernel.agent.md`：内核开发 Agent，限定只修改 `src/` 和构建文件，含 [WHY]/[CPU STATE]/[BITFIELDS] 注释规范、内存准则、可插拔接口设计模式。
+- 新增 `.github/agents/author.agent.md`：书稿作者 Agent，限定只修改 `book/`，含 `\codefile{}`、`frame=l`、TikZ 图目录管理、章节拆分等 LaTeX 规范。
+- 新增 `.github/prompts/ship.prompt.md`：发布 Prompt，封装 Merge 前置检查清单（changelog/roadmap/compdb/PDF/目录树）+ Git 分支工作流。
+- `.github/copilot-instructions.md`：精简为 Agent 工作流总览 + 项目文件结构，原有代码规范/书稿规范/Git 工作流分发到各 Agent/Prompt。
+
 ## 2026-03-17 (Roadmap: Bash porting + infrastructure gaps)
 - `docs/roadmap.md`：新增 G-ε 移植 Bash 子阶段（G-10 依赖分析 + G-11 移植验证）；为满足 Bash 运行时依赖，在 D/E/F 里程碑中补充通用基础设施——D-7/D-8 增加 job control（进程组/会话/`setpgid`/`setsid`/`tcsetpgrp`/`SIGTSTP`/`SIGCONT`）、E-1 VFS 增加 `fcntl`（`F_DUPFD`/`O_NONBLOCK`/`FD_CLOEXEC`）、F-4 增加 `pipe2` + 新增 F-4.5 select/poll I/O 多路复用、F-9 libc 增加 `setjmp`/`longjmp`/`opendir`/`fnmatch`。
 
