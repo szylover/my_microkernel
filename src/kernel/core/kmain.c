@@ -17,6 +17,11 @@
 #include "syscall.h"
 #include "kconfig.h"
 
+/* 系统调用后端 */
+#if KCONFIG_SYSCALL_BACKEND == 0
+#include "syscall_int80.h"
+#endif
+
 /* core: 内核基础设施 */
 #include "printk.h"
 #include "shell.h"
@@ -231,12 +236,19 @@ void kmain(uint32_t mb2_magic, const void* mb2_info) {
         }
 
         /*
-         * Stage D-2: 系统调用子系统初始化
+         * Stage D-3: 注册系统调用后端（在 syscall_init() 之前）
          *
-         * [WHY] 在 VMA 之后初始化，因为将来 syscall handler（如 sys_write）
-         *   需要通过 VMA 验证用户态指针的合法性。
-         *   后端在 kconfig.h 中选择（D-3 实现 int 0x80，D-4 实现 sysenter）。
+         * [WHY] syscall_init() 内部会调用 g_syscall_ops->init()，
+         *   因此必须先注册后端，再调用 syscall_init()。
+         *   后端选择由 KCONFIG_SYSCALL_BACKEND 编译期决定。
+         *
+         * [CPU STATE] int 0x80 后端注册后：
+         *   IDT[0x80] 会被安装 DPL=3 的中断门，
+         *   Ring 3 执行 `int 0x80` 时 CPU 将跳转到 syscall_int80_entry。
          */
+#if KCONFIG_SYSCALL_BACKEND == 0
+        syscall_register_backend(syscall_int80_get_ops());
+#endif
         syscall_init();
     }
 

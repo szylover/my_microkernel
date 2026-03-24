@@ -1,4 +1,18 @@
 
+## 2026-03-24 (Stage D-3: int 0x80 syscall backend)
+- 新增 `src/kernel/arch/syscall_int80_entry.asm`：int 0x80 汇编入口 stub——逆序压栈 EDI/ESI/EDX/ECX/EBX/EAX 构造 `syscall_regs_t`、保存/恢复 DS/ES/FS/GS（切换内核数据段 0x10）、`lea eax,[esp+16]` 取结构体指针调用 `syscall_dispatch()`、返回值写入 nr 槽后 `pop eax/ebx/ecx/edx/esi/edi` 恢复用户寄存器、`iret` 返回 Ring 3。
+- 新增 `src/kernel/arch/syscall_int80_backend.c`：C 后端实现——`int80_init()` 调用 `idt_install_gate(0x80, syscall_int80_entry, GDT_KERNEL_CODE_SEL, 0xEE)`（DPL=3，允许 Ring 3 软件触发）；`syscall_int80_get_ops()` 返回 `&int80_ops`（遵循 `get_ops` 模式）。
+- 新增 `src/include/arch/syscall_int80.h`：声明 `syscall_int80_get_ops()`。
+- `src/include/arch/idt.h` + `src/kernel/arch/idt.c`：新增 `idt_install_gate()` 公开导出函数（`idt_set_gate` 静态包装），供后端安装任意 DPL 的 IDT 门；`INT_GATE_DPL3 = 0xEE`（P=1, DPL=3, Type=1110）。
+- `src/kernel/arch/user_test_code.asm`：新增 `user_syscall_start`/`user_syscall_end`——PIC 技巧（`call sc_get_ip; pop esi`）获取运行时 EIP，`write(1, "hello from ring3!\n", 18)` + `exit(0)` via `int 0x80`。
+- `src/kernel/cmds/cmd_ring3.c`：新增 `ring3 syscall` 子命令——分配用户代码/栈页、复制 `user_syscall_start..user_syscall_end`、注册 VMA、`jump_to_ring3` 跳转；更新 help 文本。
+- `src/kernel/core/kmain.c`：VMA 初始化之后、`syscall_init()` 之前注册后端：`#if KCONFIG_SYSCALL_BACKEND == 0` 调用 `syscall_register_backend(syscall_int80_get_ops())`。
+- `book/chapters/ch13-syscall/sec11-int0x80-后端实现.tex`：新增——IDT gate 安装、`type_attr` bitfield 图、汇编 stub 栈布局图、C 后端代码、kmain 集成、PIC 技巧详解。
+- `book/chapters/ch13-syscall/sec12-验证：ring3-syscall-测试.tex`：新增——QEMU 启动日志、`ring3 syscall` 命令输出、7 步执行流追踪、验证要点。
+- `book/figures/ch13/fig05-int80-stack.tex`、`fig06-type-attr-bitfield.tex`：新增 TikZ 图（栈布局 + bitfield 分解）。
+- `book/chapters/ch13-syscall.tex`：追加 `\input` sec11、sec12。
+- 验证：`make iso` 编译通过（0 错误）；`ring3 syscall` 命令执行后串口输出 `hello from ring3!`，`sys_exit` 打印状态后 halt。
+
 ## 2026-03-24 (Agent workflow refactor)
 - 新增 `.github/agents/architect.agent.md`：只读架构师 Agent，输出结构化 Design Spec（接口定义 + 内核实现计划 + 书稿计划 + 验证方案），供 @Kernel 和 @Author 并行消费。
 - 新增 `.github/agents/kernel.agent.md`：内核开发 Agent，限定只修改 `src/` 和构建文件，含 [WHY]/[CPU STATE]/[BITFIELDS] 注释规范、内存准则、可插拔接口设计模式。

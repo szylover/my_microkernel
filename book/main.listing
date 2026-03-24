@@ -1,5 +1,10 @@
-[vma] backend: sorted-array
-[vma] init ok
-[syscall] table: 3 handlers registered (exit=1, write=4, brk=45)
-[syscall] no backend registered (dispatch only, no user-mode entry point)
-[syscall] init ok
+«\tpk{szy-kernel >}» «\tin{ring3 syscall}»
+[ring3] Preparing Ring 3 syscall test...
+[ring3] code page: virt=0x00400000 phys=0x001b1000
+[ring3] stack page: virt=0x00401000 phys=0x001b3000 (top=0x00402000)
+[ring3] syscall test code copied (46 bytes)
+[ring3] Jumping to Ring 3 (syscall test)...
+[ring3] Expected: write -> 'hello from ring3!' on serial, then exit -> halt
+hello from ring3!
+[syscall] exit(status=0)
+System halted.

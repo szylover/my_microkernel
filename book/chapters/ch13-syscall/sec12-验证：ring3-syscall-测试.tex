@@ -1,0 +1,159 @@
+% ============================================================================
+\section{验证：ring3 syscall 测试}
+\label{sec:int80-verify}
+% ============================================================================
+
+D-3 的端到端验证通过 \texttt{ring3 syscall} 命令完成。它把用户态代码复制到
+\hex{00400000}，跳转到 Ring~3，然后经由 \texttt{int 0x80} 完成一次 \texttt{write}
+和一次 \texttt{exit}。
+
+% ----------------------------------------------------------------------------
+\subsection{内核启动日志}
+% ----------------------------------------------------------------------------
+
+内核启动时，\texttt{syscall\_init()} 内部依次调用后端 \texttt{init()}
+和 \texttt{syscall\_register\_handler()}，串口应输出：
+
+\begin{tcblisting}{consolebox, title={QEMU 串口：内核初始化阶段}}
+[syscall/int0x80] IDT[0x80] installed (DPL=3, selector=0x08, entry=0xc01xxxxx)
+[syscall] backend registered: int0x80
+[syscall] handler registered: nr=1 (exit)
+[syscall] handler registered: nr=4 (write)
+\end{tcblisting}
+
+这四行确认：IDT 门已安装（DPL=3），后端与两个 handler 均已就绪。
+
+% ----------------------------------------------------------------------------
+\subsection{执行 \texttt{ring3 syscall} 命令}
+% ----------------------------------------------------------------------------
+
+内核 shell 就绪后，输入命令：
+
+\codefile{src/kernel/cmds/cmd\_ring3.c}
+\begin{tcblisting}{consolebox, title={\tpk{>}~ring3 syscall：完整预期输出}}
+«\tpk{szy-kernel >}» «\tin{ring3 syscall}»
+[ring3] Preparing Ring 3 syscall test...
+[ring3] code page: virt=0x00400000 phys=0x001b1000
+[ring3] stack page: virt=0x00401000 phys=0x001b3000 (top=0x00402000)
+[ring3] syscall test code copied (46 bytes)
+[ring3] Jumping to Ring 3 (syscall test)...
+[ring3] Expected: write -> 'hello from ring3!' on serial, then exit -> halt
+hello from ring3!
+[syscall] exit(status=0)
+System halted.
+\end{tcblisting}
+
+% ----------------------------------------------------------------------------
+\subsection{执行流程追踪}
+% ----------------------------------------------------------------------------
+
+从命令输入到 CPU 停机，完整的执行路径经过 7 个阶段：
+
+\begin{enumerate}
+  \item \textbf{Ring~0：准备阶段}（\texttt{ring3\_syscall()} in \texttt{cmd\_ring3.c}）
+    \begin{itemize}
+      \item \texttt{pmm\_alloc\_page()} 各分配一张物理页，用于代码和用户栈
+      \item \texttt{vmm\_map\_page(0x00400000, code\_phys, PTE\_PRESENT | PTE\_USER)}\\
+        代码页设 \texttt{PTE\_USER}，用户态可读/执行；不需要写权限
+      \item \texttt{vmm\_map\_page(0x00401000, stack\_phys, PTE\_PRESENT | PTE\_WRITABLE | PTE\_USER)}\\
+        栈页需要写权限（Ring~3 的 \texttt{push}/\texttt{call} 会写栈）
+      \item \texttt{kmemcpy(0x00400000, user\_syscall\_start, size)}\\
+        将测试代码字节拷贝到用户地址空间
+      \item \texttt{jump\_to\_ring3(0x00400000, 0x00402000)}\\
+        构造 \texttt{iret} 帧，CPL 0 → 3，EIP → \hex{00400000}
+    \end{itemize}
+
+  \item \textbf{Ring~3：PIC 获取运行时 EIP}
+    \begin{itemize}
+      \item \texttt{call sc\_get\_ip}：CPU 将 \texttt{sc\_get\_ip} 的运行时地址
+        压入用户栈，跳转过去
+      \item \texttt{pop esi}：ESI = \texttt{sc\_get\_ip} 运行时地址
+      \item \texttt{lea ecx, [esi + offset]}：计算 \texttt{sc\_msg} 的运行时地址
+    \end{itemize}
+
+  \item \textbf{第一次 \texttt{int 0x80}（\texttt{write}）：Ring~3 → Ring~0}
+    \begin{itemize}
+      \item 寄存器：EAX=4, EBX=1, ECX=\&msg, EDX=18
+      \item CPU 查 IDT[\hex{80}]：DPL=3，检查 $\text{CPL}(3) \leq \text{DPL}(3)$ 通过
+      \item 从 TSS 读 SS0:ESP0，切换到内核栈
+      \item 压入 SS/ESP/EFLAGS/CS/EIP（iret 帧），清除 IF
+      \item 跳转到 \texttt{syscall\_int80\_entry}
+    \end{itemize}
+
+  \item \textbf{Ring~0：汇编 stub 与 dispatch}
+    \begin{itemize}
+      \item \texttt{push edi..eax}：在内核栈上构造 \texttt{syscall\_regs\_t}
+      \item \texttt{push ds..gs}：保存用户段寄存器，切换 DS/ES/FS/GS 到 \hex{10}
+      \item \texttt{lea eax, [esp+16]; call syscall\_dispatch}
+      \item \texttt{syscall\_dispatch}：查表 \texttt{syscall\_table[4]}，
+        得到 \texttt{sys\_write}
+      \item \texttt{sys\_write(1, msg\_addr, 18)}：调用 \texttt{printk}，
+        串口输出 \texttt{hello from ring3!}
+      \item 返回值 18（写入字节数）存入 EAX
+    \end{itemize}
+
+  \item \textbf{Ring~0 → Ring~3：\texttt{iret} 返回}
+    \begin{itemize}
+      \item stub 恢复 DS/ES/FS/GS；\texttt{mov [esp], eax} 把返回值写入 nr 槽
+      \item \texttt{pop eax..edi}：恢复用户寄存器，EAX=18（\texttt{write} 返回值）
+      \item \texttt{iret}：CS/EFLAGS/SS/ESP 从 iret 帧恢复，CPL 回 3
+      \item 继续执行 \texttt{int 0x80} 后的下一条指令（\texttt{mov eax, 1}）
+    \end{itemize}
+
+  \item \textbf{第二次 \texttt{int 0x80}（\texttt{exit}）：Ring~3 → Ring~0}
+    \begin{itemize}
+      \item 寄存器：EAX=1（SYS\_EXIT），EBX=0（status）
+      \item 同样路径进入 stub → dispatch → \texttt{syscall\_table[1]} →
+        \texttt{sys\_exit(0)}
+    \end{itemize}
+
+  \item \textbf{\texttt{sys\_exit} → 系统停机}
+    \begin{itemize}
+      \item \texttt{sys\_exit} 打印 \texttt{[syscall] exit(status=0)}
+      \item 执行 \texttt{hlt}，CPU 进入停机状态，串口输出 \texttt{System halted.}
+    \end{itemize}
+\end{enumerate}
+
+% ----------------------------------------------------------------------------
+\subsection{验证要点}
+% ----------------------------------------------------------------------------
+
+每行输出都对应着一个关键的正确性断言：
+
+\begin{enumerate}
+  \item \texttt{[syscall/int0x80] IDT[0x80] installed} \\
+    \texttt{int80\_init()} 成功执行，IDT[\hex{80}] 已安装 DPL=3 的门。
+
+  \item \texttt{hello from ring3!} \\
+    Ring~3 代码成功通过 \texttt{int 0x80} 触发了 \texttt{sys\_write}。
+    字符串能正确打印，证明 PIC 技巧工作正常（buf 地址计算无误）。
+
+  \item \texttt{[syscall] exit(status=0)} \\
+    \texttt{sys\_exit} 被调用，参数 status=0 经由 EBX 正确传递。
+
+  \item \texttt{System halted.} \\
+    \texttt{sys\_exit} 执行 \texttt{hlt}，整条 Ring~3 → syscall → handler
+    路径完整走通。
+\end{enumerate}
+
+\begin{warnbox}
+\textbf{排查：出现 \#GP 而非 \texttt{hello from ring3!}}
+
+最常见原因：用户代码页的 PDE 没有设置 User 位。\texttt{vmm\_map\_page} 写入
+PTE 时若只设了 PTE 的 \texttt{PTE\_USER}，而 PDE 仍是内核级（User bit = 0），
+CPU 在 Ring~3 访问该页时会检测到 PDE 级别的特权违规并触发 \#PF 或 \#GP。
+
+修复方式：在 \texttt{vmm\_map\_page()} 内部确保当 \texttt{flags} 含
+\texttt{PTE\_USER} 时，同步把该 PDE 的 User 位也置 1（见第~\ref{ch:tss-ring3}~章
+\texttt{pde\_user} 标志传播一节）。
+\end{warnbox}
+
+\begin{thinkbox}
+如果把 \texttt{INT\_GATE\_DPL3}（\hex{EE}）改成 \hex{8E}（DPL=0），
+执行 \texttt{ring3 syscall} 时会看到什么现象？为什么？
+
+\emph{提示：Ring~3 执行 \texttt{int 0x80} 时，CPU 检查
+$\text{CPL}(3) \leq \text{DPL}(0)$——不满足。CPU 直接触发 \#GP(0)，
+ISR 打印 "Fault from Ring~3" 和 "Kernel panic: \#GP"，
+\texttt{syscall\_int80\_entry} 根本不会被调用。}
+\end{thinkbox}

@@ -62,7 +62,7 @@
 | # | 名称 | 内容 | 状态 |
 |---|------|------|------|
 | D-2 | 系统调用概念 + `syscall_ops_t` 接口 | 用户态→内核态受控入口、调用约定（EAX=nr, EBX~EDI=args）、可插拔 `syscall_ops_t`（init/entry）+ dispatch 层 + syscall table | ✅ |
-| D-3 | 系统调用（int 0x80）后端 | IDT gate 0x80 DPL=3、汇编 stub、第一批 syscall：`write`/`exit`/`brk`、用户态 inline asm 封装、验证 Ring 3 → int 0x80 → write("hello") | |
+| D-3 | 系统调用（int 0x80）后端 | IDT gate 0x80 DPL=3、汇编 stub、第一批 syscall：`write`/`exit`/`brk`、用户态 inline asm 封装、验证 Ring 3 → int 0x80 → write("hello") | ✅ |
 | D-4 | 系统调用（sysenter）后端 *(进阶)* | MSR 配置（IA32_SYSENTER_CS/EIP/ESP）、sysenter/sysexit 快速路径、`KCONFIG_SYSCALL_BACKEND` 切换 | |
 
 #### D-γ：可执行文件加载 (ch14)

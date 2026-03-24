@@ -1,0 +1,90 @@
+% fig05-int80-stack.tex
+% 内核栈布局：syscall_int80_entry 调用 syscall_dispatch 前的快照
+% 低地址在下（ESP 在最下），高地址在上（iret 帧在最上）
+\begin{tikzpicture}[
+  cell/.style={
+    draw, minimum width=4.8cm, minimum height=0.62cm,
+    anchor=south west, font=\ttfamily\small, align=left,
+    inner xsep=6pt,
+  },
+  off/.style={font=\ttfamily\scriptsize, anchor=west, text=gray!70},
+  grplbl/.style={font=\small, align=right},
+]
+
+  \def\H{0.62}   % cell height (must match minimum height)
+  \def\W{4.8}    % cell width
+
+  % ---- 保存的段寄存器（blue）  ESP+0 .. ESP+12 ----
+  \node[cell, fill=blue!8]  (gs)   at (0, 0*\H) {gs};
+  \node[cell, fill=blue!8]  (fs)   at (0, 1*\H) {fs};
+  \node[cell, fill=blue!8]  (es)   at (0, 2*\H) {es};
+  \node[cell, fill=blue!8]  (ds)   at (0, 3*\H) {ds};
+
+  % ---- syscall_regs_t（green）  ESP+16 .. ESP+36 ----
+  \node[cell, fill=green!8]  (nr)  at (0, 4*\H) {nr \quad\quad\ \ (EAX)};
+  \node[cell, fill=green!8]  (a1)  at (0, 5*\H) {arg1 \quad\ \ (EBX)};
+  \node[cell, fill=green!8]  (a2)  at (0, 6*\H) {arg2 \quad\ \ (ECX)};
+  \node[cell, fill=green!8]  (a3)  at (0, 7*\H) {arg3 \quad\ \ (EDX)};
+  \node[cell, fill=green!8]  (a4)  at (0, 8*\H) {arg4 \quad\ \ (ESI)};
+  \node[cell, fill=green!8]  (a5)  at (0, 9*\H) {arg5 \quad\ \ (EDI)};
+
+  % ---- CPU iret 帧（orange）  ESP+40 .. ESP+56 ----
+  \node[cell, fill=orange!12] (eip)  at (0, 10*\H) {EIP\_user};
+  \node[cell, fill=orange!12] (csu)  at (0, 11*\H) {CS\_user \quad\ (\texttt{0x1B})};
+  \node[cell, fill=orange!12] (efl)  at (0, 12*\H) {EFLAGS};
+  \node[cell, fill=orange!12] (esp3) at (0, 13*\H) {ESP\_user};
+  \node[cell, fill=orange!12] (ss3)  at (0, 14*\H) {SS\_user \quad\ (\texttt{0x23})};
+
+  % ---- 地址偏移标注（右侧）----
+  \foreach \i/\txt in {
+    0/ESP+0,  1/ESP+4,  2/ESP+8,  3/ESP+12,
+    4/ESP+16, 5/ESP+20, 6/ESP+24, 7/ESP+28, 8/ESP+32, 9/ESP+36,
+    10/ESP+40, 11/ESP+44, 12/ESP+48, 13/ESP+52, 14/ESP+56
+  } {
+    \node[off] at (\W+0.15, \i*\H + 0.31) {\txt};
+  }
+
+  % ---- ESP 箭头（最左侧）----
+  \draw[->, thick, red!70!black]
+    (-2.1, 0.31) -- (-0.05, 0.31)
+    node[left, pos=0, font=\small\bfseries, text=red!70!black] {ESP};
+
+  % ---- &regs = ESP+16 标注 ----
+  \draw[->, thick, dashed, blue!70!black]
+    (-2.1, 4*\H + 0.31) -- (-0.05, 4*\H + 0.31)
+    node[left, pos=0, font=\small, text=blue!70!black]
+      {\texttt{\&regs}};
+  \node[font=\scriptsize, text=blue!60!black, anchor=east]
+    at (-0.1, 4*\H + 0.65)
+    {\texttt{lea eax,[esp+16]}};
+
+  % ---- 分组括号（最左侧）----
+  % 保存的段
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror},
+        thick, blue!60!black]
+    (-1.95, 0*\H) -- (-1.95, 4*\H)
+    node[midway, left=8pt, grplbl, text=blue!60!black]
+      {段寄存器\\保存};
+
+  % syscall_regs_t
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror},
+        thick, green!50!black]
+    (-1.95, 4*\H) -- (-1.95, 10*\H)
+    node[midway, left=8pt, grplbl, text=green!50!black]
+      {\texttt{syscall\_regs\_t}};
+
+  % iret 帧
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror},
+        thick, orange!70!black]
+    (-1.95, 10*\H) -- (-1.95, 15*\H)
+    node[midway, left=8pt, grplbl, text=orange!70!black]
+      {CPU 自动\\压入\\iret 帧};
+
+  % ---- 地址方向指示 ----
+  \node[font=\scriptsize\itshape, gray, anchor=east] at (-2.5, 0.31)  {低地址};
+  \node[font=\scriptsize\itshape, gray, anchor=east] at (-2.5, 14*\H + 0.31) {高地址};
+  \draw[->, thin, gray!60] (-2.45, 0.9) -- (-2.45, 14*\H - 0.2)
+    node[midway, left=2pt, font=\scriptsize\itshape, text=gray!60, rotate=90,
+         anchor=south] {地址增长};
+
+\end{tikzpicture}

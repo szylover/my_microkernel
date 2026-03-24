@@ -1,0 +1,73 @@
+% fig06-type-attr-bitfield.tex
+% type_attr = 0xEE = 1110_1110b 的位域解析图
+\begin{tikzpicture}[
+  bitcell/.style={
+    draw, minimum width=1.0cm, minimum height=0.8cm,
+    font=\ttfamily\bfseries\normalsize, align=center,
+    anchor=south west,
+  },
+  bitnum/.style={font=\ttfamily\scriptsize, text=gray!70, align=center},
+  lbl/.style={font=\small, align=center},
+]
+
+  % ---- 位值（0xEE = 1110 1110）----
+  % bit7=1  bit6=1  bit5=1  bit4=0  bit3=1  bit2=1  bit1=1  bit0=0
+  % Fields:  P      DPL           S       Type
+  \def\bw{1.0}  % bit cell width
+  \def\bh{0.8}  % bit cell height
+
+  % bit 7: P=1 (present)
+  \node[bitcell, fill=green!20]  at (0*\bw, 0) {1};
+  % bit 6-5: DPL=11
+  \node[bitcell, fill=blue!15, minimum width=2.0cm] at (1*\bw, 0) {1\ \ 1};
+  % bit 4: S=0
+  \node[bitcell, fill=yellow!20] at (3*\bw, 0) {0};
+  % bit 3-0: Type=1110
+  \node[bitcell, fill=orange!15, minimum width=4.0cm] at (4*\bw, 0) {1\ \ 1\ \ 1\ \ 0};
+
+  % ---- 位编号（上方）----
+  \foreach \i/\b in {0/7, 1/6, 2/5, 3/4, 4/3, 5/2, 6/1, 7/0} {
+    \node[bitnum] at (\i*\bw + 0.5, \bh + 0.25) {\b};
+  }
+  \node[font=\scriptsize, gray, anchor=east] at (0, \bh+0.25) {bit};
+
+  % ---- 字段标注（下方，带颜色括号）----
+  % P
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror},
+        thick, green!50!black]
+    (0*\bw, -0.1) -- (1*\bw, -0.1)
+    node[midway, below=8pt, lbl, text=green!50!black]
+      {P=1\\{\scriptsize Present}};
+
+  % DPL
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror},
+        thick, blue!60!black]
+    (1*\bw, -0.1) -- (3*\bw, -0.1)
+    node[midway, below=8pt, lbl, text=blue!60!black]
+      {DPL=3\\{\scriptsize Ring 3 可触发}};
+
+  % S
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror},
+        thick, yellow!60!black]
+    (3*\bw, -0.1) -- (4*\bw, -0.1)
+    node[midway, below=8pt, lbl, text=yellow!60!black]
+      {S=0\\{\scriptsize 系统门}};
+
+  % Type
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror},
+        thick, orange!70!black]
+    (4*\bw, -0.1) -- (8*\bw, -0.1)
+    node[midway, below=8pt, lbl, text=orange!70!black]
+      {Type=0xE\\{\scriptsize 32-bit Int Gate}};
+
+  % ---- 总体标注 ----
+  \node[font=\bfseries, anchor=south west] at (0, \bh + 0.65)
+    {\texttt{type\_attr = 0xEE = 1110\,1110b}};
+
+  % ---- 对比 0x8E ----
+  \node[font=\small, anchor=west, text=gray!70] at (8.2, \bh*0.5)
+    {cf.\ \texttt{0x8E}:};
+  \node[font=\scriptsize, anchor=west, text=gray!60] at (8.2, \bh*0.5 - 0.35)
+    {DPL=0（内核专用）};
+
+\end{tikzpicture}

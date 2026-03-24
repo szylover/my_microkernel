@@ -316,6 +316,22 @@ void isr_handler_c(const regs_t* r) {
     }
 }
 
+/*
+ * idt_install_gate — 安装任意 DPL 的 IDT gate（公开接口）
+ *
+ * [WHY] idt_set_gate() 是 static，只在 idt_init() 内使用。
+ *   idt_install_gate() 暴露给外部模块（如 syscall_int80 后端），
+ *   允许在 idt_init() 完成后动态安装额外的 IDT 向量（如 int 0x80）。
+ *
+ * [CPU STATE] 调用后 IDT 表中对应向量的描述符立即生效——
+ *   下一次 CPU 发出该向量的中断/软件 int 指令时就会跳到 handler。
+ *   不需要重新加载 IDTR（因为 IDTR 指向的 idt[] 数组是同一片内存）。
+ */
+void idt_install_gate(uint8_t vector, void (*handler)(void),
+                      uint16_t selector, uint8_t type_attr) {
+    idt_set_gate(vector, handler, selector, type_attr);
+}
+
 void idt_init(void) {
     /* 清空 IDT（未设置的向量默认 0，会触发 #GP，便于发现缺失）。 */
     for (size_t i = 0; i < 256; i++) {

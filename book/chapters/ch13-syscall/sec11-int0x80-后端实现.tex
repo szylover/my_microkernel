@@ -1,0 +1,391 @@
+% ============================================================================
+\section{\texttt{int 0x80} 后端实现（D-3）}
+\label{sec:int80-backend}
+% ============================================================================
+
+在第~\ref{sec:syscall-backend-preview}~节的预告中，我们描述了 \texttt{int~0x80}
+后端的设计意图。D-3 将它完整落地：三个新文件协同工作，让 Ring~3 代码能够真正
+执行系统调用。
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=3.5cm,
+                minimum height=0.85cm, font=\small, align=center},
+    f1/.style={box, fill=blue!8},
+    f2/.style={box, fill=red!8},
+    f3/.style={box, fill=green!8},
+    arr/.style={-{Stealth[length=4pt]}, thick},
+    note/.style={font=\scriptsize\itshape, text=gray},
+  ]
+    \node[f3] (km)   at (0,   0)    {\texttt{kmain.c}\\{\footnotesize 注册后端}};
+    \node[f1] (hdr)  at (4.5, 0)    {\texttt{syscall\_int80.h}\\{\footnotesize 声明 get\_ops()}};
+    \node[f2] (back) at (0,  -1.8)  {\texttt{syscall\_int80\_backend.c}\\{\footnotesize \texttt{int80\_init()} + ops 表}};
+    \node[f2] (asm)  at (4.5,-1.8)  {\texttt{syscall\_int80\_entry.asm}\\{\footnotesize 汇编 stub}};
+    \draw[arr] (km)   -- (hdr)  node[above, pos=0.5, note] {\texttt{\#include}};
+    \draw[arr] (km)   -- (back) node[left,  pos=0.5, note] {调用 \texttt{get\_ops()}};
+    \draw[arr] (back) -- (asm)  node[above, pos=0.5, note] {\texttt{extern} 引用};
+    \draw[arr] (hdr)  -- (back) node[right, pos=0.5, note] {\texttt{\#include}};
+  \end{tikzpicture}
+  \caption{\texttt{int 0x80} 后端的文件组成}
+  \label{fig:int80-files}
+\end{figure}
+
+% ----------------------------------------------------------------------------
+\subsection{IDT 门安装：\texttt{idt\_install\_gate} 与 \texttt{type\_attr}}
+\label{sec:int80-idt-gate}
+% ----------------------------------------------------------------------------
+
+第一步是在 IDT 的第 \hex{80} 槽安装一个允许 Ring~3 触发的中断门。
+
+\subsubsection{\texttt{type\_attr} 字节：\texttt{0xEE}}
+
+IDT 门描述符中有一个关键的 \texttt{type\_attr} 字节，编码了"谁能触发、进入时是否
+关中断"两个属性。\texttt{int 0x80} 使用的值是 \texttt{0xEE}：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch13/fig06-type-attr-bitfield}
+  \caption{\texttt{type\_attr = 0xEE} 的位域解析（DPL=3，32-bit Interrupt Gate）}
+  \label{fig:type-attr}
+\end{figure}
+
+\begin{description}
+  \item[\texttt{bit 7}\enspace P = 1]
+    描述符有效（Present）。若 P=0，CPU 触发 \#NP（Segment Not Present）。
+  \item[\texttt{bits 6--5}\enspace DPL = 11$_2$ = 3]
+    允许 Ring~3 的软件 \texttt{int n} 指令触发此门。若 DPL=0，Ring~3 执行
+    \texttt{int 0x80} 时 CPU 检查 $\text{CPL}(3) \leq \text{DPL}(0)$ 不成立，
+    直接触发 \#GP。
+  \item[\texttt{bit 4}\enspace S = 0]
+    系统描述符（Gate 类型），而非代码/数据段。
+  \item[\texttt{bits 3--0}\enspace Type = 1110$_2$ = 0xE]
+    32-bit Interrupt Gate。进入处理程序时 CPU 自动清除 EFLAGS.IF（关中断），
+    防止 syscall 处理期间被硬件中断打断。
+\end{description}
+
+对比内核异常/IRQ 使用的 \texttt{0x8E}：两者 Type 字段相同，只有 DPL 不同——
+\texttt{0x8E} 的 DPL=0，仅内核态可软件触发。
+
+\begin{warnbox}
+\textbf{Interrupt Gate vs Trap Gate}
+
+选择 Interrupt Gate（Type=\texttt{0xE}，进入时清 IF）而非 Trap Gate（Type=\texttt{0xF}，
+保持 IF）是出于当前阶段的简化考量。关中断意味着 syscall 处理期间不会被时钟中断
+打断，避免了不完整的内核栈被调度器看到的问题。
+
+Linux 的 \texttt{int 0x80} 实际使用 Trap Gate 以支持内核抢占。当本书引入内核
+线程调度时，可将 \texttt{0xEE} 改为 \texttt{0xEF} 切换到 Trap Gate。
+\end{warnbox}
+
+\subsubsection{\texttt{idt\_install\_gate} 接口}
+
+为了让后端模块在 \texttt{idt\_init()} 完成后仍能动态安装向量，我们在
+\texttt{idt.h} 中新增了一个公开接口：
+
+\codefile{src/include/arch/idt.h}
+\begin{lstlisting}[style=cstyle]
+void idt_install_gate(uint8_t vector, void (*handler)(void),
+                      uint16_t selector, uint8_t type_attr);
+\end{lstlisting}
+
+实现上只是调用原有的 \texttt{static idt\_set\_gate()}——把它从模块内部提升为可导出
+符号。因为 IDTR 指向的是同一片 \texttt{idt[]} 数组，修改表项后 CPU 下次查该向量时
+就会用新值，无需重新执行 \texttt{lidt}。
+
+% ----------------------------------------------------------------------------
+\subsection{汇编入口 Stub：\texttt{syscall\_int80\_entry}}
+\label{sec:int80-asm-stub}
+% ----------------------------------------------------------------------------
+
+汇编 stub 是 IDT 门直接跳到的第一段内核代码。它的职责是：
+在内核栈上构造 \texttt{syscall\_regs\_t} 结构体 → 切换数据段 → 调用 C 的
+dispatch 函数 → 恢复现场 → \texttt{iret} 返回用户态。
+
+\subsubsection{进入时的 CPU 状态}
+
+Ring~3 执行 \texttt{int 0x80} 之后、汇编第一条指令运行之前，CPU 已完成：
+
+\begin{enumerate}
+  \item 从 TSS 读取 \texttt{SS0:ESP0}，切换到内核栈（来自第~\ref{ch:tss-ring3}~章配置的 TSS）
+  \item 向内核栈依次压入：\texttt{SS\_user} / \texttt{ESP\_user} /
+    \texttt{EFLAGS} / \texttt{CS\_user} / \texttt{EIP\_user}（完整跨特权级帧）
+  \item 清除 EFLAGS.IF（Interrupt Gate 自动关中断）
+  \item 将 CS 设置为 IDT gate 中的 selector（内核代码段 \hex{08}），跳转到 stub
+\end{enumerate}
+
+\noindent 注意：DS/ES/FS/GS \textbf{仍然是用户态的值}（\hex{23}），
+必须由 stub 手动切换。
+
+\subsubsection{内核栈布局快照}
+
+下图展示了即将调用 \texttt{syscall\_dispatch} 时内核栈的完整状态：
+
+\begin{figure}[H]
+  \centering
+  \input{figures/ch13/fig05-int80-stack}
+  \caption{\texttt{syscall\_int80\_entry} 中，\texttt{call syscall\_dispatch}
+           前的内核栈布局}
+  \label{fig:int80-stack}
+\end{figure}
+
+蓝色区域（ESP+0\,\ldots\,+12）保存用户态段寄存器；绿色区域（ESP+16\,\ldots\,+36）
+是 \texttt{syscall\_regs\_t} 结构体，\texttt{\&regs = ESP+16}；橙色区域（ESP+40\,\ldots\,+56）
+是 CPU 自动压入的 \texttt{iret} 帧。
+
+\subsubsection{完整汇编实现}
+
+\codefile{src/kernel/arch/syscall\_int80\_entry.asm}
+\begin{lstlisting}[style=nasmstyle]
+extern syscall_dispatch
+global syscall_int80_entry
+
+syscall_int80_entry:
+    ; 步骤 1：构造 syscall_regs_t（逆序压栈，使结构体从低到高按顺序排列）
+    push edi        ; arg5  offset+20
+    push esi        ; arg4  offset+16
+    push edx        ; arg3  offset+12
+    push ecx        ; arg2  offset+8
+    push ebx        ; arg1  offset+4
+    push eax        ; nr    offset+0  ← ESP 现在指向结构体起始
+
+    ; 步骤 2：保存段寄存器，切换到内核数据段（0x10）
+    push ds
+    push es
+    push fs
+    push gs
+    mov ax, 0x10    ; GDT_KERNEL_DATA_SEL
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    ; 步骤 3：调用 syscall_dispatch(&regs)
+    ; &regs = ESP+16（段寄存器占了 4×4=16 字节）
+    lea eax, [esp + 16]
+    push eax                ; 参数：syscall_regs_t*
+    call syscall_dispatch
+    add esp, 4              ; 清理参数
+
+    ; 步骤 4：恢复段寄存器（DS/ES/FS/GS 回到用户态值）
+    pop gs
+    pop fs
+    pop es
+    pop ds
+
+    ; 步骤 5：把 syscall 返回值写入 nr 槽，恢复用户寄存器
+    mov [esp], eax  ; 返回值 → nr 槽（pop eax 时取出）
+    pop eax         ; EAX = 返回值（用户态通过 EAX 接收结果）
+    pop ebx         ; 恢复 arg1
+    pop ecx         ; 恢复 arg2
+    pop edx         ; 恢复 arg3
+    pop esi         ; 恢复 arg4
+    pop edi         ; 恢复 arg5
+
+    ; 步骤 6：iret 返回 Ring 3
+    iret
+\end{lstlisting}
+
+\begin{whybox}
+\textbf{为什么用 \texttt{lea eax, [esp+16]} 而不是直接 \texttt{push esp}？}
+
+此时 ESP 指向的是刚压入的 \texttt{gs}（段寄存器保存区的最低地址），
+而 \texttt{syscall\_regs\_t} 的起始（\texttt{nr} 字段）在它上方 16 字节处
+（4 个段寄存器 × 4 字节）。若直接 \texttt{push esp}，C 函数收到的指针会指向
+\texttt{gs}，读出的 \texttt{nr} 值是 DS 选择子，而非 EAX。\texttt{lea} 加上
+偏移量才能拿到结构体的真正起始地址。
+\end{whybox}
+
+\begin{whybox}
+\textbf{为什么要把返回值先写入 \texttt{nr} 槽，再 \texttt{pop eax}？}
+
+\texttt{syscall\_dispatch()} 的返回值存在 EAX 中，但我们需要用一系列 \texttt{pop}
+来同步弹出整个 \texttt{syscall\_regs\_t} 并恢复寄存器。第一个 \texttt{pop eax}
+会弹出 \texttt{nr} 槽的内容——如果不先覆盖它，弹出的就是系统调用号而非返回值。
+\texttt{mov [esp], eax} 把返回值写入 \texttt{nr} 槽，再 \texttt{pop eax} 就能
+同时完成"取返回值 + 调整 ESP"两步。
+\end{whybox}
+
+\begin{cpustate}
+\texttt{iret} 执行后（Ring~0 → Ring~3）：
+\begin{itemize}
+  \item EIP ← \texttt{EIP\_user}（\texttt{int 0x80} 之后的下一条指令）
+  \item CS ← \texttt{CS\_user}（\hex{1B}，DPL=3）→ CPL 变回 3
+  \item EFLAGS ← 用户态 EFLAGS（IF 等标志恢复）
+  \item ESP ← \texttt{ESP\_user}（用户态栈指针）
+  \item SS ← \texttt{SS\_user}（\hex{23}，DPL=3）
+  \item EAX = syscall 返回值（用户代码通过 EAX 读取结果）
+\end{itemize}
+\end{cpustate}
+
+% ----------------------------------------------------------------------------
+\subsection{C 后端：\texttt{syscall\_int80\_backend.c}}
+\label{sec:int80-c-backend}
+% ----------------------------------------------------------------------------
+
+C 后端实现 \texttt{syscall\_ops\_t} 接口，并在 \texttt{init()} 中完成 IDT
+门的安装：
+
+\codefile{src/kernel/arch/syscall\_int80\_backend.c}
+\begin{lstlisting}[style=cstyle]
+/* 0xEE = 1110_1110b: P=1, DPL=11, S=0, Type=1110 (32-bit int gate) */
+#define INT_GATE_DPL3  0xEE
+
+extern void syscall_int80_entry(void);   /* 汇编入口（链接时解析） */
+
+static void int80_init(void) {
+    idt_install_gate(0x80,
+                     syscall_int80_entry,  /* 汇编 stub 地址 */
+                     GDT_KERNEL_CODE_SEL,  /* selector = 0x08 */
+                     INT_GATE_DPL3);       /* type_attr */
+
+    printk("[syscall/int0x80] IDT[0x80] installed "
+           "(DPL=3, selector=0x%02x, entry=%p)\n",
+           GDT_KERNEL_CODE_SEL,
+           (void *)syscall_int80_entry);
+}
+
+static const syscall_ops_t int80_ops = {
+    .name = "int0x80",
+    .init = int80_init,
+};
+
+const syscall_ops_t *syscall_int80_get_ops(void) {
+    return &int80_ops;
+}
+\end{lstlisting}
+
+\begin{whybox}
+\textbf{为什么文件名用 \texttt{syscall\_int80\_backend.c}？}
+
+Makefile 用 \texttt{patsubst} 把所有 \texttt{.c} 和 \texttt{.asm} 文件映射到
+同名的 \texttt{.o}。若此文件叫 \texttt{syscall\_int80.c}，会与
+\texttt{syscall\_int80\_entry.asm} 产生同名目标文件，导致链接重复。
+项目中 \texttt{tss.c} + \texttt{tss\_flush.asm} 遵循了相同的命名惯例。
+\end{whybox}
+
+% ----------------------------------------------------------------------------
+\subsection{\texttt{kmain.c} 集成：后端注册与编译期切换}
+\label{sec:int80-kmain}
+% ----------------------------------------------------------------------------
+
+\codefile{src/kernel/core/kmain.c}
+\begin{lstlisting}[style=cstyle]
+/* 头文件包含（编译期选择后端）*/
+#if KCONFIG_SYSCALL_BACKEND == 0
+#include "syscall_int80.h"
+#endif
+
+/* 在 kmain() 中，idt_init() 之后 */
+#if KCONFIG_SYSCALL_BACKEND == 0
+    syscall_register_backend(syscall_int80_get_ops());
+#endif
+syscall_init();
+\end{lstlisting}
+
+\begin{cpustate}
+\texttt{syscall\_init()} 执行后（\texttt{KCONFIG\_SYSCALL\_BACKEND=0}）：
+\begin{itemize}
+  \item \texttt{IDT[0x80].offset} = \texttt{\&syscall\_int80\_entry}
+  \item \texttt{IDT[0x80].selector} = \hex{08}（内核代码段）
+  \item \texttt{IDT[0x80].type\_attr} = \hex{EE}（P=1, DPL=3, 32-bit Int Gate）
+  \item Ring~3 执行 \texttt{int 0x80}：DPL 检查通过 →
+    CPU 切换到 TSS.SS0:ESP0 → 压入 iret 帧 → 跳转到 stub
+\end{itemize}
+\end{cpustate}
+
+\begin{designbox}
+\textbf{\texttt{KCONFIG\_SYSCALL\_BACKEND} 的意义}
+
+\begin{center}
+\begin{tabular}{cl}
+  \toprule
+  值 & 后端 \\
+  \midrule
+  \texttt{0} & \texttt{int 0x80}（D-3，本节实现） \\
+  \texttt{1} & \texttt{sysenter}（D-4，进阶，需配置 MSR） \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+两个后端共享同一 dispatch 层和 syscall table，切换时只需修改此编译宏并重新
+编译——这正是第~\ref{sec:syscall-interface}~节可插拔架构的价值所在。
+\end{designbox}
+
+% ----------------------------------------------------------------------------
+\subsection{用户态测试代码：PIC 技巧}
+\label{sec:int80-user-code}
+% ----------------------------------------------------------------------------
+
+\texttt{user\_test\_code.asm} 中新增了 \texttt{user\_syscall\_start/end} 片段，
+用于完整验证系统调用路径。
+
+\subsubsection{为什么需要位置无关代码（PIC）}
+
+内核将这段代码当作字节数组复制到用户地址空间（\hex{00400000}），
+但汇编时编译器并不知道运行时地址。代码中内嵌了字符串字面量
+\texttt{sc\_msg}，若直接用绝对地址引用，复制后地址就失效了。
+
+解决方案是 \textbf{call/pop} 技巧：
+
+\begin{lstlisting}[style=nasmstyle]
+    call sc_get_ip   ; 把 sc_get_ip 的地址压栈，然后跳转到 sc_get_ip
+sc_get_ip:
+    pop  esi         ; ESI = sc_get_ip 的运行时地址
+\end{lstlisting}
+
+\texttt{call} 指令执行时，CPU 把紧跟其后的指令地址（即 \texttt{sc\_get\_ip} 标签处）
+压入用户栈，然后跳到那里。\texttt{pop esi} 弹出的正是 \texttt{sc\_get\_ip}
+的\textbf{运行时}地址。之后用
+\texttt{[esi + (sc\_msg - sc\_get\_ip)]} 计算任何其他标签的运行时地址——
+括号内的偏移量在编译期已知，无论代码被加载到哪里都保持正确。
+
+\subsubsection{完整测试代码}
+
+\codefile{src/kernel/arch/user\_test\_code.asm}
+\begin{lstlisting}[style=nasmstyle]
+user_syscall_start:
+    ; PIC：获取 sc_get_ip 的运行时地址
+    call sc_get_ip
+sc_get_ip:
+    pop esi                              ; ESI = 运行时 sc_get_ip 地址
+
+    ; write(fd=1, buf=sc_msg, count=18)
+    mov eax, 4                           ; SYS_WRITE
+    mov ebx, 1                           ; fd = 1 (stdout)
+    lea ecx, [esi + (sc_msg - sc_get_ip)]; buf（运行时地址）
+    mov edx, sc_msg_len                  ; count
+    int 0x80                             ; ← 触发系统调用
+
+    ; exit(status=0)
+    mov eax, 1                           ; SYS_EXIT
+    xor ebx, ebx                         ; status = 0
+    int 0x80                             ; ← 触发系统调用
+
+    jmp $                                ; 安全网（不应执行到此处）
+
+sc_msg:    db "hello from ring3!", 0x0A  ; 18 字节（含换行符）
+sc_msg_len equ ($ - sc_msg)
+user_syscall_end:
+\end{lstlisting}
+
+两次 \texttt{int 0x80} 将分别触发完整的：
+
+\[
+\text{Ring~3} \;\xrightarrow{\texttt{int 0x80}}\; \texttt{syscall\_int80\_entry}
+  \;\to\; \texttt{syscall\_dispatch} \;\to\; \textit{handler}
+\]
+
+第一次调用 \texttt{sys\_write}（nr=4），第二次调用 \texttt{sys\_exit}（nr=1，执行
+\texttt{hlt} 令 CPU 停机）。
+
+\begin{thinkbox}
+\texttt{call sc\_get\_ip} 会把返回地址压入\textbf{用户栈}，而非内核栈。
+\texttt{int 0x80} 触发时 CPU 只保存/恢复 \texttt{ESP\_user}，用户栈上的
+这个额外字值不会被内核看到，也不影响后续 \texttt{syscall\_dispatch} 的执行。
+为什么用户栈上的内容不需要显式清理？
+
+\emph{提示：\texttt{call sc\_get\_ip} 的 \texttt{call} 指令本身已经跳转到
+\texttt{sc\_get\_ip}，它不会"返回"到 \texttt{call} 之后。
+用户栈上的返回地址只是作为 PIC 的"临时载体"被 \texttt{pop esi} 消耗掉了。}
+\end{thinkbox}
